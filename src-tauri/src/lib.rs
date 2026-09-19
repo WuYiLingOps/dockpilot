@@ -20,6 +20,14 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
+            // Linux 下窗口图标需要手动设置：X11 会话的标题栏/任务栏读取窗口图标，
+            // Wayland 会话则由 app-id 与 .desktop 文件匹配（deb 安装后生效）
+            if let Some(window) = app.get_webview_window("main") {
+                if let Some(icon) = app.default_window_icon() {
+                    let _ = window.set_icon(icon.clone());
+                }
+            }
+
             let (tx, _) = broadcast::channel::<DockerEventDto>(256);
             app.manage(tx.clone());
             app.manage(Streams::default());
