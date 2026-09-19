@@ -1,0 +1,51 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#14203A"/>
+      <stop offset="1" stop-color="#0A0F1A"/>
+    </linearGradient>
+    <radialGradient id="sheen" cx="0.32" cy="0.18" r="0.9">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.08"/>
+      <stop offset="0.5" stop-color="#FFFFFF" stop-opacity="0.015"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="emerald" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#6EE7B7"/>
+      <stop offset="1" stop-color="#059669"/>
+    </linearGradient>
+    <linearGradient id="crate" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#D7E2EE"/>
+    </linearGradient>
+    <filter id="glow" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="80"/>
+    </filter>
+  </defs>
+
+  <!-- 深海航夜底 + 顶部微光 + 翡翠辉光 + 内侧细边框 -->
+  <rect width="1024" height="1024" rx="224" fill="url(#bg)"/>
+  <rect width="1024" height="1024" rx="224" fill="url(#sheen)"/>
+  <circle cx="512" cy="512" r="330" fill="#34D399" opacity="0.14" filter="url(#glow)"/>
+  <rect x="16" y="16" width="992" height="992" rx="210" fill="none" stroke="#FFFFFF" stroke-opacity="0.05" stroke-width="3"/>
+
+  <!-- 舵轮辐条（八向，内端没入轴心箱体之后，外端延伸出环外成舵柄） -->
+  <path d="M632 512 L906 512
+           M596.85 596.85 L790.6 790.6
+           M512 632 L512 906
+           M427.15 596.85 L233.4 790.6
+           M392 512 L118 512
+           M427.15 427.15 L233.4 233.4
+           M512 392 L512 118
+           M596.85 427.15 L790.6 233.4"
+        stroke="url(#emerald)" stroke-width="34" stroke-linecap="round" fill="none"/>
+
+  <!-- 舵轮外环 -->
+  <circle cx="512" cy="512" r="286" stroke="url(#emerald)" stroke-width="36" fill="none"/>
+
+  <!-- 轴心集装箱：冰白箱体 + 波纹门槽 -->
+  <rect x="400" y="400" width="224" height="224" rx="30" fill="url(#crate)"/>
+  <path d="M456 436 L456 588
+           M512 436 L512 588
+           M568 436 L568 588"
+        stroke="#0B1526" stroke-opacity="0.15" stroke-width="18" stroke-linecap="round" fill="none"/>
+</svg>
