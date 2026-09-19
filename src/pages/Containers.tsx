@@ -11,6 +11,7 @@ import {
 import { useState } from "react";
 import { toast } from "sonner";
 import { api } from "../lib/api";
+import { useSettings } from "../lib/settings";
 import type { ContainerDto, PortDto } from "../types/docker";
 import { useContainerActions } from "../hooks/useContainerActions";
 import { timeAgo } from "../lib/format";
@@ -59,11 +60,12 @@ export function Containers({
   const qc = useQueryClient();
   const [pendingDelete, setPendingDelete] = useState<ContainerDto | null>(null);
   const { action } = useContainerActions();
+  const { data: settings } = useSettings();
 
   const query = useQuery({
     queryKey: ["containers"],
     queryFn: () => api.listContainers(true),
-    refetchInterval: 10000,
+    refetchInterval: (settings?.containers_refresh_secs ?? 10) * 1000,
   });
 
   const deleteForce = useMutation({

@@ -1,6 +1,7 @@
 import { Eraser } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { api } from "../../lib/api";
+import { useSettings } from "../../lib/settings";
 import { cn, Button, Checkbox, Input, Select } from "../ui";
 
 type Stream = "out" | "err";
@@ -12,11 +13,16 @@ interface Line {
 
 const MAX_LINES = 5000;
 
-/** 容器详情 · 日志 Tab（流式、自动跟随、关键字过滤） */
+/** 容器详情 · 日志 Tab（流式、自动跟随、关键字过滤；默认值来自设置） */
 export function LogsView({ id }: { id: string }) {
-  const [tail, setTail] = useState("1000");
+  const { data: settings } = useSettings();
+  const [tail, setTail] = useState(() =>
+    String(settings?.logs_default_tail ?? 1000),
+  );
   const [follow, setFollow] = useState(true);
-  const [timestamps, setTimestamps] = useState(false);
+  const [timestamps, setTimestamps] = useState(
+    () => settings?.logs_timestamps ?? false,
+  );
   const [filter, setFilter] = useState("");
   const [lines, setLines] = useState<Line[]>([]);
 

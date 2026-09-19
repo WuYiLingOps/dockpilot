@@ -6,7 +6,10 @@ import { Button } from "./components/ui";
 import { Containers } from "./pages/Containers";
 import { ContainerDetail } from "./pages/ContainerDetail";
 import { Images } from "./pages/Images";
+import { Cleanup } from "./pages/Cleanup";
+import { Settings } from "./pages/Settings";
 import { api } from "./lib/api";
+import { useSettingsThemeSync } from "./lib/settings";
 
 /** Docker 引擎不可达时的引导页（覆盖内容区，侧栏保持可见） */
 function DisconnectedOverlay({
@@ -43,6 +46,8 @@ export default function App() {
   const [search, setSearch] = useState("");
   const qc = useQueryClient();
 
+  useSettingsThemeSync();
+
   useEffect(
     () =>
       api.subscribeEvents((ev) => {
@@ -53,6 +58,9 @@ export default function App() {
         if (ev.kind === "image") {
           void qc.invalidateQueries({ queryKey: ["images"] });
           void qc.invalidateQueries({ queryKey: ["dockerInfo"] });
+        }
+        if (ev.kind === "volume" || ev.kind === "image") {
+          void qc.invalidateQueries({ queryKey: ["diskUsage"] });
         }
       }),
     [qc],
@@ -81,8 +89,12 @@ export default function App() {
           <ContainerDetail id={selectedId} onBack={() => setSelectedId(null)} />
         ) : page === "containers" ? (
           <Containers onOpen={setSelectedId} search={search} />
-        ) : (
+        ) : page === "images" ? (
           <Images search={search} />
+        ) : page === "cleanup" ? (
+          <Cleanup />
+        ) : (
+          <Settings />
         )}
         {info.isError && (
           <DisconnectedOverlay

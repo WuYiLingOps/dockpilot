@@ -4,6 +4,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { Terminal as XTerm } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { api } from "../../lib/api";
+import { useSettings } from "../../lib/settings";
 import { useTheme } from "../../lib/theme";
 import { Button, EmptyState, Select } from "../ui";
 
@@ -55,10 +56,11 @@ function terminalTheme(dark: boolean) {
       };
 }
 
-/** 容器详情 · 终端 Tab（交互式 shell，主题随应用亮暗切换） */
+/** 容器详情 · 终端 Tab（交互式 shell，主题随应用亮暗切换；默认 shell 来自设置） */
 export function TerminalView({ id, running }: { id: string; running: boolean }) {
   const { isDark } = useTheme();
-  const [shell, setShell] = useState("bash");
+  const { data: settings } = useSettings();
+  const [shell, setShell] = useState<string>(() => settings?.terminal_shell ?? "bash");
   const [epoch, setEpoch] = useState(0);
   const hostRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<XTerm | null>(null);

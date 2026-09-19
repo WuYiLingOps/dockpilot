@@ -8,6 +8,8 @@ import type {
   PullProgress,
   StatsTick,
 } from "../types/docker";
+import type { AppSettings } from "../types/settings";
+import type { CleanupResultDto, DaemonConfigDto, DiskUsageDto } from "../types/daemon";
 
 type Unsubscribe = () => void;
 
@@ -80,4 +82,28 @@ export const api = {
 
   execResize: (execId: string, width: number, height: number) =>
     invoke<void>("exec_resize", { execId, width, height }).catch(() => {}),
+
+  // ---- 设置 / 镜像加速 / 空间清理 ----
+
+  getSettings: () => invoke<AppSettings>("get_settings"),
+
+  setSettings: (settings: AppSettings) =>
+    invoke<AppSettings>("set_settings", { settings }),
+
+  readDaemonConfig: () => invoke<DaemonConfigDto>("read_daemon_config"),
+
+  applyMirrors: (mirrors: string[]) => invoke<void>("apply_mirrors", { mirrors }),
+
+  restartDocker: () => invoke<void>("restart_docker"),
+
+  /** pkexec 不可用时的回退：生成手动执行的终端命令（JSON 已在合并现有配置后生成） */
+  generateMirrorsCommand: (mirrors: string[]) =>
+    invoke<string>("generate_mirrors_command", { mirrors }),
+
+  /** 测速：GET {url}/v2/，返回毫秒；不可达时抛错 */
+  testMirror: (url: string) => invoke<number>("test_mirror", { url }),
+
+  diskUsage: () => invoke<DiskUsageDto>("disk_usage"),
+
+  cleanup: (kinds: string[]) => invoke<CleanupResultDto>("cleanup", { kinds }),
 };

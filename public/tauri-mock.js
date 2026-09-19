@@ -11,60 +11,63 @@
   const containers = [
     {
       id: "a1b2c3d4e5f6789012345678901234567890abcd",
-      name: "nginx-proxy",
-      image: "nginx:1.27-alpine",
+      name: "redis-prod",
+      image: "registry.cn-hangzhou.aliyuncs.com/wylhub/redis:7-alpine",
       state: "running",
-      status: "Up 3 hours",
-      created: now - 3600 * 3,
-      ports: [
-        { ip: "0.0.0.0", private_port: 80, public_port: 8080, proto: "tcp" },
-        { ip: "0.0.0.0", private_port: 443, public_port: 8443, proto: "tcp" },
-        { ip: "::", private_port: 80, public_port: 8081, proto: "tcp" },
-      ],
+      status: "Up 51 minutes",
+      created: now - 3600,
+      ports: [{ ip: "0.0.0.0", private_port: 6379, public_port: 6379, proto: "tcp" }],
     },
     {
       id: "b2c3d4e5f6a7789012345678901234567890abcd",
-      name: "redis-cache",
-      image: "redis:7.4",
+      name: "pg-prod",
+      image: "registry.cn-hangzhou.aliyuncs.com/wylhub/postgres:17-alpine",
       state: "running",
-      status: "Up 26 hours",
-      created: now - 3600 * 26,
-      ports: [{ ip: "127.0.0.1", private_port: 6379, public_port: 6379, proto: "tcp" }],
+      status: "Up 53 minutes",
+      created: now - 3600 * 2,
+      ports: [{ ip: "0.0.0.0", private_port: 5432, public_port: 5432, proto: "tcp" }],
     },
     {
       id: "c3d4e5f6a7b8789012345678901234567890abcd",
-      name: "postgres-db",
-      image: "postgres:16.4",
+      name: "nexus3",
+      image: "registry.cn-hangzhou.aliyuncs.com/wylhub/nexus3:3.93.2",
       state: "running",
-      status: "Up 2 days (healthy)",
+      status: "Up 2 days",
       created: now - 3600 * 50,
-      ports: [{ ip: "0.0.0.0", private_port: 5432, public_port: 5433, proto: "tcp" }],
+      ports: [{ ip: "0.0.0.0", private_port: 8081, public_port: 8081, proto: "tcp" }],
     },
     {
       id: "d4e5f6a7b8c9789012345678901234567890abcd",
-      name: "buildkit-daemon",
-      image: "moby/buildkit:v0.16",
-      state: "exited",
-      status: "Exited (0) 5 minutes ago",
-      created: now - 3600 * 72,
-      ports: [],
+      name: "jellyfin",
+      image: "registry.cn-hangzhou.aliyuncs.com/wylhub/jellyfin:latest",
+      state: "running",
+      status: "Up 5 days (healthy)",
+      created: now - 3600 * 120,
+      ports: [{ ip: "0.0.0.0", private_port: 8096, public_port: 8096, proto: "tcp" }],
     },
     {
       id: "e5f6a7b8c9d0789012345678901234567890abcd",
-      name: "watchtower",
-      image: "containrrr/watchtower",
-      state: "paused",
-      status: "Up 4 days (Paused)",
-      created: now - 3600 * 96,
+      name: "dpanel",
+      image: "dpanel/dpanel:latest",
+      state: "exited",
+      status: "Exited (0) 3 days ago",
+      created: now - 3600 * 200,
       ports: [],
     },
   ];
 
   const images = [
-    { id: "sha256:1111222233334444555566667777888899990000aaaabbbbccccddddeeeeffff", tags: ["nginx:1.27-alpine", "nginx:latest"], size: 43_200_000, created: now - 86400 * 5 },
-    { id: "sha256:222233334444555566667777888899990000aaaabbbbccccddddeeeeffff1111", tags: ["redis:7.4"], size: 116_800_000, created: now - 86400 * 12 },
-    { id: "sha256:33334444555566667777888899990000aaaabbbbccccddddeeeeffff11112222", tags: ["postgres:16.4"], size: 431_000_000, created: now - 86400 * 30 },
-    { id: "sha256:4444555566667777888899990000aaaabbbbccccddddeeeeffff111122223333", tags: [], size: 88_500_000, created: now - 86400 * 60 },
+    { id: "sha256:1111222233334444555566667777888899990000aaaabbbbccccddddeeeeffff", tags: ["goharbor/harbor-core:v2.13.2"], size: 409_000_000, created: now - 86400 * 3 },
+    { id: "sha256:222233334444555566667777888899990000aaaabbbbccccddddeeeeffff1111", tags: ["goharbor/harbor-db:v2.13.2"], size: 566_000_000, created: now - 86400 * 3 },
+    { id: "sha256:33334444555566667777888899990000aaaabbbbccccddddeeeeffff11112222", tags: ["goharbor/redis-photon:v2.13.2"], size: 341_000_000, created: now - 86400 * 3 },
+    { id: "sha256:4444555566667777888899990000aaaabbbbccccddddeeeeffff111122223333", tags: ["goharbor/nginx-photon:v2.13.2"], size: 311_000_000, created: now - 86400 * 3 },
+    { id: "sha256:555566667777888899990000aaaabbbbccccddddeeeeffff1111222233334444", tags: ["registry.cn-hangzhou.aliyuncs.com/wylhub/gin-vue3-blog:latest"], size: 288_000_000, created: now - 86400 * 15 },
+    { id: "sha256:66667777888899990000aaaabbbbccccddddeeeeffff11112222333344445555", tags: ["registry.cn-hangzhou.aliyuncs.com/wylhub/nexus3:3.93.2"], size: 1_130_000_000, created: now - 86400 * 30 },
+    { id: "sha256:7777888899990000aaaabbbbccccddddeeeeffff111122223333444455556666", tags: ["registry.cn-hangzhou.aliyuncs.com/wylhub/postgres:17-alpine"], size: 399_000_000, created: now - 86400 * 30 },
+    { id: "sha256:888899990000aaaabbbbccccddddeeeeffff1111222233334444555566667777", tags: ["registry.aliyuncs.com/openspug/spug:latest"], size: 1_050_000_000, created: now - 86400 * 60 },
+    { id: "sha256:99990000aaaabbbbccccddddeeeeffff11112222333344445555666677778888", tags: ["dpanel/dpanel:latest"], size: 339_000_000, created: now - 86400 * 10 },
+    { id: "sha256:aaaa0000bbbbccccddddeeeeffff111122223333444455556666777788889999", tags: ["nginx:1.27-alpine", "nginx:latest"], size: 43_200_000, created: now - 86400 * 5 },
+    { id: "sha256:bbbb0000ccccddddeeeeffff1111222233334444555566667777888899990000", tags: [], size: 88_500_000, created: now - 86400 * 90 },
   ];
 
   const info = {
@@ -79,15 +82,45 @@
     images: images.length,
   };
 
+  // ---- 设置 / 镜像加速 / 空间清理 ----
+  const settings = {
+    theme: "system",
+    docker_socket: "",
+    containers_refresh_secs: 10,
+    images_refresh_secs: 20,
+    logs_default_tail: 1000,
+    logs_timestamps: false,
+    terminal_shell: "bash",
+    mirror_custom: ["https://docker.example.dev"],
+  };
+
+  const daemonConfig = {
+    exists: true,
+    registry_mirrors: ["https://docker.m.daocloud.io"],
+    live_restore: false,
+    other_keys: ["insecure-registries"],
+  };
+
+  const diskUsage = {
+    dangling_images: { count: 3, size: 88_500_000 },
+    unused_images: { count: 4, size: 679_800_000 },
+    stopped_containers: { count: 1, size: 0 },
+    unused_volumes: { count: 2, size: 214_000_000 },
+    build_cache: { count: 7, size: 512_000_000 },
+    total_reclaimable: 679_800_000 + 214_000_000 + 512_000_000,
+  };
+
   let tick = 0;
   const statsTick = () => {
     tick++;
     const wave = Math.sin(tick / 5) * 0.5 + 0.5;
+    const memUsage = 320 * 1024 * 1024 + wave * 90 * 1024 * 1024;
+    const memLimit = 4 * 1024 * 1024 * 1024;
     return {
       cpu_percent: 12 + wave * 46,
-      mem_usage: 320 * 1024 * 1024 + wave * 90 * 1024 * 1024,
-      mem_limit: 4 * 1024 * 1024 * 1024,
-      mem_percent: 8 + wave * 3,
+      mem_usage: memUsage,
+      mem_limit: memLimit,
+      mem_percent: (memUsage / memLimit) * 100,
       net_rx: 1024 * 1024 * 260 + tick * 4096,
       net_tx: 1024 * 1024 * 96 + tick * 2048,
       block_read: 1024 * 1024 * 1200,
@@ -185,6 +218,50 @@
         case "exec_input":
         case "exec_resize":
           return Promise.resolve();
+        case "get_settings":
+          return Promise.resolve(settings);
+        case "set_settings":
+          Object.assign(settings, args.settings);
+          return Promise.resolve(settings);
+        case "read_daemon_config":
+          return Promise.resolve(daemonConfig);
+        case "apply_mirrors":
+          daemonConfig.registry_mirrors = [...args.mirrors];
+          daemonConfig.exists = true;
+          return new Promise((resolve) => setTimeout(resolve, 600));
+        case "generate_mirrors_command":
+          return Promise.resolve(
+            `printf '%s' '{"registry-mirrors":${JSON.stringify(args.mirrors)}}' | sudo tee /etc/docker/daemon.json >/dev/null && sudo systemctl restart docker`,
+          );
+        case "restart_docker":
+          return new Promise((resolve) => setTimeout(resolve, 1200));
+        case "test_mirror":
+          return new Promise((resolve) =>
+            setTimeout(() => resolve(60 + Math.floor(Math.random() * 700)), 250),
+          );
+        case "disk_usage":
+          return Promise.resolve(diskUsage);
+        case "cleanup":
+          return new Promise((resolve) =>
+            setTimeout(() => {
+              const items = args.kinds.map((kind) => ({
+                kind,
+                removed: diskUsage[kind]?.count ?? 0,
+                space_reclaimed: diskUsage[kind]?.size ?? 0,
+                error: null,
+              }));
+              for (const kind of args.kinds) {
+                if (diskUsage[kind]) diskUsage[kind] = { count: 0, size: 0 };
+              }
+              diskUsage.total_reclaimable =
+                diskUsage.unused_images.size +
+                diskUsage.unused_volumes.size +
+                diskUsage.build_cache.size;
+              resolve({ items, total_reclaimed: items.reduce((a, i) => a + i.space_reclaimed, 0) });
+            }, 800),
+          );
+        case "plugin:app|version":
+          return Promise.resolve("0.2.0-mock");
         default:
           console.warn("[tauri-mock] unhandled invoke:", cmd, args);
           return Promise.resolve();

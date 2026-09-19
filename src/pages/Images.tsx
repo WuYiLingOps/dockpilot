@@ -5,10 +5,17 @@ import {
   RefreshCw,
   Trash2,
 } from "lucide-react";
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { api } from "../lib/api";
-import { formatBytes, shortId, timeAgo } from "../lib/format";
+import { useSettings } from "../lib/settings";
+import {
+  formatBytes,
+  imageGroup,
+  imageGroupLabel,
+  shortId,
+  timeAgo,
+} from "../lib/format";
 import type { ImageDto } from "../types/docker";
 import {
   Button,
@@ -19,6 +26,7 @@ import {
   Input,
   Modal,
   PageHeader,
+  Select,
   Spinner,
 } from "../components/ui";
 
@@ -30,11 +38,13 @@ export function Images({ search }: { search: string }) {
   const [pendingDelete, setPendingDelete] = useState<ImageDto | null>(null);
   const [forceDelete, setForceDelete] = useState(false);
   const [pullOpen, setPullOpen] = useState(false);
+  const [groupFilter, setGroupFilter] = useState("");
+  const { data: settings } = useSettings();
 
   const query = useQuery({
     queryKey: ["images"],
     queryFn: api.listImages,
-    refetchInterval: 20000,
+    refetchInterval: (settings?.images_refresh_secs ?? 20) * 1000,
   });
 
   const remove = useMutation({
@@ -50,18 +60,45 @@ export function Images({ search }: { search: string }) {
   });
 
   const list = query.data ?? [];
+
+  // 按镜像地址前缀（registry/命名空间）归组，供来源筛选下拉使用
+  const groups = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const img of list) {
+      const g = imageGroup(img.tags[0]);
+      m.set(g, (m.get(g) ?? 0) + 1);
+    }
+    return [...m.entries()].sort(
+      (a, b) => b[1] - a[1] || a[0].localeCompare(b[0]),
+    );
+  }, [list]);
+
   const keyword = search.trim().toLowerCase();
-  const filtered = keyword
-    ? list.filter(
-        (img) =>
-          img.tags.some((t) => t.toLowerCase().includes(keyword)) ||
-          img.id.toLowerCase().includes(keyword),
-      )
-    : list;
+  const filtered = list.filter((img) => {
+    if (groupFilter && imageGroup(img.tags[0]) !== groupFilter) return false;
+    if (!keyword) return true;
+    return (
+      img.tags.some((t) => t.toLowerCase().includes(keyword)) ||
+      img.id.toLowerCase().includes(keyword)
+    );
+  });
 
   return (
     <>
       <PageHeader title="镜像" desc={`${list.length} 个本地镜像`}>
+        <Select
+          value={groupFilter}
+          onChange={(e) => setGroupFilter(e.target.value)}
+          className="w-52"
+          title="按镜像来源筛选"
+        >
+          <option value="">全部来源（{list.length}）</option>
+          {groups.map(([g, count]) => (
+            <option key={g} value={g}>
+              {imageGroupLabel(g)}（{count}）
+            </option>
+          ))}
+        </Select>
         <Button variant="primary" onClick={() => setPullOpen(true)}>
           <Download size={15} />
           拉取镜像
@@ -84,8 +121,12 @@ export function Images({ search }: { search: string }) {
       ) : filtered.length === 0 ? (
         <EmptyState
           icon={<ImageIcon size={40} strokeWidth={1.5} />}
-          title={keyword ? "没有匹配的镜像" : "本地没有镜像"}
-          desc={keyword ? "换个关键字试试" : "点击右上角「拉取镜像」获取一个镜像"}
+          title={keyword || groupFilter ? "没有匹配的镜像" : "本地没有镜像"}
+          desc={
+            keyword || groupFilter
+              ? "换个关键字或切换来源筛选试试"
+              : "点击右上角「拉取镜像」获取一个镜像"
+          }
         />
       ) : (
         <div className="flex-1 overflow-auto p-4 pt-2">

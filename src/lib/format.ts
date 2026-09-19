@@ -31,6 +31,26 @@ export function shortId(id: string): string {
   return id ? id.slice(0, 12) : "-";
 }
 
+/**
+ * 依据镜像引用的路径前缀归组（registry/命名空间），用于来源筛选：
+ *   goharbor/harbor-core:v2.13.2                          → "goharbor"
+ *   registry.cn-hangzhou.aliyuncs.com/wylhub/redis:7-alpine → "registry.cn-hangzhou.aliyuncs.com/wylhub"
+ *   nginx:1.27-alpine（无前缀，Docker Hub 官方）             → "docker.io"
+ *   无标签（悬空镜像）                                      → "<none>"
+ */
+export function imageGroup(imageRef: string | undefined): string {
+  if (!imageRef) return "<none>";
+  const parts = imageRef.split("/");
+  return parts.length === 1 ? "docker.io" : parts.slice(0, -1).join("/");
+}
+
+/** imageGroup 返回值的展示名 */
+export function imageGroupLabel(group: string): string {
+  if (group === "docker.io") return "Docker Hub（无前缀）";
+  if (group === "<none>") return "悬空镜像（无标签）";
+  return group;
+}
+
 export function formatPorts(ports: PortDto[]): string {
   if (!ports.length) return "-";
   const parts = ports.map((p) => {
