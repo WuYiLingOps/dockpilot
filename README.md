@@ -4,11 +4,11 @@
 
 ## 功能
 
+界面采用 OrbStack 式布局：侧栏导航（容器 / 镜像）+ 点击容器进入详情，日志、终端、监控收敛为详情页内的 Tab；支持亮 / 暗双主题（跟随系统，侧栏按钮可切换）与自定义一体化标题栏。
+
 - **容器**：列表 / 搜索 / 启动 / 停止 / 重启 / 暂停 / 恢复 / 删除，Docker 事件驱动实时刷新
+- **容器详情**：概览（CPU / 内存 / 网络 / 磁盘 I/O 实时曲线，约 1 秒刷新）、日志（流式输出、自动跟随、关键字过滤、时间戳、stderr 红色高亮）、终端（交互式 shell：bash / sh / ash，自适应窗口尺寸）
 - **镜像**：列表 / 搜索 / 删除（可强制）/ 拉取（实时进度）
-- **日志**：流式输出、自动跟随、关键字过滤、时间戳、stderr 红色高亮
-- **终端**：进入容器交互式 shell（bash / sh / ash），自适应窗口尺寸
-- **监控**：CPU、内存、网络速率、磁盘 I/O 实时曲线（约 1 秒刷新）
 
 ## 技术栈
 
@@ -21,6 +21,14 @@
 | 状态 | TanStack Query + Docker events | 列表数据由事件推送自动失效刷新 |
 
 架构说明：所有长驻流（日志、统计、终端输出、拉取进度）在后端由 Tokio 任务驱动，通过 Tauri Channel 推送到前端，并注册统一的取消句柄（`cancel_stream`）——切页即停流，避免无主任务堆积。Docker 事件由后端单实例全局监听、广播转发。
+
+### 浏览器预览（免编译走查 UI）
+
+`public/tauri-mock.js` 在非 Tauri 环境（无 `__TAURI_INTERNALS__`）下自动生效，为前端提供假数据；真实桌面应用中完全惰性。只改前端时可以不起 Rust：
+
+```bash
+npm run dev   # 打开 http://localhost:1420 预览，主题切换按钮可试亮/暗两套
+```
 
 ## 环境要求
 
@@ -84,11 +92,24 @@ update-desktop-database ~/.local/share/applications
 
 ## 构建与安装
 
+一键脚本（打包 / 安装 / 卸载）：
+
+```bash
+./build_deb.sh            # 交互菜单
+./build_deb.sh build      # 打包 deb（npm run tauri build）
+sudo ./build_deb.sh install    # 安装最新的 deb（自动检查 docker 组）
+sudo ./build_deb.sh uninstall  # 卸载 dock-pilot
+```
+
+手动方式：
+
 ```bash
 npm run tauri build
-# 产物：src-tauri/target/release/bundle/deb/dockpilot_0.1.0_amd64.deb
-sudo apt install ./src-tauri/target/release/bundle/deb/dockpilot_0.1.0_amd64.deb
+# 产物：src-tauri/target/release/bundle/deb/DockPilot_<版本>_<架构>.deb（deb 包名为 dock-pilot）
+sudo apt install ./src-tauri/target/release/bundle/deb/DockPilot_0.1.0+20260919_amd64.deb
 ```
+
+说明：`./build_deb.sh build` 打包时会自动清理旧 deb，并给版本号附加当日日期（如 `0.1.0+20260919`），便于追溯与覆盖安装；`install`/`uninstall` 分别对应 `dpkg` 包 `dock-pilot` 的安装与卸载。
 
 ## 测试
 
