@@ -160,6 +160,25 @@ pub struct DockerInfoDto {
     pub paused: u64,
     pub stopped: u64,
     pub images: u64,
+    /// 逻辑 CPU 核数
+    pub ncpu: u64,
+    /// 宿主总内存（字节）
+    pub mem_total: u64,
+    /// 存储驱动（overlay2 等）
+    pub driver: String,
+    /// Docker 根目录（/var/lib/docker）
+    pub docker_root_dir: String,
+    pub kernel_version: String,
+    /// 完整系统名（如 Ubuntu 24.04 LTS）
+    pub os_name: String,
+    /// "linux" | "windows"
+    pub os_type: String,
+    /// 默认日志驱动（json-file 等）
+    pub logging_driver: String,
+    pub plugins_volume: Vec<String>,
+    pub plugins_network: Vec<String>,
+    /// daemon 连接地址（unix:///path 或 DOCKER_HOST）
+    pub host: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -188,6 +207,50 @@ pub struct StatsTick {
     pub net_tx: u64,
     pub block_read: u64,
     pub block_write: u64,
+}
+
+/// 全部运行中容器的资源统计聚合（累计值；CPU% 与速率由前端相邻两次采样差分计算）
+#[derive(Debug, Clone, Serialize, Default)]
+pub struct HostStatsDto {
+    pub online_cpus: u64,
+    /// Σ cpu_usage.total_usage（累计 CPU 时间）
+    pub cpu_total: u64,
+    /// Σ system_cpu_usage（累计系统 CPU 时间）
+    pub system_cpu: u64,
+    /// Σ memory_stats.usage
+    pub mem_used: u64,
+    /// Σ 网络接收字节（累计）
+    pub net_rx: u64,
+    pub net_tx: u64,
+    /// Σ 块设备读取字节（累计）
+    pub block_read: u64,
+    pub block_write: u64,
+    /// 参与本次统计的运行中容器数
+    pub containers_running: u64,
+}
+
+/// 树图单项：名称 + 占用大小
+#[derive(Debug, Clone, Serialize)]
+pub struct NamedSizeDto {
+    pub name: String,
+    pub size: u64,
+}
+
+/// docker system df 的总量与明细（供系统概览页）
+#[derive(Debug, Clone, Serialize, Default)]
+pub struct SystemDfDto {
+    pub images_size: u64,
+    pub images_count: u64,
+    /// 所有容器根目录可写层写入总量（Σ size_rw）
+    pub containers_size: u64,
+    pub containers_count: u64,
+    pub volumes_size: u64,
+    pub volumes_count: u64,
+    /// 构建缓存总量（含使用中）
+    pub build_cache_size: u64,
+    pub containers: Vec<NamedSizeDto>,
+    pub images: Vec<NamedSizeDto>,
+    pub volumes: Vec<NamedSizeDto>,
 }
 
 #[derive(Debug, Clone, Serialize)]

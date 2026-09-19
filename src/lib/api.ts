@@ -4,11 +4,13 @@ import type {
   ContainerSpec,
   DockerEventDto,
   DockerInfoDto,
+  HostStatsDto,
   ImageDto,
   LogChunk,
   NetworkDto,
   PullProgress,
   StatsTick,
+  SystemDfDto,
 } from "../types/docker";
 import type { AppSettings } from "../types/settings";
 import type { CleanupResultDto, DaemonConfigDto, DiskUsageDto } from "../types/daemon";
@@ -31,6 +33,12 @@ function withCancel(sidPromise: Promise<string>): Unsubscribe {
 
 export const api = {
   dockerInfo: () => invoke<DockerInfoDto>("docker_info"),
+
+  /** 全部运行中容器的一次性资源采样聚合（累计值，速率由调用方差分） */
+  hostStats: () => invoke<HostStatsDto>("host_stats"),
+
+  /** docker system df：总量 + 树图明细 */
+  systemDf: () => invoke<SystemDfDto>("system_df"),
 
   listContainers: (all = true) => invoke<ContainerDto[]>("list_containers", { all }),
 

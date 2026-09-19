@@ -51,6 +51,18 @@ export function imageGroupLabel(group: string): string {
   return group;
 }
 
+/**
+ * 镜像引用的短展示名：去掉 registry/命名空间前缀，只留「仓库名:标签」。
+ *   registry.cn-hangzhou.aliyuncs.com/wylhub/redis:7-alpine → redis:7-alpine
+ *   goharbor/harbor-core:v2.13.2                            → harbor-core:v2.13.2
+ *   nginx:1.27-alpine                                       → nginx:1.27-alpine
+ * 完整引用请保留在 title/详情等处展示。
+ */
+export function imageShortRef(ref: string): string {
+  const slash = ref.lastIndexOf("/");
+  return slash === -1 ? ref : ref.slice(slash + 1);
+}
+
 export function formatPorts(ports: PortDto[]): string {
   if (!ports.length) return "-";
   const parts = ports.map((p) => {

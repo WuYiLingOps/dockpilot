@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Container, RefreshCw } from "lucide-react";
 import { Sidebar, type PageKey } from "./components/Sidebar";
 import { Button } from "./components/ui";
+import { Overview } from "./pages/Overview";
 import { Containers } from "./pages/Containers";
 import { ContainerDetail } from "./pages/ContainerDetail";
 import { Images } from "./pages/Images";
@@ -43,7 +44,7 @@ function DisconnectedOverlay({
 }
 
 export default function App() {
-  const [page, setPage] = useState<PageKey>("containers");
+  const [page, setPage] = useState<PageKey>("overview");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
   const [search, setSearch] = useState("");
@@ -65,6 +66,7 @@ export default function App() {
         }
         if (ev.kind === "volume" || ev.kind === "image") {
           void qc.invalidateQueries({ queryKey: ["diskUsage"] });
+          void qc.invalidateQueries({ queryKey: ["systemDf"] });
         }
       }),
     [qc],
@@ -90,6 +92,8 @@ export default function App() {
       <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
         {selectedId && (page === "containers" || page === "compose") ? (
           <ContainerDetail id={selectedId} onBack={() => setSelectedId(null)} />
+        ) : page === "overview" ? (
+          <Overview onNavigate={setPage} />
         ) : page === "containers" ? (
           <Containers
             onOpen={setSelectedId}

@@ -33,6 +33,59 @@ mod tests {
         assert_eq!(images.len() as u64, info.images, "镜像数量应与 info 一致");
     }
 
+    /// 依赖本机 Docker daemon 的系统概览集成测试：
+    /// 验证 host_stats 的聚合口径与 info 一致（容器数、核数来自 daemon 实时数据）
+    #[tokio::test]
+    async fn host_stats_matches_info() {
+        let info = system::docker_info()
+            .await
+            .expect("docker_info 应成功");
+        let stats = system::host_stats().await.expect("host_stats 应成功");
+
+        assert_eq!(
+            stats.containers_running, info.running,
+            "参与统计的运行中容器数应与 info.running 一致"
+        );
+        assert_eq!(
+            stats.online_cpus as u64, info.ncpu,
+            "online_cpus 应与 info.ncpu 一致"
+        );
+        if stats.containers_running > 0 {
+            assert!(stats.system_cpu > 0, "有运行中容器时 system_cpu 累计应为正");
+            assert!(stats.mem_used > 0, "有运行中容器时内存占用应为正");
+        }
+    }
+
+    /// 依赖本机 Docker daemon 的 system_df 集成测试：
+    /// 验证总量、明细条目数与 info 计数相互对齐（全部取自 /system/df 实时数据）
+    #[tokio::test]
+    async fn system_df_totals_match_details() {
+        let info = system::docker_info()
+            .await
+            .expect("docker_info 应成功");
+        let df = system::system_df().await.expect("system_df 应成功");
+
+        assert_eq!(df.images_count, df.images.len() as u64, "镜像计数应与明细条目数一致");
+        assert_eq!(df.containers_count, df.containers.len() as u64, "容器计数应与明细条目数一致");
+        assert_eq!(df.volumes_count, df.volumes.len() as u64, "卷计数应与明细条目数一致");
+        assert_eq!(df.images_count, info.images, "镜像计数应与 info.images 一致");
+        assert_eq!(df.containers_count, info.containers, "容器计数应与 info.containers 一致");
+
+        let images_sum: u64 = df.images.iter().map(|i| i.size).sum();
+        assert_eq!(df.images_size, images_sum, "镜像总量应等于明细之和");
+        let volumes_sum: u64 = df.volumes.iter().map(|v| v.size).sum();
+        assert_eq!(df.volumes_size, volumes_sum, "卷总量应等于明细之和");
+        // 容器明细在可写层为 0 时会退回 rootfs 大小展示，因此明细之和 >= 可写层总量
+        let containers_sum: u64 = df.containers.iter().map(|c| c.size).sum();
+        assert!(
+            df.containers_size <= containers_sum,
+            "容器可写层总量不应超过明细之和"
+        );
+        for item in df.containers.iter().chain(&df.images) {
+            assert!(!item.name.is_empty(), "明细名称不应为空");
+        }
+    }
+
     /// 依赖本机 Docker daemon 的 compose 分组集成测试：
     /// 验证 list_compose_projects 查询与分组路径可用（不要求本机存在 compose 项目）
     #[tokio::test]

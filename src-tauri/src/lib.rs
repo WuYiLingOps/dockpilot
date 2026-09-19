@@ -46,6 +46,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             docker::system::docker_info,
+            docker::system::host_stats,
+            docker::system::system_df,
             docker::containers::list_containers,
             docker::containers::container_action,
             docker::containers::create_container,

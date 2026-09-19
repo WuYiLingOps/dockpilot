@@ -35,7 +35,7 @@ fn cpu_percent(s: &ContainerStatsResponse) -> f64 {
     }
 }
 
-fn net_io(s: &ContainerStatsResponse) -> (u64, u64) {
+pub(super) fn net_io(s: &ContainerStatsResponse) -> (u64, u64) {
     let mut acc = (0u64, 0u64);
     if let Some(networks) = &s.networks {
         for n in networks.values() {
@@ -46,7 +46,7 @@ fn net_io(s: &ContainerStatsResponse) -> (u64, u64) {
     acc
 }
 
-fn block_io(s: &ContainerStatsResponse) -> (u64, u64) {
+pub(super) fn block_io(s: &ContainerStatsResponse) -> (u64, u64) {
     let mut acc = (0u64, 0u64);
     if let Some(entries) = s.blkio_stats.as_ref().and_then(|b| b.io_service_bytes_recursive.as_ref()) {
         for e in entries {

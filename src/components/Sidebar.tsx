@@ -1,12 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
-import { Boxes, Eraser, Image as ImageIcon, Layers, Settings } from "lucide-react";
+import { Boxes, Eraser, Image as ImageIcon, LayoutDashboard, Layers, Settings } from "lucide-react";
 import { api } from "../lib/api";
 import { SidebarTopBar } from "./TitleBar";
 import { cn, StatusDot } from "./ui";
 
-export type PageKey = "containers" | "images" | "compose" | "cleanup" | "settings";
+export type PageKey = "overview" | "containers" | "images" | "compose" | "cleanup" | "settings";
 
 const NAV: { key: PageKey; label: string; icon: typeof Boxes }[] = [
+  { key: "overview", label: "系统概览", icon: LayoutDashboard },
   { key: "containers", label: "容器", icon: Boxes },
   { key: "images", label: "镜像", icon: ImageIcon },
   { key: "compose", label: "编排", icon: Layers },

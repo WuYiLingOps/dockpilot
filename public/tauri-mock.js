@@ -114,6 +114,17 @@
     paused: containers.filter((c) => c.state === "paused").length,
     stopped: containers.filter((c) => c.state === "exited").length,
     images: images.length,
+    ncpu: 8,
+    mem_total: 62.58 * 1024 * 1024 * 1024,
+    driver: "overlay2",
+    docker_root_dir: "/var/lib/docker",
+    kernel_version: "7.0.0-30-generic",
+    os_name: "Ubuntu 24.04.4 LTS",
+    os_type: "linux",
+    logging_driver: "json-file",
+    plugins_volume: ["local"],
+    plugins_network: ["bridge", "host", "ipvlan", "macvlan", "null", "overlay"],
+    host: "unix:///var/run/docker.sock",
   };
 
   // ---- 设置 / 镜像加速 / 空间清理 ----
@@ -240,6 +251,60 @@ volumes:
     unused_volumes: { count: 2, size: 214_000_000 },
     build_cache: { count: 7, size: 512_000_000 },
     total_reclaimable: 679_800_000 + 214_000_000 + 512_000_000,
+  };
+
+  // ---- 系统概览：host_stats（累计计数器每次采样递增）与 system_df ----
+  let hostTick = 0;
+  const hostCounters = { cpu: 0, sys: 0, net_rx: 0, net_tx: 0, blk_read: 0, blk_write: 0 };
+  function hostStats() {
+    hostTick++;
+    // 累计值：每次采样叠加随机增量，前端差分后呈现波动的速率曲线
+    // cpu 增量相对 system_cpu（8 核 × 2s ≈ 1.6e8）模拟 0.3%-2% 的轻负载
+    hostCounters.cpu += Math.floor((0.5 + Math.random() * 2.7) * 1e6);
+    hostCounters.sys += Math.floor(8 * 2e7);
+    hostCounters.net_rx += Math.floor(Math.random() * 180_000);
+    hostCounters.net_tx += Math.floor(Math.random() * 60_000);
+    hostCounters.blk_read += Math.floor(Math.random() * 900_000);
+    hostCounters.blk_write += Math.floor(Math.random() * 1_600_000);
+    return {
+      online_cpus: 8,
+      cpu_total: hostCounters.cpu,
+      system_cpu: hostCounters.sys,
+      mem_used: 3.04 * 1024 * 1024 * 1024 + Math.sin(hostTick / 6) * 120 * 1024 * 1024,
+      net_rx: hostCounters.net_rx,
+      net_tx: hostCounters.net_tx,
+      block_read: hostCounters.blk_read,
+      block_write: hostCounters.blk_write,
+      containers_running: containers.filter((c) => c.state === "running").length,
+    };
+  }
+
+  const systemDf = {
+    images_size: images.reduce((a, i) => a + i.size, 0),
+    images_count: images.length,
+    containers_size: 2.59 * 1024 * 1024 * 1024,
+    containers_count: containers.length,
+    volumes_size: 35.47 * 1024 * 1024,
+    volumes_count: 3,
+    build_cache_size: 551.21 * 1024 * 1024,
+    containers: [
+      { name: "jellyfin", size: 1.02 * 1024 * 1024 * 1024 },
+      { name: "nexus3", size: 743 * 1024 * 1024 },
+      { name: "pg-prod", size: 512 * 1024 * 1024 },
+      { name: "redis-prod", size: 187 * 1024 * 1024 },
+      { name: "myapp-stack-web-1", size: 96 * 1024 * 1024 },
+      { name: "myapp-stack-api-1", size: 64 * 1024 * 1024 },
+      { name: "dpanel", size: 12 * 1024 * 1024 },
+    ],
+    images: images.map((i) => ({
+      name: i.tags[0] ?? "<none>:<none>",
+      size: i.size,
+    })),
+    volumes: [
+      { name: "pgdata", size: 28.2 * 1024 * 1024 },
+      { name: "nexus-data", size: 5.1 * 1024 * 1024 },
+      { name: "jellyfin-config", size: 2.17 * 1024 * 1024 },
+    ],
   };
 
   let tick = 0;
@@ -409,6 +474,10 @@ volumes:
           );
         case "disk_usage":
           return Promise.resolve(diskUsage);
+        case "host_stats":
+          return Promise.resolve(hostStats());
+        case "system_df":
+          return Promise.resolve(systemDf);
 
         // ---- 编排（docker compose）----
         case "list_compose_projects":

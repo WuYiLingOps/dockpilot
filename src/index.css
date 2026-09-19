@@ -33,6 +33,14 @@
   --app-warn: #b25b00;
   --app-err: #d70015;
 
+  /* 图表色板（系统概览：树图循环色 + 折线双色） */
+  --app-chart-1: #007aff; /* 蓝 */
+  --app-chart-2: #34c759; /* 绿 */
+  --app-chart-3: #ff9500; /* 橙 */
+  --app-chart-4: #ff3b30; /* 红 */
+  --app-chart-5: #af52de; /* 紫 */
+  --app-chart-6: #00c7be; /* 青 */
+
   --app-shadow: 0 1px 2px rgba(0, 0, 0, 0.06), 0 4px 16px rgba(0, 0, 0, 0.05);
 }
 
@@ -58,6 +66,14 @@
   --app-ok: #30d158;
   --app-warn: #ff9f0a;
   --app-err: #ff453a;
+
+  /* 图表色板（暗色提亮） */
+  --app-chart-1: #0a84ff;
+  --app-chart-2: #30d158;
+  --app-chart-3: #ff9f0a;
+  --app-chart-4: #ff453a;
+  --app-chart-5: #bf5af2;
+  --app-chart-6: #64d2ff;
 
   --app-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.35);
 }

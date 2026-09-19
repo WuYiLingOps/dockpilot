@@ -36,6 +36,66 @@ export interface DockerInfoDto {
   paused: number;
   stopped: number;
   images: number;
+  /** 逻辑 CPU 核数 */
+  ncpu: number;
+  /** 宿主总内存（字节） */
+  mem_total: number;
+  /** 存储驱动（overlay2 等） */
+  driver: string;
+  /** Docker 根目录（/var/lib/docker） */
+  docker_root_dir: string;
+  kernel_version: string;
+  /** 完整系统名（如 Ubuntu 24.04 LTS） */
+  os_name: string;
+  /** "linux" | "windows" */
+  os_type: string;
+  /** 默认日志驱动（json-file 等） */
+  logging_driver: string;
+  plugins_volume: string[];
+  plugins_network: string[];
+  /** daemon 连接地址（unix:///path 或 DOCKER_HOST） */
+  host: string;
+}
+
+/** 全部运行中容器的资源统计聚合（累计值；CPU% 与速率由前端相邻两次采样差分计算） */
+export interface HostStatsDto {
+  online_cpus: number;
+  /** Σ cpu_usage.total_usage（累计 CPU 时间） */
+  cpu_total: number;
+  /** Σ system_cpu_usage（累计系统 CPU 时间） */
+  system_cpu: number;
+  /** Σ memory_stats.usage */
+  mem_used: number;
+  /** Σ 网络接收字节（累计） */
+  net_rx: number;
+  net_tx: number;
+  /** Σ 块设备读取字节（累计） */
+  block_read: number;
+  block_write: number;
+  /** 参与本次统计的运行中容器数 */
+  containers_running: number;
+}
+
+/** 树图单项：名称 + 占用大小 */
+export interface NamedSizeDto {
+  name: string;
+  size: number;
+}
+
+/** docker system df 的总量与明细（与 Rust docker/system.rs 的 DTO 对应） */
+export interface SystemDfDto {
+  images_size: number;
+  images_count: number;
+  /** 所有容器根目录可写层写入总量（Σ size_rw） */
+  containers_size: number;
+  containers_count: number;
+  volumes_size: number;
+  volumes_count: number;
+  /** 构建缓存总量（含使用中） */
+  build_cache_size: number;
+  containers: NamedSizeDto[];
+  images: NamedSizeDto[];
+  volumes: NamedSizeDto[];
 }
 
 export interface LogChunk {
