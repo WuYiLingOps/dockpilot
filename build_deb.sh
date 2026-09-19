@@ -54,6 +54,7 @@ check_result() {
 
 APP_NAME="dock-pilot"   # deb 包名（Tauri 由 productName 生成，dpkg 查询/卸载均用它）
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SCRIPT_PATH="${PROJECT_DIR}/$(basename "$0")"
 BUNDLE_DIR="${PROJECT_DIR}/src-tauri/target/release/bundle/deb"
 
 # 检查root权限
@@ -71,9 +72,43 @@ find_deb() {
     echo "${deb}"
 }
 
+# 补充工具链 PATH：sudo/非交互环境下用户级安装的 node(nvm)、cargo(rustup) 不在默认 PATH
+prepare_path() {
+    local homes=("${HOME}")
+    if [ -n "${SUDO_USER:-}" ]; then
+        local uh
+        uh=$(getent passwd "${SUDO_USER}" 2>/dev/null | cut -d: -f6)
+        [ -n "${uh}" ] && homes+=("${uh}")
+    fi
+    local h p
+    for h in "${homes[@]}"; do
+        for p in "${h}/.cargo/bin" "${h}/.local/bin" "${h}"/.nvm/versions/node/*/bin; do
+            [ -d "${p}" ] || continue
+            case ":${PATH}:" in
+                *":${p}:"*) ;;
+                *) PATH="${p}:${PATH}" ;;
+            esac
+        done
+    done
+    export PATH
+}
+
 # 打包 deb（版本号自动附加年月日时间戳，如 0.1.0+20260919；打包前清理旧产物）
 build_deb() {
+    # sudo 下打包自动降权：rustup/cargo/npm 依赖原用户的家目录环境（RUSTUP_HOME 等），
+    # root 直接跑会因找不到工具链失败，还会把缓存文件以 root 属主写进用户目录
+    if [ "$(id -u)" -eq 0 ] && [ -n "${SUDO_USER:-}" ]; then
+        color "检测到 root 环境，打包阶段降权为 ${SUDO_USER} 执行" 0
+        sudo -u "${SUDO_USER}" "${SCRIPT_PATH}" build
+        if [ $? -ne 0 ]; then
+            color "打包失败" 1
+            exit 1
+        fi
+        return
+    fi
+
     cd "${PROJECT_DIR}" || exit 1
+    prepare_path
     color "项目目录: ${PROJECT_DIR}" 0
 
     # 构建环境检查
@@ -126,6 +161,23 @@ build_deb() {
         exit 1
     fi
     color "产物: ${DEB_FILE} ($(ls -lh "${DEB_FILE}" | awk '{print $5}'))" 0
+}
+
+# 打包并自动安装：打包（root 下自动降权）完成后进入安装（deploy）
+deploy_deb() {
+    build_deb
+
+    if [ "$(id -u)" -ne 0 ]; then
+        if ! command -v sudo &> /dev/null; then
+            color "未检测到 sudo，请手动执行安装: sudo ./build_deb.sh install" 1
+            exit 1
+        fi
+        color "打包完成，切换 root 自动安装..." 0
+        # 清理打包阶段的临时 merge 配置（exec 替换进程后 EXIT trap 不会触发）
+        [ -n "${MERGE_FILE:-}" ] && rm -f "${MERGE_FILE}"
+        exec sudo "${SCRIPT_PATH}" install
+    fi
+    install_deb
 }
 
 # 安装 deb
@@ -195,12 +247,13 @@ uninstall_deb() {
 
 # 显示帮助
 show_help() {
-    echo "用法: $0 [build|install|uninstall]"
+    echo "用法: $0 [build|deploy|install|uninstall]"
     echo ""
     echo "说明: 不传参数时进入交互菜单"
     echo ""
     echo "选项:"
     echo "  build      打包 deb（npm run tauri build）"
+    echo "  deploy     打包并自动安装（= build + install，安装时自动提权）"
     echo "  install    安装最新的 deb（需 sudo）"
     echo "  uninstall  卸载 ${APP_NAME}（需 sudo）"
     echo "  -h,--help  显示帮助"
@@ -210,15 +263,17 @@ show_help() {
 show_menu() {
     echo "请选择操作:"
     echo "  1) 打包 deb"
-    echo "  2) 安装 deb（需 sudo）"
-    echo "  3) 卸载（需 sudo）"
+    echo "  2) 打包并安装（需 sudo 提权）"
+    echo "  3) 安装 deb（需 sudo）"
+    echo "  4) 卸载（需 sudo）"
     echo "  h) 帮助  q) 退出"
     local choice
-    read -rp "输入选项 [1-3/h/q]: " choice
+    read -rp "输入选项 [1-4/h/q]: " choice
     case "$choice" in
         1) build_deb ;;
-        2) install_deb ;;
-        3) uninstall_deb ;;
+        2) deploy_deb ;;
+        3) install_deb ;;
+        4) uninstall_deb ;;
         h|H) show_help ;;
         q|Q|"") exit 0 ;;
         *) color "无效选项: ${choice}" 1 ; exit 1 ;;
@@ -235,6 +290,9 @@ main() {
     case "${1:-}" in
         build|package)
             build_deb
+            ;;
+        deploy|build-install)
+            deploy_deb
             ;;
         install)
             install_deb
