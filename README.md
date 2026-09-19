@@ -4,11 +4,13 @@
 
 ## 功能
 
-界面采用 OrbStack 式布局：侧栏导航（容器 / 镜像 / 空间清理 / 设置）+ 点击容器进入详情，日志、终端、监控收敛为详情页内的 Tab；支持亮 / 暗双主题（跟随系统）与自定义一体化标题栏。
+界面采用 OrbStack 式布局：侧栏导航（容器 / 镜像 / 编排 / 空间清理 / 设置）+ 点击进入详情，日志、终端、监控收敛为详情页内的 Tab；支持亮 / 暗双主题（跟随系统）与自定义一体化标题栏。
 
-- **容器**：列表 / 搜索 / 启动 / 停止 / 重启 / 暂停 / 恢复 / 删除，Docker 事件驱动实时刷新
+- **容器**：列表 / 搜索 / 启动 / 停止 / 重启 / 暂停 / 恢复 / 删除，Docker 事件驱动实时刷新；compose 容器带项目徽标，点击直达编排详情
+- **容器创建**（容器页「创建容器」/ 镜像页行内「运行」入口）：镜像选择（本地不存在时自动拉取，进度实时显示）、容器名（可留空自动生成）、端口映射（多行、tcp/udp）、卷挂载（多行、只读）、环境变量、标签、资源限制（内存 MB/GB、CPU 核数可小数）、命令覆盖（按 shell 词法解析）、工作目录、网络选择、主机名、重启策略、自动移除 / 特权模式 / TTY / 标准输入；与 Docker Desktop 的 Run 能力对齐
 - **容器详情**：概览（CPU / 内存 / 网络 / 磁盘 I/O 实时曲线，约 1 秒刷新）、日志（流式输出、自动跟随、关键字过滤、时间戳、stderr 红色高亮）、终端（交互式 shell：bash / sh / ash，自适应窗口尺寸）
 - **镜像**：列表 / 搜索 / 来源筛选（自动按镜像地址前缀归组）/ 删除（可强制）/ 拉取（实时进度）
+- **编排（docker compose）**：自动识别引擎上的 compose 项目并按项目聚合服务（基于容器标准标签，无需重新读取文件）；项目级启动 / 停止 / 重启 / 暂停 / 下线（可选删卷删镜像）/ 构建 / 拉取，服务级启停与重启，操作输出流式展示可中途取消；「部署新项目」选择 compose 文件一键 `up -d`；compose 配置在线编辑（保存前自动语法预检、原文件备份为 `.bak`，保存后可一键「重新应用」变更）。编排操作调用系统 `docker compose` CLI（自动探测插件版与独立版，未安装时仍可查看并提示）；自定义 socket 会同步注入 `DOCKER_HOST`，保证 CLI 与界面连接同一 daemon
 - **空间清理**：统计悬空镜像 / 未使用镜像 / 已停止容器 / 未使用卷 / 构建缓存的大小与数量，勾选后一键清理并显示回收空间
 - **设置**：主题、Docker socket 路径、列表刷新间隔、日志与终端默认值；配置持久化到 `~/.config/com.dockpilot.app/settings.json`
 - **镜像加速**：读写 `/etc/docker/daemon.json` 的 `registry-mirrors`（pkexec 提权，写入前自动备份，保留其他配置字段）、内置国内预设源、一键测速、pkexec 不可用时回退为可复制的终端命令
@@ -148,17 +150,19 @@ src-tauri/
         ├── dto.rs            # 发送给前端的序列化结构
         ├── state.rs          # 流取消句柄注册表 + 终端会话表
         ├── system.rs         # docker_info
-        ├── containers.rs     # 容器列表 / 生命周期操作
+        ├── containers.rs     # 容器列表 / 生命周期操作 / 创建并启动（Docker Desktop Run 对齐）
+        ├── networks.rs       # 网络列表（创建容器时的网络选择）
+        ├── compose.rs        # 编排：标签分组识别项目 + 调用 docker compose CLI（流式输出）
         ├── images.rs         # 镜像列表 / 删除 / 拉取
         ├── logs.rs           # 日志流
         ├── stats.rs          # 资源统计流（CPU/内存/网络/块 I/O 换算）
         ├── exec.rs           # 交互式终端（exec + stdin + resize）
         └── events.rs         # Docker 事件全局监听与订阅转发
 src/
-├── components/               # Sidebar、TitleBar、通用 UI 组件、detail/ 详情页视图
+├── components/               # Sidebar、TitleBar、通用 UI 组件、compose/ 输出面板、containers/ 创建容器弹窗、detail/ 详情页视图
 ├── components/settings/      # 镜像加速设置分组
-├── pages/                    # 容器 / 镜像 / 容器详情 / 空间清理 / 设置
-├── hooks/                    # 容器操作 mutation
+├── pages/                    # 容器 / 镜像 / 容器详情 / 编排 / 编排详情 / 空间清理 / 设置
+├── hooks/                    # 容器操作 mutation、compose 输出流
 ├── lib/api.ts                # Tauri invoke 封装（流式命令返回取消函数）
 ├── lib/settings.ts           # 设置 query/mutation 与主题迁移
 ├── lib/theme.ts              # 主题三态 store（跟随系统 / 浅 / 深）
@@ -172,6 +176,7 @@ src/
 - **Alpine 容器**：默认 shell 为 bash，Alpine 系镜像请在终端页切换为 `sh` 或 `ash`（可在设置中改默认值）。
 - **Docker 连接**：默认连接 `/var/run/docker.sock`，可在设置中指定其他 socket 路径（修改需重启应用生效）；TCP 远程连接暂未支持，见 Roadmap。
 - **镜像加速写入**：应用通过 `pkexec` 提权写 `/etc/docker/daemon.json` 并可一键重启 Docker；无 polkit 的环境（如纯 SSH 会话）会自动回退为生成可复制的终端命令。重启 Docker 会中断运行中的容器（开启 live-restore 则不受影响），应用会在确认弹窗中提示。
+- **编排操作依赖 compose CLI**：项目识别与查看仅依赖 Engine API；启动/停止等编排操作需要系统已安装 `docker compose` 插件（`docker-compose-plugin`）或 `docker-compose` 独立命令，未安装时编排页会提示并提供安装命令。
 
 ## License
 
