@@ -20,6 +20,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             // Linux 下窗口图标需要手动设置：X11 会话的标题栏/任务栏读取窗口图标，
             // Wayland 会话则由 app-id 与 .desktop 文件匹配（deb 安装后生效）
@@ -47,6 +48,14 @@ pub fn run() {
             docker::system::docker_info,
             docker::containers::list_containers,
             docker::containers::container_action,
+            docker::containers::create_container,
+            docker::networks::list_networks,
+            docker::compose::list_compose_projects,
+            docker::compose::compose_cli_info,
+            docker::compose::compose_action,
+            docker::compose::compose_deploy,
+            docker::compose::read_compose_file,
+            docker::compose::write_compose_file,
             docker::images::list_images,
             docker::images::remove_image,
             docker::images::pull_image,
