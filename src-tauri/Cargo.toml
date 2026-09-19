@@ -1,6 +1,6 @@
 [package]
 name = "dockpilot"
-version = "0.1.0"
+version = "0.2.0"
 description = "轻量级 Docker 桌面管理工具"
 authors = ["hj"]
 edition = "2021"
@@ -23,7 +23,9 @@ tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 bollard = "0.19"
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
+# 镜像源测速；tauri 已传递依赖 reqwest，直接声明并统一用 rustls 避免 OpenSSL 构建依赖
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "http2"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time", "process"] }
 futures = "0.3"
 tokio-util = "0.7"
 uuid = { version = "1", features = ["v4"] }
