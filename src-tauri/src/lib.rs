@@ -1,6 +1,7 @@
+mod cleanup;
+mod daemon_config;
 mod docker;
-
-use std::time::Duration;
+mod settings;
 
 use tauri::Manager;
 use tokio::sync::broadcast;
@@ -28,6 +29,12 @@ pub fn run() {
                 }
             }
 
+            // 连接缓存建立前读取 socket 覆盖值，修改需重启应用生效
+            let s = settings::load(app.handle());
+            settings::set_docker_socket(
+                (!s.docker_socket.is_empty()).then(|| s.docker_socket.clone()),
+            );
+
             let (tx, _) = broadcast::channel::<DockerEventDto>(256);
             app.manage(tx.clone());
             app.manage(Streams::default());
@@ -51,6 +58,15 @@ pub fn run() {
             docker::exec::exec_input,
             docker::exec::exec_resize,
             docker::state::cancel_stream,
+            settings::get_settings,
+            settings::set_settings,
+            daemon_config::read_daemon_config,
+            daemon_config::apply_mirrors,
+            daemon_config::restart_docker,
+            daemon_config::generate_mirrors_command,
+            daemon_config::test_mirror,
+            cleanup::disk_usage,
+            cleanup::cleanup,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
