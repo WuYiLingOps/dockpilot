@@ -1,4 +1,4 @@
-import { X } from "lucide-react";
+import { ChevronDown, X } from "lucide-react";
 import type {
   ButtonHTMLAttributes,
   InputHTMLAttributes,
@@ -6,18 +6,26 @@ import type {
   SelectHTMLAttributes,
 } from "react";
 import { useEffect } from "react";
+import { withDragRegion } from "../lib/drag";
 
 export function cn(...parts: Array<string | false | null | undefined>): string {
   return parts.filter(Boolean).join(" ");
 }
 
-type ButtonVariant = "primary" | "ghost" | "outline" | "danger";
+/* ---------------------------------------------------------------- */
+/* Button — macOS 四型：accent 实底 / tinted 浅底 / ghost 素色 /      */
+/* outline 描边，danger 为红色实底。默认高度 32px。                  */
+/* ---------------------------------------------------------------- */
+
+type ButtonVariant = "primary" | "tinted" | "ghost" | "outline" | "danger";
 
 const buttonStyles: Record<ButtonVariant, string> = {
-  primary: "bg-emerald-500 text-zinc-950 hover:bg-emerald-400",
-  ghost: "text-zinc-300 hover:bg-panel2 hover:text-zinc-100",
-  outline: "border border-edge text-zinc-300 hover:bg-panel2 hover:text-zinc-100",
-  danger: "bg-rose-500/90 text-white hover:bg-rose-500",
+  primary: "bg-accent text-on-accent hover:bg-accent/90 active:bg-accent/80",
+  tinted: "bg-accent/10 text-accent hover:bg-accent/15 active:bg-accent/20",
+  ghost: "text-fg2 hover:bg-hover hover:text-fg active:bg-hover",
+  outline:
+    "border border-edge-strong bg-panel text-fg hover:bg-hover active:bg-panel2",
+  danger: "bg-err text-white hover:bg-err/90 active:bg-err/80",
 };
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
@@ -28,7 +36,7 @@ export function Button({ variant = "ghost", className, ...props }: ButtonProps) 
   return (
     <button
       className={cn(
-        "inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors disabled:pointer-events-none disabled:opacity-50",
+        "inline-flex h-8 select-none items-center justify-center gap-1.5 rounded-btn px-2.5 text-[13px] font-medium transition-colors duration-150 disabled:pointer-events-none disabled:opacity-40",
         buttonStyles[variant],
         className,
       )}
@@ -48,7 +56,7 @@ export function IconButton({
       title={title}
       aria-label={title}
       className={cn(
-        "inline-flex h-7 w-7 items-center justify-center rounded-md text-zinc-400 transition-colors hover:bg-panel2 hover:text-zinc-100 disabled:pointer-events-none disabled:opacity-40",
+        "inline-flex h-7 w-7 items-center justify-center rounded-btn text-fg3 transition-colors duration-150 hover:bg-hover hover:text-fg disabled:pointer-events-none disabled:opacity-40",
         className,
       )}
       {...props}
@@ -56,25 +64,9 @@ export function IconButton({
   );
 }
 
-export function Badge({ tone = "zinc", children }: { tone?: string; children: ReactNode }) {
-  const tones: Record<string, string> = {
-    emerald: "bg-emerald-500/15 text-emerald-400 border-emerald-500/25",
-    sky: "bg-sky-500/15 text-sky-400 border-sky-500/25",
-    amber: "bg-amber-500/15 text-amber-400 border-amber-500/25",
-    rose: "bg-rose-500/15 text-rose-400 border-rose-500/25",
-    zinc: "bg-zinc-500/15 text-zinc-400 border-zinc-500/25",
-  };
-  return (
-    <span
-      className={cn(
-        "inline-flex items-center rounded-md border px-1.5 py-0.5 text-xs font-medium",
-        tones[tone] ?? tones.zinc,
-      )}
-    >
-      {children}
-    </span>
-  );
-}
+/* ---------------------------------------------------------------- */
+/* 状态 — 圆点 + 文字（OrbStack 主视觉），Badge 仅保留给端口等标签      */
+/* ---------------------------------------------------------------- */
 
 const STATE_LABEL: Record<string, string> = {
   running: "运行中",
@@ -87,28 +79,83 @@ const STATE_LABEL: Record<string, string> = {
 };
 
 const STATE_TONE: Record<string, string> = {
-  running: "emerald",
-  paused: "amber",
-  restarting: "amber",
-  created: "sky",
-  exited: "zinc",
-  dead: "rose",
-  removing: "rose",
+  running: "ok",
+  paused: "warn",
+  restarting: "warn",
+  created: "accent",
+  exited: "fg3",
+  dead: "err",
+  removing: "err",
 };
+
+export function statusColor(state: string): string {
+  const tone = STATE_TONE[state] ?? "fg3";
+  return { ok: "bg-ok", warn: "bg-warn", accent: "bg-accent", err: "bg-err", fg3: "bg-fg3" }[tone] ?? "bg-fg3";
+}
+
+export function statusText(state: string): string {
+  return STATE_LABEL[state] ?? (state || "未知");
+}
+
+export function StatusDot({
+  state,
+  className,
+}: {
+  state: string;
+  className?: string;
+}) {
+  return (
+    <span
+      aria-hidden
+      className={cn("h-2 w-2 shrink-0 rounded-full", statusColor(state), className)}
+    />
+  );
+}
 
 export function StateBadge({ state }: { state: string }) {
   return (
-    <Badge tone={STATE_TONE[state] ?? "zinc"}>
-      {STATE_LABEL[state] ?? (state || "未知")}
-    </Badge>
+    <span className="inline-flex items-center gap-1.5 text-[12px] font-medium text-fg2">
+      <StatusDot state={state} />
+      {statusText(state)}
+    </span>
   );
 }
+
+export function Badge({
+  tone = "neutral",
+  children,
+}: {
+  tone?: "neutral" | "accent" | "ok" | "warn" | "err";
+  children: ReactNode;
+}) {
+  const tones: Record<string, string> = {
+    neutral: "bg-fg3/10 text-fg2",
+    accent: "bg-accent/10 text-accent",
+    ok: "bg-ok/10 text-ok",
+    warn: "bg-warn/10 text-warn",
+    err: "bg-err/10 text-err",
+  };
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium leading-4",
+        tones[tone] ?? tones.neutral,
+      )}
+    >
+      {children}
+    </span>
+  );
+}
+
+/* ---------------------------------------------------------------- */
+/* 表单控件                                                          */
+/* ---------------------------------------------------------------- */
 
 export function Input({ className, ...props }: InputHTMLAttributes<HTMLInputElement>) {
   return (
     <input
       className={cn(
-        "h-9 rounded-lg border border-edge bg-panel px-3 text-sm text-zinc-200 outline-none placeholder:text-zinc-500 focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/30",
+        "h-8 rounded-ctl border border-edge-strong bg-panel px-2.5 text-[13px] text-fg outline-none transition-shadow placeholder:text-fg3 focus:border-accent focus:ring-[3px] focus:ring-accent/25",
         className,
       )}
       {...props}
@@ -122,15 +169,18 @@ export function Select({
   ...props
 }: SelectHTMLAttributes<HTMLSelectElement>) {
   return (
-    <select
-      className={cn(
-        "h-9 rounded-lg border border-edge bg-panel px-2.5 text-sm text-zinc-200 outline-none focus:border-emerald-500/50",
-        className,
-      )}
-      {...props}
-    >
-      {children}
-    </select>
+    <div className={cn("relative", className)}>
+      <select
+        className="h-8 w-full appearance-none rounded-ctl border border-edge-strong bg-panel pl-2.5 pr-7 text-[13px] text-fg outline-none transition-shadow focus:border-accent focus:ring-[3px] focus:ring-accent/25"
+        {...props}
+      >
+        {children}
+      </select>
+      <ChevronDown
+        size={14}
+        className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-fg3"
+      />
+    </div>
   );
 }
 
@@ -144,17 +194,55 @@ export function Checkbox({
   onChange: (v: boolean) => void;
 }) {
   return (
-    <label className="inline-flex cursor-pointer select-none items-center gap-1.5 text-sm text-zinc-400">
+    <label className="inline-flex cursor-pointer select-none items-center gap-1.5 text-[13px] text-fg2">
       <input
         type="checkbox"
         checked={checked}
         onChange={(e) => onChange(e.target.checked)}
-        className="h-3.5 w-3.5 accent-emerald-500"
+        className="h-3.5 w-3.5 accent-accent"
       />
       {label}
     </label>
   );
 }
+
+/* ---------------------------------------------------------------- */
+/* 分段控件 — 详情页 Tab                                             */
+/* ---------------------------------------------------------------- */
+
+export function SegmentedControl<T extends string>({
+  options,
+  value,
+  onChange,
+}: {
+  options: { key: T; label: string }[];
+  value: T;
+  onChange: (v: T) => void;
+}) {
+  return (
+    <div className="inline-flex items-center gap-0.5 rounded-ctl bg-panel2 p-0.5">
+      {options.map((o) => (
+        <button
+          key={o.key}
+          type="button"
+          onClick={() => onChange(o.key)}
+          className={cn(
+            "h-6.5 rounded-[5px] px-3 text-[12px] font-medium transition-colors duration-150",
+            value === o.key
+              ? "bg-panel text-fg shadow-sm"
+              : "text-fg2 hover:text-fg",
+          )}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------------- */
+/* 反馈与覆盖层                                                       */
+/* ---------------------------------------------------------------- */
 
 export function Modal({
   open,
@@ -181,20 +269,20 @@ export function Modal({
   if (!open) return null;
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+      className="animate-fade fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4 backdrop-blur-[2px]"
       onClick={onClose}
     >
       <div
-        className="w-full max-w-md rounded-xl border border-edge bg-panel p-5 shadow-2xl"
+        className="animate-pop w-full max-w-md rounded-xl border border-edge bg-panel p-5 shadow-[var(--app-shadow)]"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-3 flex items-center justify-between">
-          <h3 className="text-base font-semibold text-zinc-100">{title}</h3>
+          <h3 className="text-[15px] font-semibold text-fg">{title}</h3>
           <IconButton title="关闭" onClick={onClose}>
             <X size={16} />
           </IconButton>
         </div>
-        <div className="text-sm text-zinc-300">{children}</div>
+        <div className="text-[13px] text-fg2">{children}</div>
         {footer && <div className="mt-5 flex justify-end gap-2">{footer}</div>}
       </div>
     </div>
@@ -205,7 +293,7 @@ export function Spinner({ className }: { className?: string }) {
   return (
     <span
       className={cn(
-        "inline-block h-4 w-4 animate-spin rounded-full border-2 border-zinc-500 border-t-transparent",
+        "inline-block h-4 w-4 animate-spin rounded-full border-2 border-fg3/60 border-t-transparent",
         className,
       )}
     />
@@ -222,13 +310,17 @@ export function EmptyState({
   desc?: string;
 }) {
   return (
-    <div className="flex h-full min-h-48 flex-col items-center justify-center gap-2 p-8 text-center">
-      {icon && <div className="text-zinc-600">{icon}</div>}
-      <div className="text-sm font-medium text-zinc-400">{title}</div>
-      {desc && <div className="text-xs text-zinc-500">{desc}</div>}
+    <div className="flex h-full min-h-48 flex-col items-center justify-center gap-1.5 p-8 text-center">
+      {icon && <div className="mb-2 text-fg3/70">{icon}</div>}
+      <div className="text-[13px] font-medium text-fg2">{title}</div>
+      {desc && <div className="max-w-sm text-xs text-fg3">{desc}</div>}
     </div>
   );
 }
+
+/* ---------------------------------------------------------------- */
+/* 工具栏（页面头）— 兼作可拖拽标题栏延伸                              */
+/* ---------------------------------------------------------------- */
 
 export function PageHeader({
   title,
@@ -240,12 +332,19 @@ export function PageHeader({
   children?: ReactNode;
 }) {
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 border-b border-edge px-6 py-4">
-      <div>
-        <h1 className="text-lg font-semibold text-zinc-100">{title}</h1>
-        {desc && <p className="mt-0.5 text-xs text-zinc-500">{desc}</p>}
+    <div
+      {...withDragRegion()}
+      className="flex h-12 shrink-0 flex-wrap items-center justify-between gap-3 border-b border-edge bg-panel px-4"
+    >
+      <div className="flex min-w-0 items-baseline gap-2.5">
+        <h1 className="truncate text-[15px] font-semibold text-fg">{title}</h1>
+        {desc && <p className="hidden truncate text-xs text-fg3 md:block">{desc}</p>}
       </div>
-      {children && <div className="flex flex-wrap items-center gap-2">{children}</div>}
+      {children && (
+        <div className="flex flex-wrap items-center gap-2" data-no-drag>
+          {children}
+        </div>
+      )}
     </div>
   );
 }
@@ -253,7 +352,7 @@ export function PageHeader({
 export function ErrorNote({ message, onRetry }: { message: string; onRetry?: () => void }) {
   return (
     <div className="flex h-full flex-col items-center justify-center gap-3 p-8">
-      <div className="max-w-lg break-all text-center text-sm text-rose-400">{message}</div>
+      <div className="max-w-lg break-all text-center text-[13px] text-err">{message}</div>
       {onRetry && (
         <Button variant="outline" onClick={onRetry}>
           重试

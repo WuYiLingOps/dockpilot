@@ -1,12 +1,94 @@
 @import "tailwindcss";
+@import "@fontsource-variable/inter";
 
-@theme {
-  --color-app: #0a0c10;
-  --color-panel: #10141b;
-  --color-panel2: #1a212e;
-  --color-edge: rgba(148, 163, 184, 0.14);
-  --font-mono: ui-monospace, "JetBrains Mono", "SFMono-Regular", Menlo, Consolas,
-    monospace;
+/* ------------------------------------------------------------------ */
+/* 设计 Token — OrbStack / macOS 原生观感                              */
+/* 原始变量在 :root（亮）/ .dark（暗）双份定义，经 @theme inline        */
+/* 映射为 Tailwind 颜色工具类，运行时切 class 即可整站换肤。           */
+/* ------------------------------------------------------------------ */
+
+:root {
+  color-scheme: light;
+
+  /* 表面层级 */
+  --app-canvas: #f5f5f7; /* 内容区画布 */
+  --app-panel: #ffffff; /* 卡片 / 工具栏 */
+  --app-panel2: #f2f2f5; /* 嵌套面（输入框、代码块） */
+  --app-sidebar: #ececef; /* 侧栏材质 */
+  --app-hover: rgba(0, 0, 0, 0.045); /* 列表行悬停 */
+  --app-edge: rgba(0, 0, 0, 0.09); /* 发丝分隔线 */
+  --app-edge-strong: rgba(0, 0, 0, 0.16); /* 输入框描边 */
+
+  /* 文字 */
+  --app-fg: #1d1d1f;
+  --app-fg2: #57575d;
+  --app-fg3: #85858b;
+
+  /* 强调（macOS 系统蓝） */
+  --app-accent: #007aff;
+  --app-on-accent: #ffffff;
+
+  /* 状态色（亮色下调深保证可读） */
+  --app-ok: #1e9e4b;
+  --app-warn: #b25b00;
+  --app-err: #d70015;
+
+  --app-shadow: 0 1px 2px rgba(0, 0, 0, 0.06), 0 4px 16px rgba(0, 0, 0, 0.05);
+}
+
+.dark {
+  color-scheme: dark;
+
+  --app-canvas: #161618;
+  --app-panel: #1e1e20;
+  --app-panel2: #29292c;
+  --app-sidebar: #19191b;
+  --app-hover: rgba(255, 255, 255, 0.06);
+  --app-edge: rgba(255, 255, 255, 0.09);
+  --app-edge-strong: rgba(255, 255, 255, 0.17);
+
+  --app-fg: #f5f5f7;
+  --app-fg2: #a8a8ad;
+  --app-fg3: #74747a;
+
+  --app-accent: #0a84ff;
+  --app-on-accent: #ffffff;
+
+  /* Apple 暗色系统色 */
+  --app-ok: #30d158;
+  --app-warn: #ff9f0a;
+  --app-err: #ff453a;
+
+  --app-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+@theme inline {
+  --color-canvas: var(--app-canvas);
+  --color-panel: var(--app-panel);
+  --color-panel2: var(--app-panel2);
+  --color-sidebar: var(--app-sidebar);
+  --color-hover: var(--app-hover);
+  --color-edge: var(--app-edge);
+  --color-edge-strong: var(--app-edge-strong);
+  --color-fg: var(--app-fg);
+  --color-fg2: var(--app-fg2);
+  --color-fg3: var(--app-fg3);
+  --color-accent: var(--app-accent);
+  --color-on-accent: var(--app-on-accent);
+  --color-ok: var(--app-ok);
+  --color-warn: var(--app-warn);
+  --color-err: var(--app-err);
+
+  --font-sans:
+    "Inter Variable", system-ui, -apple-system, "Segoe UI", "PingFang SC",
+    "Noto Sans CJK SC", "Microsoft YaHei", sans-serif;
+  --font-mono:
+    ui-monospace, "JetBrains Mono", "SFMono-Regular", Menlo, Consolas,
+    "Noto Sans Mono CJK SC", monospace;
+
+  --radius-btn: 6px;
+  --radius-ctl: 8px;
+  --radius-card: 10px;
 }
 
 html,
@@ -17,31 +99,87 @@ body,
 
 body {
   margin: 0;
-  background: var(--color-app);
-  color: #e2e8f0;
-  font-family: system-ui, -apple-system, "Segoe UI", "PingFang SC",
-    "Noto Sans CJK SC", "Microsoft YaHei", sans-serif;
+  background: var(--app-canvas);
+  color: var(--app-fg);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 1.45;
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
+::selection {
+  background: color-mix(in srgb, var(--app-accent) 25%, transparent);
+}
+
+/* 主题切换瞬间的柔和过渡（仅颜色属性，尊重减少动效偏好） */
+@media (prefers-reduced-motion: no-preference) {
+  body,
+  aside,
+  main,
+  header {
+    transition: background-color 180ms ease, color 180ms ease,
+      border-color 180ms ease;
+  }
+}
+
+/* 滚动条 — 细巧、随主题 */
 *::-webkit-scrollbar {
   width: 10px;
   height: 10px;
 }
-
 *::-webkit-scrollbar-thumb {
-  background: #2a3342;
+  background: color-mix(in srgb, var(--app-fg3) 45%, transparent);
   border-radius: 6px;
-  border: 2px solid transparent;
+  border: 3px solid transparent;
   background-clip: content-box;
 }
-
 *::-webkit-scrollbar-thumb:hover {
-  background: #3a4557;
+  background: color-mix(in srgb, var(--app-fg3) 75%, transparent);
   background-clip: content-box;
-  border: 2px solid transparent;
+  border: 3px solid transparent;
 }
-
 *::-webkit-scrollbar-track {
   background: transparent;
+}
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* xterm 填满宿主 */
+.xterm,
+.xterm .xterm-viewport {
+  height: 100%;
+}
+
+/* 弹层动效 */
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.animate-pop {
+  animation: pop-in 160ms cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+.animate-fade {
+  animation: fade-in 150ms ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-pop,
+  .animate-fade {
+    animation: none;
+  }
 }

@@ -1,17 +1,7 @@
-import { useQuery } from "@tanstack/react-query";
-import { Eraser, ScrollText } from "lucide-react";
+import { Eraser } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { api } from "../lib/api";
-import { cn } from "../components/ui";
-import {
-  Button,
-  Checkbox,
-  EmptyState,
-  ErrorNote,
-  PageHeader,
-  Select,
-  Spinner,
-} from "../components/ui";
+import { api } from "../../lib/api";
+import { cn, Button, Checkbox, Input, Select } from "../ui";
 
 type Stream = "out" | "err";
 
@@ -22,14 +12,8 @@ interface Line {
 
 const MAX_LINES = 5000;
 
-export function Logs() {
-  const containers = useQuery({
-    queryKey: ["containers"],
-    queryFn: () => api.listContainers(true),
-  });
-  const list = containers.data ?? [];
-
-  const [id, setId] = useState("");
+/** 容器详情 · 日志 Tab（流式、自动跟随、关键字过滤） */
+export function LogsView({ id }: { id: string }) {
   const [tail, setTail] = useState("1000");
   const [follow, setFollow] = useState(true);
   const [timestamps, setTimestamps] = useState(false);
@@ -40,13 +24,7 @@ export function Logs() {
   const stick = useRef(true);
   const pending = useRef<Line | null>(null);
 
-  // 默认选中第一个容器
   useEffect(() => {
-    if (!id && list.length > 0) setId(list[0].id);
-  }, [list, id]);
-
-  useEffect(() => {
-    if (!id) return;
     setLines([]);
     pending.current = null;
     stick.current = true;
@@ -86,58 +64,22 @@ export function Logs() {
     if (el && stick.current) el.scrollTop = el.scrollHeight;
   }, [lines]);
 
-  if (containers.isLoading) {
-    return (
-      <>
-        <PageHeader title="日志" />
-        <div className="flex flex-1 items-center justify-center">
-          <Spinner className="h-6 w-6" />
-        </div>
-      </>
-    );
-  }
-
-  if (containers.isError) {
-    return (
-      <>
-        <PageHeader title="日志" />
-        <ErrorNote
-          message={String(containers.error)}
-          onRetry={() => void containers.refetch()}
-        />
-      </>
-    );
-  }
-
-  if (list.length === 0) {
-    return (
-      <>
-        <PageHeader title="日志" />
-        <EmptyState
-          icon={<ScrollText size={40} />}
-          title="没有可选的容器"
-          desc="先创建并运行一个容器，再回到这里查看日志"
-        />
-      </>
-    );
-  }
-
   const keyword = filter.trim().toLowerCase();
   const shown = keyword
     ? lines.filter((l) => l.text.toLowerCase().includes(keyword))
     : lines;
 
   return (
-    <>
-      <PageHeader title="日志" desc="流式查看容器输出">
-        <Select value={id} onChange={(e) => setId(e.target.value)}>
-          {list.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name}（{c.state === "running" ? "运行中" : c.status}）
-            </option>
-          ))}
-        </Select>
-        <Select value={tail} onChange={(e) => setTail(e.target.value)}>
+    <div className="flex h-full min-h-0 flex-col">
+      <div
+        className="flex h-10 shrink-0 flex-wrap items-center gap-3 border-b border-edge bg-panel px-4"
+        data-no-drag
+      >
+        <Select
+          value={tail}
+          onChange={(e) => setTail(e.target.value)}
+          className="w-32"
+        >
           <option value="100">最近 100 行</option>
           <option value="1000">最近 1000 行</option>
           <option value="5000">最近 5000 行</option>
@@ -145,17 +87,17 @@ export function Logs() {
         </Select>
         <Checkbox label="跟随" checked={follow} onChange={setFollow} />
         <Checkbox label="时间戳" checked={timestamps} onChange={setTimestamps} />
-        <input
+        <Input
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
           placeholder="过滤关键字"
-          className="h-9 w-40 rounded-lg border border-edge bg-panel px-3 text-sm text-zinc-200 outline-none placeholder:text-zinc-500 focus:border-emerald-500/50"
+          className="ml-auto h-7 w-44"
         />
-        <Button variant="outline" onClick={() => setLines([])}>
+        <Button variant="ghost" className="h-7" onClick={() => setLines([])}>
           <Eraser size={14} />
           清屏
         </Button>
-      </PageHeader>
+      </div>
 
       <div
         ref={boxRef}
@@ -165,10 +107,10 @@ export function Logs() {
             stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
           }
         }}
-        className="flex-1 overflow-auto px-4 py-3 font-mono text-xs leading-5"
+        className="min-h-0 flex-1 overflow-auto px-4 py-3 font-mono text-[12px] leading-5"
       >
         {shown.length === 0 ? (
-          <div className="pt-8 text-center text-zinc-600">
+          <div className="pt-8 text-center text-fg3">
             {lines.length === 0 ? "暂无日志输出" : "没有匹配过滤条件的行"}
           </div>
         ) : (
@@ -177,7 +119,7 @@ export function Logs() {
               key={i}
               className={cn(
                 "whitespace-pre-wrap break-all",
-                l.stream === "err" ? "text-rose-400" : "text-zinc-300",
+                l.stream === "err" ? "text-err" : "text-fg2",
               )}
             >
               {l.text || " "}
@@ -185,6 +127,6 @@ export function Logs() {
           ))
         )}
       </div>
-    </>
+    </div>
   );
 }

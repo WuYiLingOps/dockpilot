@@ -5,10 +5,21 @@
     <link rel="icon" type="image/svg+xml" href="/tauri.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>DockPilot — Docker 桌面管理</title>
+    <script>
+      // 首帧前同步主题，避免闪白/闪黑
+      (function () {
+        try {
+          var m = localStorage.getItem("dockpilot.theme") || "system";
+          var dark = m === "dark" || (m === "system" && matchMedia("(prefers-color-scheme: dark)").matches);
+          if (dark) document.documentElement.classList.add("dark");
+        } catch (e) {}
+      })();
+    </script>
   </head>
 
   <body>
     <div id="root"></div>
+    <script src="/tauri-mock.js"></script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

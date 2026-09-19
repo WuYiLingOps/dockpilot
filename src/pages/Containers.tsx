@@ -5,39 +5,60 @@ import {
   Play,
   RefreshCw,
   RotateCw,
-  Search,
   Square,
   Trash2,
 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { api } from "../lib/api";
-import { formatPorts, timeAgo } from "../lib/format";
-import type { ContainerDto } from "../types/docker";
+import type { ContainerDto, PortDto } from "../types/docker";
+import { useContainerActions } from "../hooks/useContainerActions";
+import { timeAgo } from "../lib/format";
 import {
   Button,
   EmptyState,
   ErrorNote,
   IconButton,
-  Input,
   Modal,
   PageHeader,
   Spinner,
-  StateBadge,
+  StatusDot,
+  Badge,
+  statusText,
 } from "../components/ui";
 
-const ACT_LABEL: Record<string, string> = {
-  start: "启动",
-  stop: "停止",
-  restart: "重启",
-  pause: "暂停",
-  unpause: "恢复",
-};
+/** 端口徽章：最多展示 2 个，多余合并为 +N */
+function PortChips({ ports }: { ports: PortDto[] }) {
+  if (ports.length === 0) return <span className="text-fg3">—</span>;
+  const chips = ports.slice(0, 2).map((p, i) => (
+    <Badge key={`${p.public_port}-${p.private_port}-${i}`}>
+      <span className="font-mono">
+        {p.public_port != null ? `${p.public_port}→${p.private_port}` : p.private_port}
+      </span>
+    </Badge>
+  ));
+  const more = ports.length > 2 ? <span className="text-[11px] text-fg3">+{ports.length - 2}</span> : null;
+  return (
+    <div className="flex items-center gap-1" title={ports.map((p) => (p.public_port != null ? `${p.public_port}→${p.private_port}` : `${p.private_port}`)).join("  ")}>
+      {chips}
+      {more}
+    </div>
+  );
+}
 
-export function Containers() {
+const GRID =
+  "grid grid-cols-[104px_minmax(170px,1.4fr)_minmax(130px,1fr)_minmax(140px,1fr)_104px_148px] items-center gap-x-3";
+
+export function Containers({
+  onOpen,
+  search,
+}: {
+  onOpen: (id: string) => void;
+  search: string;
+}) {
   const qc = useQueryClient();
-  const [search, setSearch] = useState("");
   const [pendingDelete, setPendingDelete] = useState<ContainerDto | null>(null);
+  const { action } = useContainerActions();
 
   const query = useQuery({
     queryKey: ["containers"],
@@ -45,24 +66,14 @@ export function Containers() {
     refetchInterval: 10000,
   });
 
-  const action = useMutation({
-    mutationFn: (vars: { id: string; act: string }) =>
-      api.containerAction(vars.id, vars.act),
-    onSuccess: (_data, vars) => {
-      toast.success(`容器已${ACT_LABEL[vars.act] ?? vars.act}`);
-      void qc.invalidateQueries({ queryKey: ["containers"] });
-    },
-    onError: (e, vars) =>
-      toast.error(`容器${ACT_LABEL[vars.act] ?? vars.act}失败: ${e}`),
-  });
-
-  const remove = useMutation({
+  const deleteForce = useMutation({
     mutationFn: (c: ContainerDto) =>
       api.containerAction(c.id, "remove", c.state === "running"),
     onSuccess: () => {
       toast.success("容器已删除");
       setPendingDelete(null);
       void qc.invalidateQueries({ queryKey: ["containers"] });
+      void qc.invalidateQueries({ queryKey: ["dockerInfo"] });
     },
     onError: (e) => toast.error(`删除容器失败: ${e}`),
   });
@@ -80,23 +91,11 @@ export function Containers() {
 
   return (
     <>
-      <PageHeader title="容器" desc="本机全部容器的生命周期管理">
-        <div className="relative">
-          <Search
-            size={14}
-            className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500"
-          />
-          <Input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="搜索名称 / 镜像 / ID"
-            className="w-64 pl-8"
-          />
-        </div>
+      <PageHeader title="容器" desc={`${list.length} 个容器 · 点击行查看详情`}>
         <IconButton
           title="刷新"
           onClick={() => void query.refetch()}
-          className="h-9 w-9 border border-edge"
+          className="h-8 w-8"
         >
           <RefreshCw size={15} className={query.isFetching ? "animate-spin" : ""} />
         </IconButton>
@@ -107,124 +106,115 @@ export function Containers() {
           <Spinner className="h-6 w-6" />
         </div>
       ) : query.isError ? (
-        <ErrorNote
-          message={String(query.error)}
-          onRetry={() => void query.refetch()}
-        />
+        <ErrorNote message={String(query.error)} onRetry={() => void query.refetch()} />
       ) : filtered.length === 0 ? (
         <EmptyState
-          icon={<Boxes size={40} />}
+          icon={<Boxes size={40} strokeWidth={1.5} />}
           title={keyword ? "没有匹配的容器" : "还没有容器"}
-          desc={keyword ? "换个关键字试试" : "运行 docker run 创建一个容器后这里会显示"}
+          desc={
+            keyword
+              ? "换个关键字试试"
+              : "运行 docker run 创建一个容器后这里会显示"
+          }
         />
       ) : (
-        <div className="flex-1 overflow-auto">
-          <table className="w-full text-sm">
-            <thead className="sticky top-0 z-10 bg-panel text-left text-xs text-zinc-500">
-              <tr className="border-b border-edge">
-                <th className="px-6 py-2.5 font-medium">状态</th>
-                <th className="py-2.5 font-medium">名称</th>
-                <th className="py-2.5 font-medium">镜像</th>
-                <th className="py-2.5 font-medium">端口</th>
-                <th className="py-2.5 font-medium">创建时间</th>
-                <th className="py-2.5 pr-6 text-right font-medium">操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((c) => (
-                <tr
-                  key={c.id}
-                  className="border-b border-edge/60 transition-colors last:border-0 hover:bg-panel2/50"
+        <div className="flex-1 overflow-auto p-4 pt-2">
+          <div className="overflow-hidden rounded-card border border-edge bg-panel shadow-[var(--app-shadow)]">
+            <div
+              className={`${GRID} h-8 border-b border-edge bg-panel2/60 px-4 text-[11px] font-medium text-fg3`}
+            >
+              <div>状态</div>
+              <div>名称</div>
+              <div>镜像</div>
+              <div>端口</div>
+              <div>创建时间</div>
+              <div />
+            </div>
+            {filtered.map((c) => (
+              <div
+                key={c.id}
+                onClick={() => onOpen(c.id)}
+                className={`${GRID} group cursor-pointer border-b border-edge/60 px-4 py-2.5 transition-colors last:border-0 hover:bg-hover`}
+              >
+                <div title={c.status}>
+                  <div className="flex items-center gap-1.5 text-[12px] text-fg2">
+                    <StatusDot state={c.state} />
+                    {statusText(c.state)}
+                  </div>
+                </div>
+                <div className="min-w-0">
+                  <div className="truncate font-medium text-fg">{c.name}</div>
+                  <div className="truncate font-mono text-[11px] text-fg3">
+                    {c.id.slice(0, 12)}
+                  </div>
+                </div>
+                <div className="min-w-0">
+                  <div className="truncate font-mono text-[12px] text-fg2" title={c.image}>
+                    {c.image}
+                  </div>
+                </div>
+                <PortChips ports={c.ports} />
+                <div className="text-[12px] text-fg3">{timeAgo(c.created)}</div>
+                <div
+                  className="flex items-center justify-end gap-0.5 opacity-0 transition-opacity duration-150 group-hover:opacity-100"
+                  onClick={(e) => e.stopPropagation()}
+                  data-no-drag
                 >
-                  <td className="px-6 py-2.5">
-                    <div className="flex flex-col gap-0.5">
-                      <StateBadge state={c.state} />
-                      <span className="text-[10px] text-zinc-500">{c.status}</span>
-                    </div>
-                  </td>
-                  <td className="py-2.5 pr-4">
-                    <div className="font-medium text-zinc-200">{c.name}</div>
-                    <div className="font-mono text-[10px] text-zinc-500">
-                      {c.id.slice(0, 12)}
-                    </div>
-                  </td>
-                  <td className="max-w-56 py-2.5 pr-4">
-                    <div className="truncate font-mono text-xs text-zinc-400" title={c.image}>
-                      {c.image}
-                    </div>
-                  </td>
-                  <td className="max-w-52 py-2.5 pr-4">
-                    <div
-                      className="truncate font-mono text-xs text-zinc-400"
-                      title={formatPorts(c.ports)}
+                  {(c.state === "exited" || c.state === "created" || c.state === "dead") && (
+                    <IconButton
+                      title="启动"
+                      disabled={action.isPending}
+                      onClick={() => action.mutate({ id: c.id, act: "start" })}
                     >
-                      {formatPorts(c.ports)}
-                    </div>
-                  </td>
-                  <td className="py-2.5 pr-4 text-xs text-zinc-500">
-                    {timeAgo(c.created)}
-                  </td>
-                  <td className="py-2.5 pr-6">
-                    <div className="flex items-center justify-end gap-0.5">
-                      {(c.state === "exited" ||
-                        c.state === "created" ||
-                        c.state === "dead") && (
-                        <IconButton
-                          title="启动"
-                          disabled={action.isPending}
-                          onClick={() => action.mutate({ id: c.id, act: "start" })}
-                        >
-                          <Play size={14} />
-                        </IconButton>
-                      )}
-                      {c.state === "running" && (
-                        <>
-                          <IconButton
-                            title="停止"
-                            disabled={action.isPending}
-                            onClick={() => action.mutate({ id: c.id, act: "stop" })}
-                          >
-                            <Square size={14} />
-                          </IconButton>
-                          <IconButton
-                            title="重启"
-                            disabled={action.isPending}
-                            onClick={() => action.mutate({ id: c.id, act: "restart" })}
-                          >
-                            <RotateCw size={14} />
-                          </IconButton>
-                          <IconButton
-                            title="暂停"
-                            disabled={action.isPending}
-                            onClick={() => action.mutate({ id: c.id, act: "pause" })}
-                          >
-                            <Pause size={14} />
-                          </IconButton>
-                        </>
-                      )}
-                      {c.state === "paused" && (
-                        <IconButton
-                          title="恢复"
-                          disabled={action.isPending}
-                          onClick={() => action.mutate({ id: c.id, act: "unpause" })}
-                        >
-                          <Play size={14} />
-                        </IconButton>
-                      )}
+                      <Play size={14} />
+                    </IconButton>
+                  )}
+                  {c.state === "running" && (
+                    <>
                       <IconButton
-                        title="删除"
-                        disabled={remove.isPending}
-                        className="hover:bg-rose-500/10 hover:text-rose-400"
-                        onClick={() => setPendingDelete(c)}
+                        title="停止"
+                        disabled={action.isPending}
+                        onClick={() => action.mutate({ id: c.id, act: "stop" })}
                       >
-                        <Trash2 size={14} />
+                        <Square size={14} />
                       </IconButton>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                      <IconButton
+                        title="重启"
+                        disabled={action.isPending}
+                        onClick={() => action.mutate({ id: c.id, act: "restart" })}
+                      >
+                        <RotateCw size={14} />
+                      </IconButton>
+                      <IconButton
+                        title="暂停"
+                        disabled={action.isPending}
+                        onClick={() => action.mutate({ id: c.id, act: "pause" })}
+                      >
+                        <Pause size={14} />
+                      </IconButton>
+                    </>
+                  )}
+                  {c.state === "paused" && (
+                    <IconButton
+                      title="恢复"
+                      disabled={action.isPending}
+                      onClick={() => action.mutate({ id: c.id, act: "unpause" })}
+                    >
+                      <Play size={14} />
+                    </IconButton>
+                  )}
+                  <IconButton
+                    title="删除"
+                    disabled={deleteForce.isPending}
+                    className="hover:bg-err/10 hover:text-err"
+                    onClick={() => setPendingDelete(c)}
+                  >
+                    <Trash2 size={14} />
+                  </IconButton>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
@@ -239,8 +229,8 @@ export function Containers() {
             </Button>
             <Button
               variant="danger"
-              disabled={remove.isPending}
-              onClick={() => pendingDelete && remove.mutate(pendingDelete)}
+              disabled={deleteForce.isPending}
+              onClick={() => pendingDelete && deleteForce.mutate(pendingDelete)}
             >
               确认删除
             </Button>
@@ -248,11 +238,10 @@ export function Containers() {
         }
       >
         <p>
-          确定删除容器{" "}
-          <span className="font-mono text-zinc-100">{pendingDelete?.name}</span> 吗？
+          确定删除容器 <span className="font-mono text-fg">{pendingDelete?.name}</span> 吗？
         </p>
         {pendingDelete?.state === "running" && (
-          <p className="mt-2 text-xs text-amber-400">
+          <p className="mt-2 text-[12px] text-warn">
             该容器正在运行，删除时会先强制停止，此操作不可恢复。
           </p>
         )}

@@ -1,5 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Download, Image as ImageIcon, RefreshCw, Search, Trash2 } from "lucide-react";
+import {
+  Download,
+  Image as ImageIcon,
+  RefreshCw,
+  Trash2,
+} from "lucide-react";
 import { useRef, useState } from "react";
 import { toast } from "sonner";
 import { api } from "../lib/api";
@@ -17,9 +22,11 @@ import {
   Spinner,
 } from "../components/ui";
 
-export function Images() {
+const GRID =
+  "grid grid-cols-[minmax(220px,1.8fr)_130px_110px_110px_96px] items-center gap-x-3";
+
+export function Images({ search }: { search: string }) {
   const qc = useQueryClient();
-  const [search, setSearch] = useState("");
   const [pendingDelete, setPendingDelete] = useState<ImageDto | null>(null);
   const [forceDelete, setForceDelete] = useState(false);
   const [pullOpen, setPullOpen] = useState(false);
@@ -31,12 +38,13 @@ export function Images() {
   });
 
   const remove = useMutation({
-    mutationFn: (img: ImageDto) => api.removeImage(img.id, forceDelete),
+    mutationFn: (v: { img: ImageDto; force: boolean }) =>
+      api.removeImage(v.img.id, v.force),
     onSuccess: () => {
       toast.success("镜像已删除");
       setPendingDelete(null);
-      setForceDelete(false);
       void qc.invalidateQueries({ queryKey: ["images"] });
+      void qc.invalidateQueries({ queryKey: ["dockerInfo"] });
     },
     onError: (e) => toast.error(`删除镜像失败: ${e}`),
   });
@@ -53,19 +61,7 @@ export function Images() {
 
   return (
     <>
-      <PageHeader title="镜像" desc="本地镜像与拉取">
-        <div className="relative">
-          <Search
-            size={14}
-            className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500"
-          />
-          <Input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="搜索标签 / ID"
-            className="w-56 pl-8"
-          />
-        </div>
+      <PageHeader title="镜像" desc={`${list.length} 个本地镜像`}>
         <Button variant="primary" onClick={() => setPullOpen(true)}>
           <Download size={15} />
           拉取镜像
@@ -73,7 +69,7 @@ export function Images() {
         <IconButton
           title="刷新"
           onClick={() => void query.refetch()}
-          className="h-9 w-9 border border-edge"
+          className="h-8 w-8"
         >
           <RefreshCw size={15} className={query.isFetching ? "animate-spin" : ""} />
         </IconButton>
@@ -87,70 +83,64 @@ export function Images() {
         <ErrorNote message={String(query.error)} onRetry={() => void query.refetch()} />
       ) : filtered.length === 0 ? (
         <EmptyState
-          icon={<ImageIcon size={40} />}
+          icon={<ImageIcon size={40} strokeWidth={1.5} />}
           title={keyword ? "没有匹配的镜像" : "本地没有镜像"}
           desc={keyword ? "换个关键字试试" : "点击右上角「拉取镜像」获取一个镜像"}
         />
       ) : (
-        <div className="flex-1 overflow-auto">
-          <table className="w-full text-sm">
-            <thead className="sticky top-0 z-10 bg-panel text-left text-xs text-zinc-500">
-              <tr className="border-b border-edge">
-                <th className="px-6 py-2.5 font-medium">标签</th>
-                <th className="py-2.5 font-medium">镜像 ID</th>
-                <th className="py-2.5 font-medium">大小</th>
-                <th className="py-2.5 font-medium">创建时间</th>
-                <th className="py-2.5 pr-6 text-right font-medium">操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((img) => {
-                const [main = "", ...rest] = img.tags;
-                return (
-                  <tr
-                    key={img.id}
-                    className="border-b border-edge/60 transition-colors last:border-0 hover:bg-panel2/50"
-                  >
-                    <td className="px-6 py-2.5 pr-4">
-                      <div
-                        className="max-w-72 truncate font-mono text-xs text-zinc-200"
-                        title={main || "<none>:<none>"}
-                      >
-                        {main || "<none>:<none>"}
+        <div className="flex-1 overflow-auto p-4 pt-2">
+          <div className="overflow-hidden rounded-card border border-edge bg-panel shadow-[var(--app-shadow)]">
+            <div
+              className={`${GRID} h-8 border-b border-edge bg-panel2/60 px-4 text-[11px] font-medium text-fg3`}
+            >
+              <div>标签</div>
+              <div>镜像 ID</div>
+              <div>大小</div>
+              <div>创建时间</div>
+              <div />
+            </div>
+            {filtered.map((img) => {
+              const [main = "", ...rest] = img.tags;
+              return (
+                <div
+                  key={img.id}
+                  className={`${GRID} group border-b border-edge/60 px-4 py-2.5 transition-colors last:border-0 hover:bg-hover`}
+                >
+                  <div className="min-w-0">
+                    <div
+                      className="truncate font-mono text-[12px] text-fg"
+                      title={main || "<none>:<none>"}
+                    >
+                      {main || "<none>:<none>"}
+                    </div>
+                    {rest.length > 0 && (
+                      <div className="text-[11px] text-fg3" title={rest.join(", ")}>
+                        还有 {rest.length} 个标签
                       </div>
-                      {rest.length > 0 && (
-                        <div className="text-[10px] text-zinc-500" title={rest.join(", ")}>
-                          还有 {rest.length} 个标签
-                        </div>
-                      )}
-                    </td>
-                    <td className="py-2.5 pr-4 font-mono text-xs text-zinc-400">
-                      {shortId(img.id)}
-                    </td>
-                    <td className="py-2.5 pr-4 font-mono text-xs text-zinc-400">
-                      {formatBytes(img.size)}
-                    </td>
-                    <td className="py-2.5 pr-4 text-xs text-zinc-500">
-                      {timeAgo(img.created)}
-                    </td>
-                    <td className="py-2.5 pr-6 text-right">
-                      <IconButton
-                        title="删除"
-                        disabled={remove.isPending}
-                        className="ml-auto hover:bg-rose-500/10 hover:text-rose-400"
-                        onClick={() => {
-                          setForceDelete(false);
-                          setPendingDelete(img);
-                        }}
-                      >
-                        <Trash2 size={14} />
-                      </IconButton>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                    )}
+                  </div>
+                  <div className="font-mono text-[12px] text-fg3">{shortId(img.id)}</div>
+                  <div className="font-mono text-[12px] text-fg2">
+                    {formatBytes(img.size)}
+                  </div>
+                  <div className="text-[12px] text-fg3">{timeAgo(img.created)}</div>
+                  <div className="flex items-center justify-end opacity-0 transition-opacity duration-150 group-hover:opacity-100">
+                    <IconButton
+                      title="删除"
+                      disabled={remove.isPending}
+                      className="hover:bg-err/10 hover:text-err"
+                      onClick={() => {
+                        setForceDelete(false);
+                        setPendingDelete(img);
+                      }}
+                    >
+                      <Trash2 size={14} />
+                    </IconButton>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
 
@@ -166,7 +156,9 @@ export function Images() {
             <Button
               variant="danger"
               disabled={remove.isPending}
-              onClick={() => pendingDelete && remove.mutate(pendingDelete)}
+              onClick={() =>
+                pendingDelete && remove.mutate({ img: pendingDelete, force: forceDelete })
+              }
             >
               确认删除
             </Button>
@@ -175,7 +167,7 @@ export function Images() {
       >
         <p>
           确定删除镜像{" "}
-          <span className="font-mono text-zinc-100">
+          <span className="font-mono text-fg">
             {pendingDelete?.tags[0] || shortId(pendingDelete?.id ?? "")}
           </span>{" "}
           吗？
@@ -223,6 +215,7 @@ function PullModal({ open, onClose }: { open: boolean; onClose: () => void }) {
         } else {
           toast.success("镜像拉取完成");
           void qc.invalidateQueries({ queryKey: ["images"] });
+          void qc.invalidateQueries({ queryKey: ["dockerInfo"] });
         }
       }
     });
@@ -252,11 +245,7 @@ function PullModal({ open, onClose }: { open: boolean; onClose: () => void }) {
           <Button variant="outline" onClick={close}>
             关闭
           </Button>
-          <Button
-            variant="primary"
-            disabled={running || !image.trim()}
-            onClick={start}
-          >
+          <Button variant="primary" disabled={running || !image.trim()} onClick={start}>
             {running ? "拉取中…" : "开始拉取"}
           </Button>
         </>
@@ -275,7 +264,7 @@ function PullModal({ open, onClose }: { open: boolean; onClose: () => void }) {
         <div
           ref={boxRef}
           onScroll={onScroll}
-          className="mt-3 h-44 overflow-auto rounded-lg border border-edge bg-app p-2.5 font-mono text-[11px] leading-4 text-zinc-400"
+          className="mt-3 h-44 overflow-auto rounded-ctl border border-edge bg-panel2 p-2.5 font-mono text-[11px] leading-4 text-fg2"
         >
           {lines.map((l, i) => (
             <div key={i} className="whitespace-pre-wrap break-all">
