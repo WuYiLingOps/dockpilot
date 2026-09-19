@@ -1,14 +1,15 @@
 import { useQuery } from "@tanstack/react-query";
-import { Boxes, Eraser, Image as ImageIcon, Search, Settings } from "lucide-react";
+import { Boxes, Eraser, Image as ImageIcon, Layers, Settings } from "lucide-react";
 import { api } from "../lib/api";
 import { SidebarTopBar } from "./TitleBar";
 import { cn, StatusDot } from "./ui";
 
-export type PageKey = "containers" | "images" | "cleanup" | "settings";
+export type PageKey = "containers" | "images" | "compose" | "cleanup" | "settings";
 
 const NAV: { key: PageKey; label: string; icon: typeof Boxes }[] = [
   { key: "containers", label: "容器", icon: Boxes },
   { key: "images", label: "镜像", icon: ImageIcon },
+  { key: "compose", label: "编排", icon: Layers },
   { key: "cleanup", label: "空间清理", icon: Eraser },
   { key: "settings", label: "设置", icon: Settings },
 ];
@@ -16,13 +17,9 @@ const NAV: { key: PageKey; label: string; icon: typeof Boxes }[] = [
 export function Sidebar({
   page,
   onChange,
-  search,
-  onSearch,
 }: {
   page: PageKey;
   onChange: (p: PageKey) => void;
-  search: string;
-  onSearch: (v: string) => void;
 }) {
   const info = useQuery({
     queryKey: ["dockerInfo"],
@@ -40,34 +37,21 @@ export function Sidebar({
     queryFn: api.listImages,
     enabled: page === "images",
   });
+  const composeProjects = useQuery({
+    queryKey: ["composeProjects"],
+    queryFn: api.listComposeProjects,
+    enabled: page === "compose",
+  });
 
   const counts: Partial<Record<PageKey, number | undefined>> = {
     containers: containers.data?.length,
     images: images.data?.length,
+    compose: composeProjects.data?.length,
   };
 
   return (
     <aside className="flex w-56 shrink-0 flex-col border-r border-edge bg-sidebar">
       <SidebarTopBar />
-
-      {/* 全局搜索（仅列表视图） */}
-      {(page === "containers" || page === "images") && (
-        <div className="px-3 pb-1 pt-2">
-          <div className="relative">
-            <Search
-              size={13}
-              className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fg3"
-            />
-            <input
-              value={search}
-              onChange={(e) => onSearch(e.target.value)}
-              placeholder="搜索"
-              data-no-drag
-              className="h-7 w-full rounded-ctl border border-edge-strong bg-panel pl-7 pr-2 text-[13px] text-fg outline-none transition-shadow placeholder:text-fg3 focus:border-accent focus:ring-[3px] focus:ring-accent/25"
-            />
-          </div>
-        </div>
-      )}
 
       <nav className="mt-1.5 flex-1 space-y-0.5 px-3">
         {NAV.map(({ key, label, icon: Icon }) => (

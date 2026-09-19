@@ -3,6 +3,7 @@ import {
   Boxes,
   Pause,
   Play,
+  Plus,
   RefreshCw,
   RotateCw,
   Square,
@@ -12,9 +13,10 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { api } from "../lib/api";
 import { useSettings } from "../lib/settings";
-import type { ContainerDto, PortDto } from "../types/docker";
+import type { ContainerDto } from "../types/docker";
 import { useContainerActions } from "../hooks/useContainerActions";
 import { timeAgo } from "../lib/format";
+import { CreateContainerModal } from "../components/containers/CreateContainerModal";
 import {
   Button,
   EmptyState,
@@ -22,43 +24,30 @@ import {
   IconButton,
   Modal,
   PageHeader,
+  PortChips,
+  SearchInput,
   Spinner,
   StatusDot,
-  Badge,
   statusText,
 } from "../components/ui";
-
-/** 端口徽章：最多展示 2 个，多余合并为 +N */
-function PortChips({ ports }: { ports: PortDto[] }) {
-  if (ports.length === 0) return <span className="text-fg3">—</span>;
-  const chips = ports.slice(0, 2).map((p, i) => (
-    <Badge key={`${p.public_port}-${p.private_port}-${i}`}>
-      <span className="font-mono">
-        {p.public_port != null ? `${p.public_port}→${p.private_port}` : p.private_port}
-      </span>
-    </Badge>
-  ));
-  const more = ports.length > 2 ? <span className="text-[11px] text-fg3">+{ports.length - 2}</span> : null;
-  return (
-    <div className="flex items-center gap-1" title={ports.map((p) => (p.public_port != null ? `${p.public_port}→${p.private_port}` : `${p.private_port}`)).join("  ")}>
-      {chips}
-      {more}
-    </div>
-  );
-}
 
 const GRID =
   "grid grid-cols-[104px_minmax(170px,1.4fr)_minmax(130px,1fr)_minmax(140px,1fr)_104px_148px] items-center gap-x-3";
 
 export function Containers({
   onOpen,
+  onOpenProject,
   search,
+  onSearch,
 }: {
   onOpen: (id: string) => void;
+  onOpenProject: (project: string) => void;
   search: string;
+  onSearch: (v: string) => void;
 }) {
   const qc = useQueryClient();
   const [pendingDelete, setPendingDelete] = useState<ContainerDto | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
   const { action } = useContainerActions();
   const { data: settings } = useSettings();
 
@@ -94,6 +83,11 @@ export function Containers({
   return (
     <>
       <PageHeader title="容器" desc={`${list.length} 个容器 · 点击行查看详情`}>
+        <SearchInput value={search} onChange={onSearch} className="w-44" />
+        <Button variant="primary" onClick={() => setCreateOpen(true)}>
+          <Plus size={15} />
+          创建容器
+        </Button>
         <IconButton
           title="刷新"
           onClick={() => void query.refetch()}
@@ -145,7 +139,22 @@ export function Containers({
                   </div>
                 </div>
                 <div className="min-w-0">
-                  <div className="truncate font-medium text-fg">{c.name}</div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="truncate font-medium text-fg">{c.name}</span>
+                    {c.compose_project && (
+                      <button
+                        type="button"
+                        title={`compose 项目：${c.compose_project}，点击查看编排详情`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onOpenProject(c.compose_project!);
+                        }}
+                        className="shrink-0 cursor-pointer rounded-full bg-accent/10 px-2 py-0.5 text-[10.5px] font-medium leading-4 text-accent transition-colors hover:bg-accent/20"
+                      >
+                        {c.compose_project}
+                      </button>
+                    )}
+                  </div>
                   <div className="truncate font-mono text-[11px] text-fg3">
                     {c.id.slice(0, 12)}
                   </div>
@@ -219,6 +228,8 @@ export function Containers({
           </div>
         </div>
       )}
+
+      <CreateContainerModal open={createOpen} onClose={() => setCreateOpen(false)} />
 
       <Modal
         open={pendingDelete !== null}

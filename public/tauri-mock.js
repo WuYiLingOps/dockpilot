@@ -54,6 +54,40 @@
       created: now - 3600 * 200,
       ports: [],
     },
+    // ---- compose 项目 myapp-stack 的三个服务容器（部分运行，便于走查状态展示） ----
+    {
+      id: "f6a7b8c9d0e1789012345678901234567890abcd",
+      name: "myapp-stack-web-1",
+      image: "nginx:1.27-alpine",
+      state: "running",
+      status: "Up 20 minutes",
+      created: now - 3600 * 3,
+      ports: [{ ip: "0.0.0.0", private_port: 80, public_port: 8080, proto: "tcp" }],
+      compose_project: "myapp-stack",
+      compose_service: "web",
+    },
+    {
+      id: "a7b8c9d0e1f2789012345678901234567890abcd",
+      name: "myapp-stack-api-1",
+      image: "registry.cn-hangzhou.aliyuncs.com/wylhub/gin-vue3-blog:latest",
+      state: "running",
+      status: "Up 20 minutes",
+      created: now - 3600 * 3,
+      ports: [{ ip: "0.0.0.0", private_port: 8080, public_port: 8081, proto: "tcp" }],
+      compose_project: "myapp-stack",
+      compose_service: "api",
+    },
+    {
+      id: "b8c9d0e1f2a3789012345678901234567890abcd",
+      name: "myapp-stack-db-1",
+      image: "registry.cn-hangzhou.aliyuncs.com/wylhub/postgres:17-alpine",
+      state: "exited",
+      status: "Exited (0) 8 minutes ago",
+      created: now - 3600 * 3,
+      ports: [],
+      compose_project: "myapp-stack",
+      compose_service: "db",
+    },
   ];
 
   const images = [
@@ -93,6 +127,104 @@
     terminal_shell: "bash",
     mirror_custom: ["https://docker.example.dev"],
   };
+
+  // ---- 编排（docker compose）----
+  const composeProjectDir = (name) => `/home/user/${name}`;
+
+  /** 从容器数组实时聚合 compose 项目，与真实后端的标签分组口径一致 */
+  function composeProjects() {
+    const byProject = new Map();
+    for (const c of containers) {
+      if (!c.compose_project) continue;
+      if (!byProject.has(c.compose_project)) {
+        byProject.set(c.compose_project, {
+          name: c.compose_project,
+          working_dir: composeProjectDir(c.compose_project),
+          config_files: [`${composeProjectDir(c.compose_project)}/compose.yaml`],
+          services: [],
+          running_count: 0,
+          total_count: 0,
+        });
+      }
+      const p = byProject.get(c.compose_project);
+      p.services.push({
+        name: c.compose_service ?? c.name,
+        container_id: c.id,
+        state: c.state,
+        status: c.status,
+        image: c.image,
+        ports: c.ports,
+      });
+      p.total_count++;
+      if (c.state === "running") p.running_count++;
+    }
+    return [...byProject.values()];
+  }
+
+  const composeYamlSample = `services:
+  web:
+    image: nginx:1.27-alpine
+    ports:
+      - "8080:80"
+    depends_on:
+      - api
+  api:
+    image: registry.cn-hangzhou.aliyuncs.com/wylhub/gin-vue3-blog:latest
+    environment:
+      DATABASE_URL: postgres://app:secret@db:5432/app
+  db:
+    image: registry.cn-hangzhou.aliyuncs.com/wylhub/postgres:17-alpine
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:
+`;
+
+  /** 模拟一次 compose CLI 流式输出，结束时按动作翻转 mock 容器状态 */
+  function fakeComposeStream(args, project, action) {
+    const sid = `sid-compose-${Math.random().toString(36).slice(2, 8)}`;
+    streams[sid] = args;
+    const verb = { up: "Up", up_build: "Up", restart: "Restart", stop: "Stop", down: "Down" }[action] ?? action;
+    const steps = [
+      { stream: "out", data: `# Running with docker compose (mock)`, code: null, error: null },
+      { stream: "out", data: `[+] ${verb} 3/3`, code: null, error: null },
+      { stream: "out", data: ` ✔ Container ${project}-web-1  ${verb === "Down" ? "Removed" : "Started"}`, code: null, error: null },
+      { stream: "out", data: ` ✔ Container ${project}-api-1  ${verb === "Down" ? "Removed" : "Started"}`, code: null, error: null },
+    ];
+    let i = 0;
+    const timer = setInterval(() => {
+      if (streams[sid] === undefined) return clearInterval(timer);
+      if (i < steps.length) {
+        push(args.onOutput, steps[i++]);
+        return;
+      }
+      clearInterval(timer);
+      delete streams[sid];
+      // 模拟动作效果（action 与后端 build_action_args 的小写枚举一致）
+      if (verb === "Up" || verb === "Restart") {
+        for (const c of containers) {
+          if (c.compose_project === project) {
+            c.state = "running";
+            c.status = "Up Less than a second";
+          }
+        }
+      } else if (verb === "Stop") {
+        for (const c of containers) {
+          if (c.compose_project === project && c.state === "running") {
+            c.state = "exited";
+            c.status = "Exited (0) 1 second ago";
+          }
+        }
+      } else if (verb === "Down") {
+        for (let j = containers.length - 1; j >= 0; j--) {
+          if (containers[j].compose_project === project) containers.splice(j, 1);
+        }
+      }
+      push(args.onOutput, { stream: "exit", data: "0", code: 0, error: null });
+    }, 350);
+    return Promise.resolve(sid);
+  }
 
   const daemonConfig = {
     exists: true,
@@ -156,6 +288,37 @@
           return Promise.resolve(info);
         case "list_containers":
           return Promise.resolve(containers);
+        case "create_container": {
+          const spec = args.spec ?? {};
+          const id =
+            (spec.image || "created").replace(/[^a-z0-9]/gi, "").slice(0, 10) +
+            Date.now().toString(16) +
+            "0".repeat(64);
+          containers.push({
+            id: id.slice(0, 64),
+            name: spec.name || `auto-${Math.random().toString(36).slice(2, 8)}`,
+            image: spec.image,
+            state: "running",
+            status: "Up Less than a second",
+            created: Math.floor(Date.now() / 1000),
+            ports: (spec.ports ?? []).map((p) => ({
+              ip: "0.0.0.0",
+              private_port: p.container,
+              public_port: p.host,
+              proto: p.proto ?? "tcp",
+            })),
+            compose_project: null,
+            compose_service: null,
+          });
+          return Promise.resolve(id.slice(0, 64));
+        }
+        case "list_networks":
+          return Promise.resolve([
+            { id: "net-bridge000000000000000000000000000000000000000000000", name: "bridge", driver: "bridge" },
+            { id: "net-compose00000000000000000000000000000000000000000000", name: "myapp-stack_default", driver: "bridge" },
+            { id: "net-host000000000000000000000000000000000000000000000000", name: "host", driver: "host" },
+            { id: "net-none000000000000000000000000000000000000000000000000", name: "none", driver: "null" },
+          ]);
         case "list_images":
           return Promise.resolve(images);
         case "container_action":
@@ -212,7 +375,12 @@
         }
         case "cancel_stream": {
           const sid = args.streamId;
+          const st = streams[sid];
           delete streams[sid];
+          // compose 流被取消时补发终止消息，让前端把运行态收尾
+          if (st?.onOutput) {
+            push(st.onOutput, { stream: "exit", data: "", code: null, error: "操作已取消" });
+          }
           return Promise.resolve();
         }
         case "exec_input":
@@ -241,6 +409,23 @@
           );
         case "disk_usage":
           return Promise.resolve(diskUsage);
+
+        // ---- 编排（docker compose）----
+        case "list_compose_projects":
+          return Promise.resolve(composeProjects());
+        case "compose_cli_info":
+          return Promise.resolve({ available: true, version: "v5.5.0", source: "plugin" });
+        case "compose_action":
+          return fakeComposeStream(args, args.project, args.action);
+        case "compose_deploy":
+          return fakeComposeStream(args, args.projectName || "myapp", "Up");
+        case "read_compose_file":
+          return Promise.resolve(composeYamlSample);
+        case "write_compose_file":
+          return new Promise((resolve) => setTimeout(resolve, 400));
+        case "plugin:dialog|open":
+          return Promise.resolve("/home/user/myapp-stack/compose.yaml");
+
         case "cleanup":
           return new Promise((resolve) =>
             setTimeout(() => {

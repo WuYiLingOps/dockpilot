@@ -1,15 +1,22 @@
 import { invoke, Channel } from "@tauri-apps/api/core";
 import type {
   ContainerDto,
+  ContainerSpec,
   DockerEventDto,
   DockerInfoDto,
   ImageDto,
   LogChunk,
+  NetworkDto,
   PullProgress,
   StatsTick,
 } from "../types/docker";
 import type { AppSettings } from "../types/settings";
 import type { CleanupResultDto, DaemonConfigDto, DiskUsageDto } from "../types/daemon";
+import type {
+  ComposeCliInfoDto,
+  ComposeOutput,
+  ComposeProjectDto,
+} from "../types/compose";
 
 type Unsubscribe = () => void;
 
@@ -29,6 +36,12 @@ export const api = {
 
   containerAction: (id: string, action: string, force = false) =>
     invoke<void>("container_action", { id, action, force }),
+
+  /** 创建并启动容器；镜像不存在时返回明确错误（可先 pullImage） */
+  createContainer: (spec: ContainerSpec) =>
+    invoke<string>("create_container", { spec }),
+
+  listNetworks: () => invoke<NetworkDto[]>("list_networks"),
 
   listImages: () => invoke<ImageDto[]>("list_images"),
 
@@ -106,4 +119,58 @@ export const api = {
   diskUsage: () => invoke<DiskUsageDto>("disk_usage"),
 
   cleanup: (kinds: string[]) => invoke<CleanupResultDto>("cleanup", { kinds }),
+
+  // ---- 编排（docker compose）----
+
+  listComposeProjects: () => invoke<ComposeProjectDto[]>("list_compose_projects"),
+
+  composeCliInfo: () => invoke<ComposeCliInfoDto>("compose_cli_info"),
+
+  /** 对项目执行操作，输出经 Channel 流式推送；返回取消函数（会 kill 子进程） */
+  composeAction: (
+    project: string,
+    action: string,
+    opts: { removeVolumes?: boolean; removeImages?: boolean; services?: string[] },
+    onOutput: (o: ComposeOutput) => void,
+  ): Unsubscribe => {
+    const ch = new Channel<ComposeOutput>();
+    ch.onmessage = onOutput;
+    return withCancel(
+      invoke<string>("compose_action", {
+        project,
+        action,
+        removeVolumes: opts.removeVolumes ?? false,
+        removeImages: opts.removeImages ?? false,
+        services: opts.services ?? [],
+        onOutput: ch,
+      }),
+    );
+  },
+
+  /** 部署新项目：选择 compose 文件后执行 up -d */
+  composeDeploy: (
+    files: string[],
+    projectDir: string,
+    projectName: string,
+    onOutput: (o: ComposeOutput) => void,
+  ): Unsubscribe => {
+    const ch = new Channel<ComposeOutput>();
+    ch.onmessage = onOutput;
+    return withCancel(
+      invoke<string>("compose_deploy", {
+        files,
+        projectDir,
+        projectName,
+        onOutput: ch,
+      }),
+    );
+  },
+
+  /** 只读查看 compose 文件内容 */
+  readComposeFile: (path: string) =>
+    invoke<string>("read_compose_file", { path }),
+
+  /** 保存 compose 文件（保存前做语法预检并自动备份原文件为 .bak） */
+  writeComposeFile: (path: string, content: string) =>
+    invoke<void>("write_compose_file", { path, content }),
 };

@@ -6,6 +6,8 @@ import { Button } from "./components/ui";
 import { Containers } from "./pages/Containers";
 import { ContainerDetail } from "./pages/ContainerDetail";
 import { Images } from "./pages/Images";
+import { Compose } from "./pages/Compose";
+import { ComposeDetail } from "./pages/ComposeDetail";
 import { Cleanup } from "./pages/Cleanup";
 import { Settings } from "./pages/Settings";
 import { api } from "./lib/api";
@@ -43,6 +45,7 @@ function DisconnectedOverlay({
 export default function App() {
   const [page, setPage] = useState<PageKey>("containers");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedProject, setSelectedProject] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const qc = useQueryClient();
 
@@ -54,6 +57,7 @@ export default function App() {
         if (ev.kind === "container") {
           void qc.invalidateQueries({ queryKey: ["containers"] });
           void qc.invalidateQueries({ queryKey: ["dockerInfo"] });
+          void qc.invalidateQueries({ queryKey: ["composeProjects"] });
         }
         if (ev.kind === "image") {
           void qc.invalidateQueries({ queryKey: ["images"] });
@@ -80,17 +84,33 @@ export default function App() {
         onChange={(p) => {
           setPage(p);
           setSelectedId(null);
+          setSelectedProject(null);
         }}
-        search={search}
-        onSearch={setSearch}
       />
       <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
-        {page === "containers" && selectedId ? (
+        {selectedId && (page === "containers" || page === "compose") ? (
           <ContainerDetail id={selectedId} onBack={() => setSelectedId(null)} />
         ) : page === "containers" ? (
-          <Containers onOpen={setSelectedId} search={search} />
+          <Containers
+            onOpen={setSelectedId}
+            onOpenProject={(name) => {
+              setPage("compose");
+              setSelectedId(null);
+              setSelectedProject(name);
+            }}
+            search={search}
+            onSearch={setSearch}
+          />
         ) : page === "images" ? (
-          <Images search={search} />
+          <Images search={search} onSearch={setSearch} />
+        ) : page === "compose" && selectedProject ? (
+          <ComposeDetail
+            project={selectedProject}
+            onBack={() => setSelectedProject(null)}
+            onOpenContainer={setSelectedId}
+          />
+        ) : page === "compose" ? (
+          <Compose onOpen={setSelectedProject} search={search} onSearch={setSearch} />
         ) : page === "cleanup" ? (
           <Cleanup />
         ) : (

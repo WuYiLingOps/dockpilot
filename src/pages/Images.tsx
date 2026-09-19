@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Download,
   Image as ImageIcon,
+  Play,
   RefreshCw,
   Trash2,
 } from "lucide-react";
@@ -17,6 +18,7 @@ import {
   timeAgo,
 } from "../lib/format";
 import type { ImageDto } from "../types/docker";
+import { CreateContainerModal } from "../components/containers/CreateContainerModal";
 import {
   Button,
   Checkbox,
@@ -26,6 +28,7 @@ import {
   Input,
   Modal,
   PageHeader,
+  SearchInput,
   Select,
   Spinner,
 } from "../components/ui";
@@ -33,11 +36,18 @@ import {
 const GRID =
   "grid grid-cols-[minmax(220px,1.8fr)_130px_110px_110px_96px] items-center gap-x-3";
 
-export function Images({ search }: { search: string }) {
+export function Images({
+  search,
+  onSearch,
+}: {
+  search: string;
+  onSearch: (v: string) => void;
+}) {
   const qc = useQueryClient();
   const [pendingDelete, setPendingDelete] = useState<ImageDto | null>(null);
   const [forceDelete, setForceDelete] = useState(false);
   const [pullOpen, setPullOpen] = useState(false);
+  const [runImage, setRunImage] = useState<string | null>(null);
   const [groupFilter, setGroupFilter] = useState("");
   const { data: settings } = useSettings();
 
@@ -86,6 +96,7 @@ export function Images({ search }: { search: string }) {
   return (
     <>
       <PageHeader title="镜像" desc={`${list.length} 个本地镜像`}>
+        <SearchInput value={search} onChange={onSearch} className="w-44" />
         <Select
           value={groupFilter}
           onChange={(e) => setGroupFilter(e.target.value)}
@@ -167,6 +178,17 @@ export function Images({ search }: { search: string }) {
                   <div className="text-[12px] text-fg3">{timeAgo(img.created)}</div>
                   <div className="flex items-center justify-end opacity-0 transition-opacity duration-150 group-hover:opacity-100">
                     <IconButton
+                      title={
+                        img.tags.length === 0
+                          ? "该镜像没有标签，无法按名运行"
+                          : `用 ${main} 创建并运行容器`
+                      }
+                      disabled={img.tags.length === 0}
+                      onClick={() => setRunImage(main)}
+                    >
+                      <Play size={14} />
+                    </IconButton>
+                    <IconButton
                       title="删除"
                       disabled={remove.isPending}
                       className="hover:bg-err/10 hover:text-err"
@@ -223,6 +245,12 @@ export function Images({ search }: { search: string }) {
       </Modal>
 
       <PullModal open={pullOpen} onClose={() => setPullOpen(false)} />
+
+      <CreateContainerModal
+        open={runImage !== null}
+        initialImage={runImage ?? ""}
+        onClose={() => setRunImage(null)}
+      />
     </>
   );
 }

@@ -1,4 +1,4 @@
-import { ChevronDown, X } from "lucide-react";
+import { ChevronDown, Search, X } from "lucide-react";
 import type {
   ButtonHTMLAttributes,
   InputHTMLAttributes,
@@ -7,6 +7,7 @@ import type {
 } from "react";
 import { useEffect } from "react";
 import { withDragRegion } from "../lib/drag";
+import type { PortDto } from "../types/docker";
 
 export function cn(...parts: Array<string | false | null | undefined>): string {
   return parts.filter(Boolean).join(" ");
@@ -147,6 +148,25 @@ export function Badge({
   );
 }
 
+/** 端口徽章：最多展示 2 个，多余合并为 +N */
+export function PortChips({ ports }: { ports: PortDto[] }) {
+  if (ports.length === 0) return <span className="text-fg3">—</span>;
+  const chips = ports.slice(0, 2).map((p, i) => (
+    <Badge key={`${p.public_port}-${p.private_port}-${i}`}>
+      <span className="font-mono">
+        {p.public_port != null ? `${p.public_port}→${p.private_port}` : p.private_port}
+      </span>
+    </Badge>
+  ));
+  const more = ports.length > 2 ? <span className="text-[11px] text-fg3">+{ports.length - 2}</span> : null;
+  return (
+    <div className="flex items-center gap-1" title={ports.map((p) => (p.public_port != null ? `${p.public_port}→${p.private_port}` : `${p.private_port}`)).join("  ")}>
+      {chips}
+      {more}
+    </div>
+  );
+}
+
 /* ---------------------------------------------------------------- */
 /* 表单控件                                                          */
 /* ---------------------------------------------------------------- */
@@ -160,6 +180,49 @@ export function Input({ className, ...props }: InputHTMLAttributes<HTMLInputElem
       )}
       {...props}
     />
+  );
+}
+
+/** 列表页统一搜索框：页头使用，输入即过滤当前列表 */
+export function SearchInput({
+  value,
+  onChange,
+  placeholder = "搜索",
+  className,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+  className?: string;
+}) {
+  return (
+    <div className={cn("relative", className)}>
+      <Search
+        size={13}
+        className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fg3"
+      />
+      <input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        data-no-drag
+        className={cn(
+          "h-8 w-full rounded-ctl border border-edge-strong bg-panel pl-7 pr-7 text-[13px] text-fg outline-none transition-shadow placeholder:text-fg3 focus:border-accent focus:ring-[3px] focus:ring-accent/25",
+          value && "pr-7",
+        )}
+      />
+      {value && (
+        <button
+          type="button"
+          aria-label="清空搜索"
+          data-no-drag
+          onClick={() => onChange("")}
+          className="absolute right-1.5 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-full text-fg3 transition-colors hover:bg-hover hover:text-fg"
+        >
+          <X size={12} />
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -250,12 +313,15 @@ export function Modal({
   onClose,
   children,
   footer,
+  size = "md",
 }: {
   open: boolean;
   title: string;
   onClose: () => void;
   children: ReactNode;
   footer?: ReactNode;
+  /** md：普通确认/输入弹窗；lg：宽表单弹窗（创建容器等） */
+  size?: "md" | "lg";
 }) {
   useEffect(() => {
     if (!open) return;
@@ -273,7 +339,10 @@ export function Modal({
       onClick={onClose}
     >
       <div
-        className="animate-pop w-full max-w-md rounded-xl border border-edge bg-panel p-5 shadow-[var(--app-shadow)]"
+        className={cn(
+          "animate-pop w-full rounded-xl border border-edge bg-panel p-5 shadow-[var(--app-shadow)]",
+          size === "md" ? "max-w-md" : "max-w-2xl",
+        )}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-3 flex items-center justify-between">
