@@ -46,6 +46,42 @@ npm install
 npm run tauri dev
 ```
 
+## 本地测试（不安装 deb）
+
+**直接运行构建产物**（无需安装）：
+
+```bash
+npm run tauri build
+./src-tauri/target/release/dockpilot
+# 调试构建：src-tauri/target/debug/dockpilot（cargo build 产物）
+```
+
+**任务栏图标说明（Wayland 会话）**：Wayland 下任务栏图标靠窗口 app-id 与 `.desktop`
+文件匹配，dev 模式默认没有桌面入口，任务栏会显示通用图标。把调试二进制注册为
+用户级应用即可解决：
+
+```bash
+mkdir -p ~/.local/share/applications
+cat > ~/.local/share/applications/dockpilot-dev.desktop <<'EOF'
+[Desktop Entry]
+Categories=Development;Utility;
+Comment=DockPilot 开发模式（调试二进制）
+Exec=/home/hj/ProjectData/docker-desktop/src-tauri/target/debug/dockpilot
+StartupWMClass=dockpilot
+Icon=/home/hj/ProjectData/docker-desktop/design/app-icon.png
+Name=DockPilot (Dev)
+Terminal=false
+Type=Application
+EOF
+update-desktop-database ~/.local/share/applications
+```
+
+说明：
+
+- `Exec` 与 `Icon` 需按实际仓库路径修改；应用窗口的 app-id 为二进制名 `dockpilot`
+- **安装正式 deb 后请删除该文件**（`rm ~/.local/share/applications/dockpilot-dev.desktop`），
+  避免与安装版（`StartupWMClass=dockpilot`）产生匹配歧义
+
 ## 构建与安装
 
 ```bash
@@ -66,26 +102,32 @@ npm run build        # 前端 tsc + vite 构建
 ## 项目结构
 
 ```
-src-tauri/src/
-├── lib.rs               # 应用入口：状态注册、全局事件监听、命令注册
-├── main.rs
-└── docker/
-    ├── conn.rs          # Docker 连接与统一错误类型
-    ├── dto.rs           # 发送给前端的序列化结构
-    ├── state.rs         # 流取消句柄注册表 + 终端会话表
-    ├── system.rs        # docker_info
-    ├── containers.rs    # 容器列表 / 生命周期操作
-    ├── images.rs        # 镜像列表 / 删除 / 拉取
-    ├── logs.rs          # 日志流
-    ├── stats.rs         # 资源统计流（CPU/内存/网络/块 I/O 换算）
-    ├── exec.rs          # 交互式终端（exec + stdin + resize）
-    └── events.rs        # Docker 事件全局监听与订阅转发
+design/
+├── app-icon.svg              # 图标矢量源文件（舵轮 + 集装箱）
+├── app-icon.png              # 1024px 渲染源图
+└── icon-design-philosophy.md # 图标设计哲学
+src-tauri/
+├── icons/                    # 由 `npx tauri icon design/app-icon.png` 生成
+└── src/
+    ├── lib.rs                # 应用入口：状态注册、全局事件监听、命令注册
+    ├── main.rs
+    └── docker/
+        ├── conn.rs           # Docker 连接与统一错误类型
+        ├── dto.rs            # 发送给前端的序列化结构
+        ├── state.rs          # 流取消句柄注册表 + 终端会话表
+        ├── system.rs         # docker_info
+        ├── containers.rs     # 容器列表 / 生命周期操作
+        ├── images.rs         # 镜像列表 / 删除 / 拉取
+        ├── logs.rs           # 日志流
+        ├── stats.rs          # 资源统计流（CPU/内存/网络/块 I/O 换算）
+        ├── exec.rs           # 交互式终端（exec + stdin + resize）
+        └── events.rs         # Docker 事件全局监听与订阅转发
 src/
-├── components/          # Sidebar、通用 UI 组件
-├── pages/               # 容器 / 镜像 / 日志 / 终端 / 监控五个页面
-├── lib/api.ts           # Tauri invoke 封装（流式命令返回取消函数）
-├── lib/format.ts        # 字节 / 时间 / 端口格式化
-└── types/docker.ts      # 与 Rust DTO 一一对应的 TS 类型
+├── components/               # Sidebar、通用 UI 组件
+├── pages/                    # 容器 / 镜像 / 日志 / 终端 / 监控五个页面
+├── lib/api.ts                # Tauri invoke 封装（流式命令返回取消函数）
+├── lib/format.ts             # 字节 / 时间 / 端口格式化
+└── types/docker.ts           # 与 Rust DTO 一一对应的 TS 类型
 ```
 
 ## 已知说明
