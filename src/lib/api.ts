@@ -8,9 +8,12 @@ import type {
   ImageDto,
   LogChunk,
   NetworkDto,
+  NetworkSpec,
   PullProgress,
   StatsTick,
   SystemDfDto,
+  VolumeDto,
+  VolumeSpec,
 } from "../types/docker";
 import type { AppSettings } from "../types/settings";
 import type { CleanupResultDto, DaemonConfigDto, DiskUsageDto } from "../types/daemon";
@@ -50,6 +53,23 @@ export const api = {
     invoke<string>("create_container", { spec }),
 
   listNetworks: () => invoke<NetworkDto[]>("list_networks"),
+
+  createNetwork: (spec: NetworkSpec) => invoke<string>("create_network", { spec }),
+
+  removeNetwork: (name: string) => invoke<void>("remove_network", { name }),
+
+  connectNetwork: (network: string, container: string) =>
+    invoke<void>("connect_network", { network, container }),
+
+  disconnectNetwork: (network: string, container: string, force = false) =>
+    invoke<void>("disconnect_network", { network, container, force }),
+
+  listVolumes: () => invoke<VolumeDto[]>("list_volumes"),
+
+  createVolume: (spec: VolumeSpec) => invoke<void>("create_volume", { spec }),
+
+  removeVolume: (name: string, force = false) =>
+    invoke<void>("remove_volume", { name, force }),
 
   listImages: () => invoke<ImageDto[]>("list_images"),
 
