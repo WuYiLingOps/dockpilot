@@ -248,10 +248,95 @@ volumes:
     dangling_images: { count: 3, size: 88_500_000 },
     unused_images: { count: 4, size: 679_800_000 },
     stopped_containers: { count: 1, size: 0 },
-    unused_volumes: { count: 2, size: 214_000_000 },
-    build_cache: { count: 7, size: 512_000_000 },
-    total_reclaimable: 679_800_000 + 214_000_000 + 512_000_000,
+    unused_volumes: { count: 2, size: 214_400_000 },
+    build_cache: { count: 2, size: 166_210_000 },
+    total_reclaimable: 679_800_000 + 214_400_000 + 166_210_000,
   };
+
+  // ---- 存储和网络：卷 / 网络 / 构建缓存种子数据 ----
+  const iso = (unixSecs) => new Date(unixSecs * 1000).toISOString();
+
+  const volumes = [
+    { name: "pgdata", driver: "local", scope: "local", mountpoint: "/var/lib/docker/volumes/pgdata/_data", created: iso(now - 86400 * 30), size: 28.2 * 1024 * 1024, ref_count: 2, in_use: true, used_by: ["pg-prod", "myapp-stack-db-1"], labels: [] },
+    { name: "nexus-data", driver: "local", scope: "local", mountpoint: "/var/lib/docker/volumes/nexus-data/_data", created: iso(now - 86400 * 60), size: 5.1 * 1024 * 1024, ref_count: 1, in_use: true, used_by: ["nexus3"], labels: [] },
+    { name: "jellyfin-config", driver: "local", scope: "local", mountpoint: "/var/lib/docker/volumes/jellyfin-config/_data", created: iso(now - 86400 * 120), size: 2.17 * 1024 * 1024, ref_count: 1, in_use: true, used_by: ["jellyfin"], labels: [] },
+    { name: "backup-tmp", driver: "local", scope: "local", mountpoint: "/var/lib/docker/volumes/backup-tmp/_data", created: iso(now - 86400 * 9), size: 187 * 1024 * 1024, ref_count: 0, in_use: false, used_by: [], labels: [{ key: "dockpilot.demo", value: "unused" }] },
+    { name: "old-cache", driver: "local", scope: "local", mountpoint: "/var/lib/docker/volumes/old-cache/_data", created: iso(now - 86400 * 45), size: 27.4 * 1024 * 1024, ref_count: 0, in_use: false, used_by: [], labels: [] },
+  ];
+
+  /** 生成网络的已连接容器明细（仅运行中的容器会挂在网络端点上） */
+  const netMember = (ipBase, names) =>
+    containers
+      .filter((c) => names.includes(c.name) && c.state === "running")
+      .map((c, i) => ({
+        name: c.name,
+        id: c.id,
+        ipv4: `${ipBase}.0.${2 + i}/16`,
+        mac: `02:42:ac:${Number(ipBase.split(".")[1]).toString(16).padStart(2, "0")}:00:${(2 + i).toString(16).padStart(2, "0")}`,
+      }));
+
+  const networks = [
+    {
+      id: "f1e2d3c4b5a6" + "0".repeat(52),
+      name: "bridge",
+      driver: "bridge",
+      scope: "local",
+      internal: false,
+      attachable: false,
+      enable_ipv6: false,
+      created: iso(now - 86400 * 90),
+      subnet: "172.17.0.0/16",
+      gateway: "172.17.0.1",
+      built_in: true,
+      labels: [],
+      containers: netMember("172.17", ["redis-prod", "pg-prod", "nexus3", "jellyfin"]),
+    },
+    {
+      id: "a9b8c7d6e5f4" + "0".repeat(52),
+      name: "host",
+      driver: "host",
+      scope: "local",
+      internal: false,
+      attachable: false,
+      enable_ipv6: false,
+      created: iso(now - 86400 * 90),
+      subnet: null,
+      gateway: null,
+      built_in: true,
+      labels: [],
+      containers: [],
+    },
+    {
+      id: "102030405060" + "0".repeat(52),
+      name: "none",
+      driver: "null",
+      scope: "local",
+      internal: false,
+      attachable: false,
+      enable_ipv6: false,
+      created: iso(now - 86400 * 90),
+      subnet: null,
+      gateway: null,
+      built_in: true,
+      labels: [],
+      containers: [],
+    },
+    {
+      id: "c0ffee00dead" + "0".repeat(52),
+      name: "myapp-stack_default",
+      driver: "bridge",
+      scope: "local",
+      internal: false,
+      attachable: false,
+      enable_ipv6: false,
+      created: iso(now - 86400 * 3),
+      subnet: "172.18.0.0/16",
+      gateway: "172.18.0.1",
+      built_in: false,
+      labels: [{ key: "com.docker.compose.project", value: "myapp-stack" }],
+      containers: netMember("172.18", ["myapp-stack-web-1", "myapp-stack-api-1"]),
+    },
+  ];
 
   // ---- 系统概览：host_stats（累计计数器每次采样递增）与 system_df ----
   let hostTick = 0;
@@ -284,8 +369,8 @@ volumes:
     images_count: images.length,
     containers_size: 2.59 * 1024 * 1024 * 1024,
     containers_count: containers.length,
-    volumes_size: 35.47 * 1024 * 1024,
-    volumes_count: 3,
+    volumes_size: volumes.reduce((a, v) => a + v.size, 0),
+    volumes_count: volumes.length,
     build_cache_size: 551.21 * 1024 * 1024,
     containers: [
       { name: "jellyfin", size: 1.02 * 1024 * 1024 * 1024 },
@@ -300,10 +385,12 @@ volumes:
       name: i.tags[0] ?? "<none>:<none>",
       size: i.size,
     })),
-    volumes: [
-      { name: "pgdata", size: 28.2 * 1024 * 1024 },
-      { name: "nexus-data", size: 5.1 * 1024 * 1024 },
-      { name: "jellyfin-config", size: 2.17 * 1024 * 1024 },
+    volumes: volumes.map((v) => ({ name: v.name, size: v.size })),
+    build_cache: [
+      { id: "b1c2d3e4f5a6789012345678901234567890abcd0000000000000000000000", typ: "regular", description: "goharbor v2.13.2 构建层", size: 289_000_000, created_at: iso(now - 86400 * 2), in_use: true, shared: true, usage_count: 4 },
+      { id: "c2d3e4f5a6b7789012345678901234567890abcd0000000000000000000000", typ: "regular", description: "nginx:1.27 alpine layers", size: 96_000_000, created_at: iso(now - 86400 * 5), in_use: true, shared: true, usage_count: 2 },
+      { id: "d3e4f5a6b7c8789012345678901234567890abcd0000000000000000000000", typ: "exec.cachemount", description: "apt 缓存挂载", size: 121_000_000, created_at: iso(now - 86400 * 11), in_use: false, shared: false, usage_count: 1 },
+      { id: "e4f5a6b7c8d9789012345678901234567890abcd0000000000000000000000", typ: "source", description: "本地源码上下文", size: 45_210_000, created_at: iso(now - 86400 * 20), in_use: false, shared: false, usage_count: 0 },
     ],
   };
 
@@ -378,12 +465,102 @@ volumes:
           return Promise.resolve(id.slice(0, 64));
         }
         case "list_networks":
-          return Promise.resolve([
-            { id: "net-bridge000000000000000000000000000000000000000000000", name: "bridge", driver: "bridge" },
-            { id: "net-compose00000000000000000000000000000000000000000000", name: "myapp-stack_default", driver: "bridge" },
-            { id: "net-host000000000000000000000000000000000000000000000000", name: "host", driver: "host" },
-            { id: "net-none000000000000000000000000000000000000000000000000", name: "none", driver: "null" },
-          ]);
+          return Promise.resolve(
+            [...networks].sort((a, b) => a.name.localeCompare(b.name)),
+          );
+        case "list_volumes":
+          return Promise.resolve(volumes);
+        case "create_volume": {
+          const spec = args.spec ?? {};
+          const name = (spec.name ?? "").trim();
+          volumes.unshift({
+            name,
+            driver: spec.driver ?? "local",
+            scope: "local",
+            mountpoint: `/var/lib/docker/volumes/${name}/_data`,
+            created: new Date().toISOString(),
+            size: 0,
+            ref_count: 0,
+            in_use: false,
+            used_by: [],
+            labels: (spec.labels ?? []).map((l) => ({ key: l.key, value: l.value })),
+          });
+          return Promise.resolve();
+        }
+        case "remove_volume": {
+          const v = volumes.find((x) => x.name === args.name);
+          if (!v) return Promise.reject(`卷 ${args.name} 不存在`);
+          if (v.used_by.length > 0 && !args.force) {
+            return Promise.reject(
+              `卷 ${args.name} 正在被 ${v.used_by.length} 个容器使用，请先卸载相关容器`,
+            );
+          }
+          volumes.splice(volumes.indexOf(v), 1);
+          return Promise.resolve();
+        }
+        case "create_network": {
+          const spec = args.spec ?? {};
+          const name = (spec.name ?? "").trim();
+          if (networks.some((n) => n.name === name)) {
+            return Promise.reject(`创建网络失败: network with name ${name} already exists`);
+          }
+          const id = "net" + Math.random().toString(16).slice(2, 10) + "0".repeat(52);
+          networks.push({
+            id,
+            name,
+            driver: spec.driver ?? "bridge",
+            scope: "local",
+            internal: !!spec.internal,
+            attachable: !!spec.attachable,
+            enable_ipv6: !!spec.enable_ipv6,
+            created: new Date().toISOString(),
+            subnet: spec.subnet ?? null,
+            gateway: spec.gateway ?? null,
+            built_in: false,
+            labels: (spec.labels ?? []).map((l) => ({ key: l.key, value: l.value })),
+            containers: [],
+          });
+          return Promise.resolve(id);
+        }
+        case "remove_network": {
+          if (["bridge", "host", "none"].includes(args.name)) {
+            return Promise.reject("内置网络不可删除");
+          }
+          const idx = networks.findIndex((n) => n.name === args.name);
+          if (idx === -1) return Promise.reject(`网络 ${args.name} 不存在`);
+          if (networks[idx].containers.length > 0) {
+            return Promise.reject(
+              `删除网络失败: 网络 ${args.name} 仍有活跃端点，请先断开容器`,
+            );
+          }
+          networks.splice(idx, 1);
+          return Promise.resolve();
+        }
+        case "connect_network": {
+          const net = networks.find((n) => n.name === args.network);
+          const c = containers.find(
+            (x) => x.name === args.container || x.id === args.container,
+          );
+          if (!net || !c) return Promise.reject("连接网络失败: 网络或容器不存在");
+          if (net.containers.some((x) => x.name === c.name)) {
+            return Promise.reject(`连接网络失败: 容器 ${c.name} 已在该网络中`);
+          }
+          net.containers.push({
+            name: c.name,
+            id: c.id,
+            ipv4: "172.20.0.9/16",
+            mac: "02:42:ac:14:00:09",
+          });
+          return Promise.resolve();
+        }
+        case "disconnect_network": {
+          const net = networks.find((n) => n.name === args.network);
+          if (!net) return Promise.reject("断开网络失败: 网络不存在");
+          net.containers = net.containers.filter(
+            (x) => x.name !== args.container && x.id !== args.container,
+          );
+          return Promise.resolve();
+        }
         case "list_images":
           return Promise.resolve(images);
         case "container_action":
