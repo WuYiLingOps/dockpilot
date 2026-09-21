@@ -10,6 +10,7 @@ pub mod networks;
 pub mod state;
 pub mod stats;
 pub mod system;
+pub mod volumes;
 
 #[cfg(test)]
 mod tests {
@@ -158,5 +159,106 @@ mod tests {
         containers::container_action(id, "remove".into(), true)
             .await
             .expect("清理测试容器应成功");
+    }
+
+    /// 依赖本机 Docker daemon 的存储/网络列表集成测试：
+    /// 验证卷列表（df 占用合并 + 挂载明细）与网络列表（inspect 连接明细）查询路径可用
+    #[tokio::test]
+    async fn storage_and_network_lists() {
+        let volumes = volumes::list_volumes().await.expect("list_volumes 应成功");
+        for v in &volumes {
+            assert!(!v.name.is_empty(), "卷名不应为空");
+            assert!(!v.mountpoint.is_empty(), "卷挂载点不应为空");
+            assert_eq!(v.in_use, v.ref_count > 0, "in_use 应与 ref_count 口径一致");
+            assert!(
+                v.used_by.len() <= v.ref_count as usize,
+                "挂载明细容器数不应超过 ref_count"
+            );
+        }
+
+        let networks = networks::list_networks().await.expect("list_networks 应成功");
+        let bridge = networks
+            .iter()
+            .find(|n| n.name == "bridge")
+            .expect("默认 bridge 网络应存在");
+        assert!(bridge.built_in, "bridge 应标记为内置网络");
+        assert_eq!(bridge.driver, "bridge");
+        for n in &networks {
+            assert_eq!(
+                n.built_in,
+                matches!(n.name.as_str(), "bridge" | "host" | "none"),
+                "内置标记应与网络名一致"
+            );
+        }
+    }
+
+    /// 依赖本机 Docker daemon 的卷/网络创建回归测试：
+    /// 创建 → 出现在列表 → 删除，均走命令层完整路径
+    #[tokio::test]
+    async fn volume_and_network_create_remove_roundtrip() {
+        // 幂等：清理上次失败遗留的同名资源
+        if let Ok(list) = volumes::list_volumes().await {
+            for v in list.iter().filter(|v| v.name == "dockpilot-it-vol") {
+                let _ = volumes::remove_volume(v.name.clone(), true).await;
+            }
+        }
+        if let Ok(list) = networks::list_networks().await {
+            for n in list.iter().filter(|n| n.name == "dockpilot-it-net") {
+                let _ = networks::remove_network(n.name.clone()).await;
+            }
+        }
+
+        volumes::create_volume(dto::VolumeCreateSpec {
+            name: "dockpilot-it-vol".into(),
+            driver: None,
+            labels: vec![dto::KeyValueSpec {
+                key: "dockpilot-test".into(),
+                value: "1".into(),
+            }],
+        })
+        .await
+        .expect("创建卷应成功");
+        let volumes = volumes::list_volumes().await.unwrap();
+        let vol = volumes
+            .iter()
+            .find(|v| v.name == "dockpilot-it-vol")
+            .expect("新创建的卷应出现在列表中");
+        assert_eq!(vol.driver, "local");
+        assert!(!vol.in_use, "新建卷不应被引用");
+
+        let net_id = networks::create_network(dto::NetworkCreateSpec {
+            name: "dockpilot-it-net".into(),
+            driver: None,
+            subnet: Some("172.30.77.0/24".into()),
+            gateway: Some("172.30.77.1".into()),
+            internal: false,
+            attachable: true,
+            enable_ipv6: false,
+            labels: vec![],
+        })
+        .await
+        .expect("创建网络应成功");
+        assert!(!net_id.is_empty());
+        let networks = networks::list_networks().await.unwrap();
+        let net = networks
+            .iter()
+            .find(|n| n.name == "dockpilot-it-net")
+            .expect("新创建的网络应出现在列表中");
+        assert_eq!(net.subnet.as_deref(), Some("172.30.77.0/24"), "IPAM 子网应生效");
+        assert_eq!(net.built_in, false);
+        assert_eq!(net.containers.len(), 0, "新网络不应有连接的容器");
+
+        volumes::remove_volume("dockpilot-it-vol".into(), false)
+            .await
+            .expect("删除卷应成功");
+        networks::remove_network("dockpilot-it-net".into())
+            .await
+            .expect("删除网络应成功");
+
+        // 内置网络保护
+        let err = networks::remove_network("bridge".into())
+            .await
+            .expect_err("删除内置网络应被拒绝");
+        assert!(err.contains("内置网络"), "错误信息应说明内置网络不可删除");
     }
 }
