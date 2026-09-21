@@ -9,6 +9,7 @@ import { ContainerDetail } from "./pages/ContainerDetail";
 import { Images } from "./pages/Images";
 import { Compose } from "./pages/Compose";
 import { ComposeDetail } from "./pages/ComposeDetail";
+import { Storage, type StorageTab } from "./pages/Storage";
 import { Cleanup } from "./pages/Cleanup";
 import { Settings } from "./pages/Settings";
 import { api } from "./lib/api";
@@ -47,10 +48,19 @@ export default function App() {
   const [page, setPage] = useState<PageKey>("overview");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
+  const [storageTab, setStorageTab] = useState<StorageTab>("volumes");
   const [search, setSearch] = useState("");
   const qc = useQueryClient();
 
   useSettingsThemeSync();
+
+  // 带可选子 Tab 的导航：Overview 的统计卡片跳到「存储和网络」对应 Tab
+  const navigate = (p: PageKey, tab?: string) => {
+    setPage(p);
+    if (p === "storage" && (tab === "volumes" || tab === "networks" || tab === "usage")) {
+      setStorageTab(tab);
+    }
+  };
 
   useEffect(
     () =>
@@ -63,6 +73,12 @@ export default function App() {
         if (ev.kind === "image") {
           void qc.invalidateQueries({ queryKey: ["images"] });
           void qc.invalidateQueries({ queryKey: ["dockerInfo"] });
+        }
+        if (ev.kind === "volume") {
+          void qc.invalidateQueries({ queryKey: ["volumes"] });
+        }
+        if (ev.kind === "network") {
+          void qc.invalidateQueries({ queryKey: ["networks"] });
         }
         if (ev.kind === "volume" || ev.kind === "image") {
           void qc.invalidateQueries({ queryKey: ["diskUsage"] });
@@ -87,13 +103,14 @@ export default function App() {
           setPage(p);
           setSelectedId(null);
           setSelectedProject(null);
+          if (p === "storage") setStorageTab("volumes");
         }}
       />
       <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
         {selectedId && (page === "containers" || page === "compose") ? (
           <ContainerDetail id={selectedId} onBack={() => setSelectedId(null)} />
         ) : page === "overview" ? (
-          <Overview onNavigate={setPage} />
+          <Overview onNavigate={navigate} />
         ) : page === "containers" ? (
           <Containers
             onOpen={setSelectedId}
@@ -115,6 +132,14 @@ export default function App() {
           />
         ) : page === "compose" ? (
           <Compose onOpen={setSelectedProject} search={search} onSearch={setSearch} />
+        ) : page === "storage" ? (
+          <Storage
+            tab={storageTab}
+            onTab={setStorageTab}
+            search={search}
+            onSearch={setSearch}
+            onOpenCleanup={() => setPage("cleanup")}
+          />
         ) : page === "cleanup" ? (
           <Cleanup />
         ) : (
