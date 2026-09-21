@@ -1,0 +1,44 @@
+name: CI
+
+# push 到 main 与所有 PR：跑后端测试（含依赖 Docker daemon 的集成测试）与前端构建
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Tauri Linux 系统依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: 缓存 Cargo 编译产物
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      # 容器创建回归测试假定本地已有 busybox:stable（与本地开发口径一致）
+      - name: 预拉取测试镜像
+        run: docker pull busybox:stable
+
+      - name: cargo test（含 Docker 集成测试，runner 自带 daemon）
+        working-directory: src-tauri
+        run: cargo test --locked
+
+      - name: 前端构建
+        run: npm run build

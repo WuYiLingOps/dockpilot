@@ -1,0 +1,69 @@
+name: Release
+
+# 推送 v* tag 时自动构建 deb 并发布 GitHub Release；也可在 Actions 页手动触发（仅构建，上传 artifact 不发版）
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write # tauri-action 创建 Release 需要写权限
+
+jobs:
+  release:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      # Tauri v2 Linux 构建的系统依赖（官方 prerequisites）
+      - name: 安装 Tauri Linux 系统依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: 缓存 Cargo 编译产物
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      # 项目惯例三处版本号同步改（package.json / Cargo.toml / tauri.conf.json），
+      # 发版 tag 必须与 tauri.conf.json 一致，避免 Release 与 deb 内版本错位
+      - name: 校验 tag 与版本号一致
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          V=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          [ "v$V" = "${{ github.ref_name }}" ] || {
+            echo "tag ${{ github.ref_name }} 与 tauri.conf.json 的 v$V 不一致，请同步三处版本号后重新打 tag";
+            exit 1;
+          }
+
+      - name: 构建并发布 Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: "DockPilot ${{ github.ref_name }}"
+          releaseBody: "Ubuntu 22.04 / 24.04 的 deb 安装包见下方 Assets（构建于 ubuntu-22.04 runner，兼容 24.04）。"
+          releaseDraft: false
+          prerelease: false
+
+      # 手动触发只做构建验证：产物可在本次运行页面的 Artifacts 下载
+      - name: 上传构建产物
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: DockPilot-deb
+          path: src-tauri/target/release/bundle/deb/*.deb
+          if-no-files-found: error
