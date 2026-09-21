@@ -1,16 +1,32 @@
 import { useQuery } from "@tanstack/react-query";
-import { Boxes, Eraser, Image as ImageIcon, LayoutDashboard, Layers, Settings } from "lucide-react";
+import {
+  Boxes,
+  Eraser,
+  HardDrive,
+  Image as ImageIcon,
+  LayoutDashboard,
+  Layers,
+  Settings,
+} from "lucide-react";
 import { api } from "../lib/api";
 import { SidebarTopBar } from "./TitleBar";
 import { cn, StatusDot } from "./ui";
 
-export type PageKey = "overview" | "containers" | "images" | "compose" | "cleanup" | "settings";
+export type PageKey =
+  | "overview"
+  | "containers"
+  | "images"
+  | "compose"
+  | "storage"
+  | "cleanup"
+  | "settings";
 
 const NAV: { key: PageKey; label: string; icon: typeof Boxes }[] = [
   { key: "overview", label: "系统概览", icon: LayoutDashboard },
   { key: "containers", label: "容器", icon: Boxes },
   { key: "images", label: "镜像", icon: ImageIcon },
   { key: "compose", label: "编排", icon: Layers },
+  { key: "storage", label: "存储和网络", icon: HardDrive },
   { key: "cleanup", label: "空间清理", icon: Eraser },
   { key: "settings", label: "设置", icon: Settings },
 ];
@@ -43,11 +59,17 @@ export function Sidebar({
     queryFn: api.listComposeProjects,
     enabled: page === "compose",
   });
+  const volumes = useQuery({
+    queryKey: ["volumes"],
+    queryFn: api.listVolumes,
+    enabled: page === "storage",
+  });
 
   const counts: Partial<Record<PageKey, number | undefined>> = {
     containers: containers.data?.length,
     images: images.data?.length,
     compose: composeProjects.data?.length,
+    storage: volumes.data?.length,
   };
 
   return (
