@@ -4,7 +4,7 @@ use futures::future::join_all;
 use futures::StreamExt;
 
 use super::conn::{docker, CmdResult};
-use super::dto::{DockerInfoDto, HostStatsDto, NamedSizeDto, SystemDfDto};
+use super::dto::{BuildCacheDto, DockerInfoDto, HostStatsDto, NamedSizeDto, SystemDfDto};
 use super::stats::{block_io, net_io};
 
 fn docker_host() -> String {
@@ -161,7 +161,18 @@ pub async fn system_df() -> CmdResult<SystemDfDto> {
     }
 
     for bc in df.build_cache.iter().flatten() {
-        out.build_cache_size += bc.size.unwrap_or(0).max(0) as u64;
+        let size = bc.size.unwrap_or(0).max(0) as u64;
+        out.build_cache_size += size;
+        out.build_cache.push(BuildCacheDto {
+            id: bc.id.clone().unwrap_or_default(),
+            typ: bc.typ.as_ref().map(|t| t.to_string()).unwrap_or_default(),
+            description: bc.description.clone().unwrap_or_default(),
+            size,
+            created_at: bc.created_at.clone(),
+            in_use: bc.in_use.unwrap_or(false),
+            shared: bc.shared.unwrap_or(false),
+            usage_count: bc.usage_count.unwrap_or(0).max(0) as u64,
+        });
     }
 
     Ok(out)
