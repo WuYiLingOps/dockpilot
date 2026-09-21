@@ -34,7 +34,12 @@ jobs:
           node-version: 20
           cache: npm
 
-      - run: npm ci
+      # 锁文件使用公共 npm registry，避免 CI 依赖本地内网镜像；Tauri CLI 在 devDependencies
+      - name: 安装 Node 依赖
+        run: npm ci --include=dev --registry=https://registry.npmjs.org/
+
+      - name: 校验 Tauri CLI
+        run: npm run tauri -- --version
 
       # 项目惯例三处版本号同步改（package.json / Cargo.toml / tauri.conf.json），
       # 发版 tag 必须与 tauri.conf.json 一致，避免 Release 与 deb 内版本错位
