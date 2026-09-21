@@ -62,6 +62,10 @@ pub async fn docker_info() -> CmdResult<DockerInfoDto> {
 #[tauri::command]
 pub async fn host_stats() -> CmdResult<HostStatsDto> {
     let d = docker().await?;
+    let info = d
+        .info()
+        .await
+        .map_err(|e| format!("获取 Docker 信息失败: {e}"))?;
     let list = d
         .list_containers(Some(ListContainersOptions::<String> {
             all: false,
@@ -80,7 +84,10 @@ pub async fn host_stats() -> CmdResult<HostStatsDto> {
     }))
     .await;
 
-    let mut out = HostStatsDto::default();
+    let mut out = HostStatsDto {
+        online_cpus: info.ncpu.unwrap_or(0).max(1) as u64,
+        ..Default::default()
+    };
     for item in samples.into_iter().flatten() {
         let Ok(s) = item else { continue };
         if let Some(cpu) = &s.cpu_stats {
@@ -90,7 +97,6 @@ pub async fn host_stats() -> CmdResult<HostStatsDto> {
                 .and_then(|u| u.total_usage)
                 .unwrap_or(0);
             out.system_cpu += cpu.system_cpu_usage.unwrap_or(0);
-            out.online_cpus = out.online_cpus.max(cpu.online_cpus.unwrap_or(1) as u64);
         }
         out.mem_used += s.memory_stats.as_ref().and_then(|m| m.usage).unwrap_or(0);
         let (rx, tx) = net_io(&s);
@@ -100,7 +106,6 @@ pub async fn host_stats() -> CmdResult<HostStatsDto> {
         out.block_read += read;
         out.block_write += write;
     }
-    out.online_cpus = out.online_cpus.max(1);
     out.containers_running = list.len() as u64;
     Ok(out)
 }
