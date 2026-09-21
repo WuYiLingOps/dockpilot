@@ -134,11 +134,111 @@ pub struct ContainerCreateSpec {
     pub open_stdin: bool,
 }
 
+// ---------------------------------------------------------------------------
+// 卷/网络创建（前端提交的规格，Deserialize）
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct VolumeCreateSpec {
+    pub name: String,
+    /// 缺省 local
+    #[serde(default)]
+    pub driver: Option<String>,
+    #[serde(default)]
+    pub labels: Vec<KeyValueSpec>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct NetworkCreateSpec {
+    pub name: String,
+    /// 缺省 bridge
+    #[serde(default)]
+    pub driver: Option<String>,
+    /// CIDR（如 172.30.0.0/16）；选填，不填由 daemon 自动分配
+    #[serde(default)]
+    pub subnet: Option<String>,
+    /// CIDR 网关（如 172.30.0.1）；填写子网时可一并指定
+    #[serde(default)]
+    pub gateway: Option<String>,
+    #[serde(default)]
+    pub internal: bool,
+    #[serde(default)]
+    pub attachable: bool,
+    #[serde(default)]
+    pub enable_ipv6: bool,
+    #[serde(default)]
+    pub labels: Vec<KeyValueSpec>,
+}
+
+/// 键值对展示（标签等）
+#[derive(Debug, Clone, Serialize)]
+pub struct KeyValueDto {
+    pub key: String,
+    pub value: String,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct NetworkDto {
     pub id: String,
     pub name: String,
     pub driver: String,
+    /// "local" | "swarm"
+    pub scope: String,
+    pub internal: bool,
+    pub attachable: bool,
+    pub enable_ipv6: bool,
+    /// RFC3339 时间字符串
+    pub created: Option<String>,
+    /// IPAM 首个配置的子网/网关（未自定义时为 None）
+    pub subnet: Option<String>,
+    pub gateway: Option<String>,
+    /// 已连接容器明细（inspect_network 的 containers 字段）
+    pub containers: Vec<NetworkContainerDto>,
+    /// 内置网络（bridge/host/none）不可删除
+    pub built_in: bool,
+    pub labels: Vec<KeyValueDto>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct NetworkContainerDto {
+    pub name: String,
+    pub id: String,
+    pub ipv4: String,
+    pub mac: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct VolumeDto {
+    pub name: String,
+    pub driver: String,
+    /// "local" | "cluster"
+    pub scope: String,
+    pub mountpoint: String,
+    /// RFC3339 时间字符串
+    pub created: Option<String>,
+    /// 占用大小（非 local 驱动不可统计时为 0）
+    pub size: u64,
+    /// 引用该卷的容器数（df ref_count 与容器挂载明细取大者）
+    pub ref_count: u64,
+    pub in_use: bool,
+    /// 使用该卷的容器名（容器列表自带 mounts，无需逐个 inspect）
+    pub used_by: Vec<String>,
+    pub labels: Vec<KeyValueDto>,
+}
+
+/// 构建缓存逐条明细（docker system df 的 build cache 记录）
+#[derive(Debug, Clone, Serialize)]
+pub struct BuildCacheDto {
+    pub id: String,
+    /// "internal" | "frontend" | "source" | "exec.cachemount" | "regular"
+    pub typ: String,
+    pub description: String,
+    pub size: u64,
+    /// RFC3339 时间字符串
+    pub created_at: Option<String>,
+    pub in_use: bool,
+    pub shared: bool,
+    pub usage_count: u64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -248,6 +348,8 @@ pub struct SystemDfDto {
     pub volumes_count: u64,
     /// 构建缓存总量（含使用中）
     pub build_cache_size: u64,
+    /// 构建缓存逐条明细
+    pub build_cache: Vec<BuildCacheDto>,
     pub containers: Vec<NamedSizeDto>,
     pub images: Vec<NamedSizeDto>,
     pub volumes: Vec<NamedSizeDto>,
