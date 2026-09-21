@@ -31,6 +31,13 @@ export function shortId(id: string): string {
   return id ? id.slice(0, 12) : "-";
 }
 
+/** RFC3339 时间字符串（卷/网络/构建缓存的 created 字段）转 unix 秒；无效时返回 0（timeAgo 显示 "-"） */
+export function rfc3339ToUnix(s: string | null | undefined): number {
+  if (!s) return 0;
+  const t = Date.parse(s);
+  return Number.isNaN(t) ? 0 : Math.floor(t / 1000);
+}
+
 /**
  * 依据镜像引用的路径前缀归组（registry/命名空间），用于来源筛选：
  *   goharbor/harbor-core:v2.13.2                          → "goharbor"
