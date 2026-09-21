@@ -30,3 +30,23 @@ fn connect() -> CmdResult<Docker> {
         None => Docker::connect_with_socket_defaults().map_err(err),
     }
 }
+
+/// 卷/网络名称约束：[a-zA-Z0-9][a-zA-Z0-9_.-]*，与 docker CLI 一致；
+/// 提前校验以给出中文可读错误，其余非法值由 daemon 兜底拒绝
+pub(super) fn validate_resource_name(name: &str, label: &str) -> Result<(), String> {
+    let mut chars = name.chars();
+    let valid = match chars.next() {
+        Some(c) => {
+            c.is_ascii_alphanumeric()
+                && chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-'))
+        }
+        None => false,
+    };
+    if valid {
+        Ok(())
+    } else {
+        Err(format!(
+            "{label}名称只能包含字母、数字、下划线、点和中划线，且以字母或数字开头"
+        ))
+    }
+}
