@@ -93,6 +93,8 @@ export interface SystemDfDto {
   volumes_count: number;
   /** 构建缓存总量（含使用中） */
   build_cache_size: number;
+  /** 构建缓存逐条明细 */
+  build_cache: BuildCacheDto[];
   containers: NamedSizeDto[];
   images: NamedSizeDto[];
   volumes: NamedSizeDto[];
@@ -174,8 +176,89 @@ export interface ContainerSpec {
   open_stdin: boolean;
 }
 
+/** 键值对展示（标签等，与 Rust KeyValueDto 对应） */
+export interface KeyValueDto {
+  key: string;
+  value: string;
+}
+
 export interface NetworkDto {
   id: string;
   name: string;
   driver: string;
+  /** "local" | "swarm" */
+  scope: string;
+  internal: boolean;
+  attachable: boolean;
+  enable_ipv6: boolean;
+  /** RFC3339 时间字符串 */
+  created: string | null;
+  /** IPAM 首个配置的子网/网关（未自定义时为 null） */
+  subnet: string | null;
+  gateway: string | null;
+  /** 已连接容器明细 */
+  containers: NetworkContainerDto[];
+  /** 内置网络（bridge/host/none）不可删除 */
+  built_in: boolean;
+  labels: KeyValueDto[];
+}
+
+export interface NetworkContainerDto {
+  name: string;
+  id: string;
+  /** 含 CIDR 后缀（如 172.18.0.2/16） */
+  ipv4: string;
+  mac: string;
+}
+
+export interface VolumeDto {
+  name: string;
+  driver: string;
+  /** "local" | "cluster" */
+  scope: string;
+  mountpoint: string;
+  /** RFC3339 时间字符串 */
+  created: string | null;
+  /** 占用大小（非 local 驱动不可统计时为 0） */
+  size: number;
+  ref_count: number;
+  in_use: boolean;
+  /** 使用该卷的容器名 */
+  used_by: string[];
+  labels: KeyValueDto[];
+}
+
+/** 构建缓存逐条明细 */
+export interface BuildCacheDto {
+  id: string;
+  /** "internal" | "frontend" | "source" | "exec.cachemount" | "regular" */
+  typ: string;
+  description: string;
+  size: number;
+  created_at: string | null;
+  in_use: boolean;
+  shared: boolean;
+  usage_count: number;
+}
+
+// ---- 卷/网络创建（与 Rust VolumeCreateSpec / NetworkCreateSpec 对应）----
+
+export interface VolumeSpec {
+  name: string;
+  /** null 时使用 local */
+  driver: string | null;
+  labels: KeyValueSpec[];
+}
+
+export interface NetworkSpec {
+  name: string;
+  /** null 时使用 bridge */
+  driver: string | null;
+  /** CIDR，null 由 daemon 自动分配 */
+  subnet: string | null;
+  gateway: string | null;
+  internal: boolean;
+  attachable: boolean;
+  enable_ipv6: boolean;
+  labels: KeyValueSpec[];
 }
