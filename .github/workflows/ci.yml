@@ -30,7 +30,9 @@ jobs:
           node-version: 20
           cache: npm
 
-      - run: npm ci
+      # 锁文件使用公共 npm registry，避免 CI 依赖本地内网镜像
+      - name: 安装 Node 依赖
+        run: npm ci --include=dev --registry=https://registry.npmjs.org/
 
       # 容器创建回归测试假定本地已有 busybox:stable（与本地开发口径一致）
       - name: 预拉取测试镜像
