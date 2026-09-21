@@ -125,7 +125,12 @@ function StatCell({
   );
 }
 
-export function Overview({ onNavigate }: { onNavigate: (p: PageKey) => void }) {
+export function Overview({
+  onNavigate,
+}: {
+  /** tab 参数用于跳转「存储和网络」页的对应子 Tab */
+  onNavigate: (p: PageKey, tab?: string) => void;
+}) {
   const info = useQuery({
     queryKey: ["dockerInfo"],
     queryFn: api.dockerInfo,
@@ -388,11 +393,13 @@ export function Overview({ onNavigate }: { onNavigate: (p: PageKey) => void }) {
                     label="存储卷"
                     value={formatBytes(dfd?.volumes_size ?? 0)}
                     sub={`${dfd?.volumes_count ?? 0} 个 · 不含挂载目录`}
+                    onDetail={() => onNavigate("storage", "volumes")}
                   />
                   <StatCell
                     label="网络"
                     value={String(networks.data?.length ?? 0)}
                     sub="自定义与内置网络"
+                    onDetail={() => onNavigate("storage", "networks")}
                   />
                   <StatCell
                     label="主机端口"
