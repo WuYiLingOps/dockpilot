@@ -195,7 +195,14 @@ pub async fn create_container(spec: ContainerCreateSpec) -> CmdResult<String> {
 
     let port_bindings = build_port_bindings(&spec.ports);
     let binds = build_binds(&spec.volumes);
-    let (env, labels) = build_kv_pairs(&spec.env);
+    let (env, mut labels) = build_kv_pairs(&spec.env);
+    // 标签与环境变量共用 KeyValueSpec，但独立提交、不注入容器环境
+    for item in &spec.labels {
+        let key = item.key.trim();
+        if !key.is_empty() {
+            labels.insert(key.to_string(), item.value.clone());
+        }
+    }
     let (memory, nano_cpus) = build_resources(spec.memory_mb, spec.cpus)?;
     let host_config = HostConfig {
         port_bindings: (!port_bindings.is_empty()).then_some(port_bindings),
