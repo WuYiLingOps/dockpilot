@@ -10,6 +10,7 @@ pub mod networks;
 pub mod state;
 pub mod stats;
 pub mod system;
+pub mod tunnel;
 pub mod volumes;
 
 #[cfg(test)]
@@ -260,5 +261,197 @@ mod tests {
             .await
             .expect_err("删除内置网络应被拒绝");
         assert!(err.contains("内置网络"), "错误信息应说明内置网络不可删除");
+    }
+
+    /// 真实远程 SSH 连接回归测试（只读操作，默认忽略）。
+    /// 远程机需已配置本机公钥免密登录，运行方式：
+    /// DOCKERPILOT_REMOTE_SSH=root@10.0.0.115 cargo test --lib -- --ignored remote_ssh
+    #[tokio::test]
+    #[ignore]
+    async fn remote_ssh_tunnel_roundtrip() {
+        use crate::settings::ConnectionProfile;
+
+        let host = std::env::var("DOCKERPILOT_REMOTE_SSH").unwrap_or_else(|_| "root@10.0.0.115".into());
+        let profile = ConnectionProfile {
+            id: "it-remote-ssh".into(),
+            name: "远程集成测试".into(),
+            kind: "ssh".into(),
+            host,
+            ..Default::default()
+        };
+
+        // 走命令层真实路径：init_active → docker()（内部建隧道 + 缓存连接）
+        conn::init_active(profile.clone());
+        let d = conn::docker()
+            .await
+            .expect("经 SSH 隧道连接远程 daemon 应成功");
+
+        let v = d.version().await.expect("远程 version() 应成功");
+        let version = v.version.unwrap_or_default();
+        assert!(!version.is_empty(), "远程版本不应为空");
+        let info = d.info().await.expect("远程 info() 应成功");
+        println!(
+            "远程 daemon: {version}，容器 {:?} 个（运行 {:?} 个）",
+            info.containers, info.containers_running
+        );
+
+        let containers = containers::list_containers(true)
+            .await
+            .expect("经 docker() 的远程容器列表应成功");
+        println!("list_containers 返回 {} 个容器", containers.len());
+
+        // 容器级回归：拉取镜像 → 创建 → exec → 日志 → 统计 → 删除（验证 GUI 核心交互经隧道可用）
+        // 命令层底层即这些 bollard 调用
+        if let Ok(images) = images::list_images().await {
+            let has_busybox = images
+                .iter()
+                .any(|i| i.tags.iter().any(|t| t.starts_with("busybox:")));
+            if !has_busybox {
+                // 拉取进度流（GUI 拉取镜像的底层路径）
+                let mut pull = d.create_image(
+                    Some(bollard::image::CreateImageOptions::<String> {
+                        from_image: "busybox:stable".into(),
+                        ..Default::default()
+                    }),
+                    None,
+                    None,
+                );
+                let mut layers = 0;
+                while let Some(item) = pull.next().await {
+                    match item {
+                        Ok(_) => layers += 1,
+                        Err(e) => panic!("远程拉取 busybox:stable 失败: {e}"),
+                    }
+                }
+                println!("镜像拉取完成，收到 {layers} 条进度事件");
+            }
+        }
+        let rt_id = containers::create_container(dto::ContainerCreateSpec {
+            name: Some("dockpilot-it-remote".into()),
+            image: "busybox:stable".into(),
+            ports: vec![],
+            volumes: vec![],
+            env: vec![],
+            labels: vec![],
+            restart_policy: None,
+            command: Some("sleep 60".into()),
+            workdir: None,
+            network: None,
+            hostname: None,
+            memory_mb: None,
+            cpus: None,
+            auto_remove: false,
+            privileged: false,
+            tty: false,
+            open_stdin: false,
+        })
+        .await
+        .expect("远程创建测试容器应成功（需远程可拉取 busybox:stable）");
+
+        // exec：容器内执行 echo，输出应经隧道返回
+        let exec = d
+            .create_exec(
+                &rt_id,
+                bollard::exec::CreateExecOptions {
+                    attach_stdout: Some(true),
+                    cmd: Some(vec!["echo", "tunnel-exec-ok"]),
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("远程 exec_create 应成功");
+        use bollard::exec::StartExecResults;
+        use futures::{future, StreamExt};
+        let started = d
+            .start_exec(&exec.id, None)
+            .await
+            .expect("远程 start_exec 应成功");
+        let mut exec_output = String::new();
+        if let StartExecResults::Attached { mut output, .. } = started {
+            while let Some(item) = output.next().await {
+                match item {
+                    Ok(bollard::container::LogOutput::StdOut { message }) => {
+                        exec_output.push_str(&String::from_utf8_lossy(&message))
+                    }
+                    Ok(_) => {}
+                    Err(e) => panic!("远程 exec 输出流出错: {e}"),
+                }
+            }
+        }
+        assert!(exec_output.contains("tunnel-exec-ok"), "exec 输出应经隧道返回");
+        println!("exec 输出经隧道返回正常: {}", exec_output.trim());
+
+        // 日志流（sleep 容器无输出，能建立流并干净结束即算通过）
+        let log_stream = d.logs(
+            &rt_id,
+            Some(bollard::container::LogsOptions::<String> {
+                stdout: true,
+                tail: "100".into(),
+                ..Default::default()
+            }),
+        );
+        let log_chunks = log_stream.filter(|r| future::ready(r.is_ok())).count().await;
+        println!("日志流正常结束，收到 {log_chunks} 个分块");
+
+        // 统计流：取一个采样
+        let mut stats = d.stats(
+            &rt_id,
+            Some(bollard::container::StatsOptions { stream: true, one_shot: false }),
+        );
+        let stat = tokio::time::timeout(std::time::Duration::from_secs(5), stats.next())
+            .await
+            .expect("远程统计采样超时")
+            .expect("远程统计流不应为空")
+            .expect("远程统计采样不应出错");
+        assert!(stat.cpu_stats.is_some(), "统计采样应含 CPU 数据");
+        println!("统计流采样正常");
+        drop(stats);
+
+        containers::container_action(rt_id, "remove".into(), true)
+            .await
+            .expect("清理远程测试容器应成功");
+        println!("远程测试容器已删除");
+
+        // 事件流：保持 1.5 秒不报错即认为流可用（事件是否到达取决于远程活动）
+        {
+            use futures::StreamExt;
+            let mut events = d.events(None::<bollard::system::EventsOptions<String>>);
+            let deadline = std::time::Instant::now() + std::time::Duration::from_millis(1500);
+            while std::time::Instant::now() < deadline {
+                if tokio::time::timeout(
+                    deadline.saturating_duration_since(std::time::Instant::now()),
+                    events.next(),
+                )
+                .await
+                .is_err()
+                {
+                    break;
+                }
+            }
+        }
+
+        // compose CLI 环境：指向隧道 socket 并实际调用本机 docker CLI 验证连通
+        let active = conn::active();
+        assert!(active.tunnel_socket.is_some(), "ssh 连接激活后应记录隧道 socket");
+        let env = conn::cli_env(&active);
+        let docker_host = env
+            .iter()
+            .find(|(k, _)| k == "DOCKER_HOST")
+            .map(|(_, v)| v.clone())
+            .expect("ssh 连接应注入 DOCKER_HOST");
+        assert!(docker_host.starts_with("unix://"), "compose 应经隧道 socket 连接");
+        let out = tokio::process::Command::new("docker")
+            .args(["version", "--format", "{{.Server.Version}}"])
+            .env("DOCKER_HOST", &docker_host)
+            .output()
+            .await
+            .expect("本机 docker CLI 应可用");
+        let cli_version = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        assert!(out.status.success(), "compose CLI 经隧道调用远程 daemon 应成功");
+        assert_eq!(cli_version, version, "CLI 看到的远程版本应与 bollard 一致");
+        println!("compose CLI 经隧道连到远程 daemon: {cli_version}");
+
+        // 收尾：停隧道后旧 socket 不可连
+        tunnel::stop(&profile.id);
     }
 }

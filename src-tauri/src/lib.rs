@@ -30,18 +30,20 @@ pub fn run() {
                 }
             }
 
-            // 连接缓存建立前读取 socket 覆盖值，修改需重启应用生效
+            // 加载设置（含旧配置迁移），初始化活跃连接；连接在首次命令时惰性建立
             let s = settings::load(app.handle());
-            settings::set_docker_socket(
-                (!s.docker_socket.is_empty()).then(|| s.docker_socket.clone()),
-            );
+            if let Some(profile) = settings::find_connection(&s, &s.active_connection_id) {
+                docker::conn::init_active(profile.clone());
+            } else {
+                docker::conn::init_active(settings::ConnectionProfile::default_local());
+            }
 
             let (tx, _) = broadcast::channel::<DockerEventDto>(256);
             app.manage(tx.clone());
             app.manage(Streams::default());
             app.manage(ExecSessions::default());
 
-            docker::events::spawn_global_listener(tx);
+            docker::events::start_global_listener(tx);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -76,6 +78,8 @@ pub fn run() {
             docker::exec::exec_input,
             docker::exec::exec_resize,
             docker::state::cancel_stream,
+            docker::conn::switch_connection,
+            docker::conn::test_connection,
             settings::get_settings,
             settings::set_settings,
             daemon_config::read_daemon_config,
@@ -86,6 +90,12 @@ pub fn run() {
             cleanup::disk_usage,
             cleanup::cleanup,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while running tauri application")
+        .run(|_app, event| {
+            // 退出时回收 SSH 隧道子进程，避免遗留孤儿 ssh
+            if let tauri::RunEvent::Exit = event {
+                docker::tunnel::stop_all();
+            }
+        });
 }

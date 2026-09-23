@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Container, RefreshCw } from "lucide-react";
+import { Container, RefreshCw, Settings as SettingsIcon } from "lucide-react";
 import { Sidebar, type PageKey } from "./components/Sidebar";
 import { Button } from "./components/ui";
 import { Overview } from "./pages/Overview";
@@ -13,17 +13,19 @@ import { Storage, type StorageTab } from "./pages/Storage";
 import { Cleanup } from "./pages/Cleanup";
 import { Settings } from "./pages/Settings";
 import { api } from "./lib/api";
-import { useSettingsThemeSync } from "./lib/settings";
+import { activeConnection, useSettings, useSettingsThemeSync } from "./lib/settings";
 
 /** Docker 引擎不可达时的引导页（覆盖内容区，侧栏保持可见） */
 function DisconnectedOverlay({
   message,
   onRetry,
   retrying,
+  onManage,
 }: {
   message: string;
   onRetry: () => void;
   retrying: boolean;
+  onManage: () => void;
 }) {
   return (
     <div className="absolute inset-0 z-40 flex flex-col items-center justify-center gap-2 bg-canvas p-8 text-center">
@@ -33,13 +35,20 @@ function DisconnectedOverlay({
       <div className="text-[15px] font-semibold text-fg">无法连接 Docker 引擎</div>
       <p className="max-w-md break-all text-[12px] text-fg3">{message}</p>
       <p className="max-w-md text-[12px] text-fg3">
-        请确认 Docker 服务已启动，且当前用户已加入 docker 组：
-        <span className="mx-1 font-mono text-fg2">sudo usermod -aG docker $USER</span>
+        本地连接请确认 Docker 服务已启动且当前用户已加入 docker 组
+        （<span className="mx-1 font-mono text-fg2">sudo usermod -aG docker $USER</span>）；
+        远程连接请在侧栏切换连接，或到「设置 → Docker 连接」测试并修改配置。
       </p>
-      <Button variant="primary" className="mt-3" onClick={onRetry} disabled={retrying}>
-        <RefreshCw size={14} className={retrying ? "animate-spin" : ""} />
-        重新连接
-      </Button>
+      <div className="mt-3 flex gap-2">
+        <Button variant="primary" onClick={onRetry} disabled={retrying}>
+          <RefreshCw size={14} className={retrying ? "animate-spin" : ""} />
+          重新连接
+        </Button>
+        <Button variant="outline" onClick={onManage}>
+          <SettingsIcon size={14} />
+          连接设置
+        </Button>
+      </div>
     </div>
   );
 }
@@ -53,6 +62,7 @@ export default function App() {
   const qc = useQueryClient();
 
   useSettingsThemeSync();
+  const { data: settings } = useSettings();
 
   // 带可选子 Tab 的导航：Overview 的统计卡片跳到「存储和网络」对应 Tab
   const navigate = (p: PageKey, tab?: string) => {
@@ -149,7 +159,15 @@ export default function App() {
           <DisconnectedOverlay
             message={String(info.error)}
             retrying={info.isFetching}
-            onRetry={() => void info.refetch()}
+            onRetry={() => {
+              // 对远程连接需要重建（重启隧道/替换句柄），本地连接幂等重试
+              const active = activeConnection(settings);
+              void api
+                .switchConnection(active.id)
+                .catch(() => {})
+                .finally(() => void info.refetch());
+            }}
+            onManage={() => setPage("settings")}
           />
         )}
       </main>

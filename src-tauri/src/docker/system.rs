@@ -8,10 +8,7 @@ use super::dto::{BuildCacheDto, DockerInfoDto, HostStatsDto, NamedSizeDto, Syste
 use super::stats::{block_io, net_io};
 
 fn docker_host() -> String {
-    crate::settings::docker_socket()
-        .map(|p| format!("unix://{p}"))
-        .or_else(|| std::env::var("DOCKER_HOST").ok())
-        .unwrap_or_else(|| "unix:///var/run/docker.sock".to_string())
+    super::conn::active().profile.display_url()
 }
 
 #[tauri::command]

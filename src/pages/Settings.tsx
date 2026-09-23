@@ -1,9 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
 import { api } from "../lib/api";
 import { useSettings, useUpdateSettings } from "../lib/settings";
 import { useTheme, type ThemeMode } from "../lib/theme";
-import { PageHeader, Select, Input, Checkbox } from "../components/ui";
+import { PageHeader, Select, Checkbox } from "../components/ui";
+import { ConnectionSettings } from "../components/settings/ConnectionSettings";
 import { MirrorSettings } from "../components/settings/MirrorSettings";
 import type { AppSettings } from "../types/settings";
 
@@ -52,33 +52,6 @@ const THEME_OPTIONS: { value: ThemeMode; label: string }[] = [
   { value: "light", label: "浅色" },
   { value: "dark", label: "深色" },
 ];
-
-/** Socket 输入框：本地编辑，失焦/回车时提交，避免每次按键触发 IPC */
-function SocketInput({
-  value,
-  onCommit,
-}: {
-  value: string;
-  onCommit: (v: string) => void;
-}) {
-  const [draft, setDraft] = useState(value);
-  const commit = () => {
-    const v = draft.trim();
-    if (v !== value) onCommit(v);
-    else setDraft(value);
-  };
-  return (
-    <Input
-      value={draft}
-      onChange={(e) => setDraft(e.target.value)}
-      onBlur={commit}
-      onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
-      placeholder="/var/run/docker.sock"
-      className="w-64 font-mono"
-      spellCheck={false}
-    />
-  );
-}
 
 export function Settings() {
   const { data: settings } = useSettings();
@@ -135,13 +108,9 @@ export function Settings() {
           </Row>
         </Card>
 
-        <Card title="Docker 连接">
-          <Row
-            label="Socket 路径"
-            desc="留空使用默认 /var/run/docker.sock，修改需重启应用生效"
-          >
-            <SocketInput key={settings.docker_socket} value={settings.docker_socket} onCommit={(v) => patch({ docker_socket: v })} />
-          </Row>
+        <ConnectionSettings />
+
+        <Card title="轮询与刷新">
           <Row label="容器列表刷新间隔">
             <Select
               value={String(settings.containers_refresh_secs)}

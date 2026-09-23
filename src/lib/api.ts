@@ -15,7 +15,7 @@ import type {
   VolumeDto,
   VolumeSpec,
 } from "../types/docker";
-import type { AppSettings } from "../types/settings";
+import type { AppSettings, ConnectionProfile, ConnectionTestResult } from "../types/settings";
 import type { CleanupResultDto, DaemonConfigDto, DiskUsageDto } from "../types/daemon";
 import type {
   ComposeCliInfoDto,
@@ -130,6 +130,13 @@ export const api = {
 
   setSettings: (settings: AppSettings) =>
     invoke<AppSettings>("set_settings", { settings }),
+
+  /** 切换活跃连接：后端验证可达后替换连接并重启事件监听（不可达时抛错并保持原连接） */
+  switchConnection: (id: string) => invoke<ConnectionProfile>("switch_connection", { id }),
+
+  /** 测试连接配置（不落盘、不影响当前连接）；ssh 类型会临时建立隧道再回收 */
+  testConnection: (profile: ConnectionProfile) =>
+    invoke<ConnectionTestResult>("test_connection", { profile }),
 
   readDaemonConfig: () => invoke<DaemonConfigDto>("read_daemon_config"),
 

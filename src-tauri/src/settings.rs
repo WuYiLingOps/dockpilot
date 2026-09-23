@@ -1,8 +1,61 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use std::sync::RwLock;
 
 use crate::docker::conn::CmdResult;
+
+/// Docker 连接配置。kind 决定其余字段的语义：
+/// - local: socket_path（空 = 默认 /var/run/docker.sock）
+/// - tcp:   host（host:port，明文 HTTP）
+/// - tls:   host（host:port）+ cert_path（证书目录，含 ca.pem / cert.pem / key.pem）
+/// - ssh:   host（user@host[:port]）+ 可选 key_path + 可选 remote_socket（rootless 等非默认路径）
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct ConnectionProfile {
+    pub id: String,
+    pub name: String,
+    /// "local" | "tcp" | "tls" | "ssh"
+    pub kind: String,
+    pub socket_path: String,
+    pub host: String,
+    pub cert_path: String,
+    pub key_path: String,
+    /// ssh 类型：远程 docker socket 路径，空 = /var/run/docker.sock
+    pub remote_socket: String,
+}
+
+impl ConnectionProfile {
+    /// 兜底本地连接（默认 socket）
+    pub fn default_local() -> Self {
+        Self {
+            id: "local".into(),
+            name: "本地".into(),
+            kind: "local".into(),
+            socket_path: String::new(),
+            host: String::new(),
+            cert_path: String::new(),
+            key_path: String::new(),
+            remote_socket: String::new(),
+        }
+    }
+
+    /// 展示地址（连接 URL 形式，供系统概览与侧栏显示）
+    pub fn display_url(&self) -> String {
+        match self.kind.as_str() {
+            "local" => format!(
+                "unix://{}",
+                if self.socket_path.is_empty() {
+                    "/var/run/docker.sock"
+                } else {
+                    &self.socket_path
+                }
+            ),
+            "tcp" => format!("tcp://{}", self.host),
+            "tls" => format!("https://{}", self.host),
+            "ssh" => format!("ssh://{}", self.host),
+            _ => self.host.clone(),
+        }
+    }
+}
 
 /// 应用设置：持久化到 app_config_dir()/settings.json。
 /// 反序列化带 #[serde(default)]，旧文件缺字段自动补默认值，
@@ -12,9 +65,12 @@ use crate::docker::conn::CmdResult;
 pub struct AppSettings {
     /// "system" | "light" | "dark"
     pub theme: String,
-    /// 自定义 Docker socket 路径；为空时使用默认 /var/run/docker.sock。
-    /// 连接在启动后缓存，修改需重启应用生效。
+    /// 旧版自定义 socket 字段：仅用于迁移为 local 连接，迁移后不再使用
     pub docker_socket: String,
+    /// 连接配置列表，始终保证至少一个本地连接
+    pub connections: Vec<ConnectionProfile>,
+    /// 当前激活的连接 id
+    pub active_connection_id: String,
     /// 容器列表轮询间隔（秒）
     pub containers_refresh_secs: u32,
     /// 镜像列表轮询间隔（秒）
@@ -34,6 +90,10 @@ impl Default for AppSettings {
         Self {
             theme: "system".into(),
             docker_socket: String::new(),
+            // 反序列化旧配置时以本 Default 为底：留空让 migrate() 统一补本地连接，
+            // 避免旧配置被误判为"已有连接列表"而跳过迁移
+            connections: Vec::new(),
+            active_connection_id: String::new(),
             containers_refresh_secs: 10,
             images_refresh_secs: 20,
             logs_default_tail: 1000,
@@ -41,6 +101,51 @@ impl Default for AppSettings {
             terminal_shell: "bash".into(),
             mirror_custom: Vec::new(),
         }
+    }
+}
+
+/// 旧配置迁移：仅有 docker_socket 时转为"本地"连接；
+/// 并保证连接列表非空、始终存在本地连接、active_id 指向真实存在的配置。
+/// load/set_settings 时都会执行，幂等。
+pub fn migrate(mut s: AppSettings) -> AppSettings {
+    if s.connections.is_empty() && !s.docker_socket.trim().is_empty() {
+        s.connections.push(ConnectionProfile {
+            socket_path: s.docker_socket.trim().to_string(),
+            ..ConnectionProfile::default_local()
+        });
+    }
+    if !s.connections.iter().any(|c| c.kind == "local") {
+        s.connections.push(ConnectionProfile::default_local());
+    }
+    if s.active_connection_id.is_empty()
+        || !s
+            .connections
+            .iter()
+            .any(|c| c.id == s.active_connection_id)
+    {
+        s.active_connection_id = "local".into();
+    }
+    // 旧字段已完成迁移，清空避免残留歧义
+    s.docker_socket.clear();
+    s
+}
+
+/// 连接地址归一化：去 scheme 与首尾空白/斜杠，tcp/tls 缺端口时补默认（2375/2376）。
+/// ssh 的 user@host 保留原样（端口由用户显式给出）。
+pub fn normalize_conn_host(kind: &str, host: &str) -> String {
+    let mut h = host.trim().trim_end_matches('/').to_string();
+    for prefix in ["ssh://", "tcp://", "http://", "https://"] {
+        if let Some(rest) = h.strip_prefix(prefix) {
+            h = rest.to_string();
+            break;
+        }
+    }
+    let h = h.trim().to_string();
+    match kind {
+        "tcp" | "tls" if !h.is_empty() && !h.contains(':') => {
+            format!("{h}:{}", if kind == "tls" { 2376 } else { 2375 })
+        }
+        _ => h,
     }
 }
 
@@ -63,6 +168,41 @@ pub fn sanitize(mut s: AppSettings) -> AppSettings {
         .filter(|m| !m.is_empty())
         .collect();
     s.mirror_custom.dedup();
+
+    // 连接配置：字段归一化 + 空 id 生成 + id 去重（保留首个，重复者换新 id）
+    use std::collections::HashSet;
+    let mut seen = HashSet::new();
+    for c in &mut s.connections {
+        c.id = c.id.trim().to_string();
+        c.name = c.name.trim().to_string();
+        if c.name.is_empty() {
+            c.name = "未命名连接".into();
+        }
+        if !matches!(c.kind.as_str(), "local" | "tcp" | "tls" | "ssh") {
+            c.kind = "local".into();
+        }
+        c.socket_path = c.socket_path.trim().to_string();
+        c.host = normalize_conn_host(&c.kind, &c.host);
+        c.cert_path = c.cert_path.trim().to_string();
+        c.key_path = c.key_path.trim().to_string();
+        c.remote_socket = c.remote_socket.trim().to_string();
+        if c.id.is_empty() {
+            c.id = uuid::Uuid::new_v4().to_string();
+        }
+        if !seen.insert(c.id.clone()) {
+            c.id = uuid::Uuid::new_v4().to_string();
+            seen.insert(c.id.clone());
+        }
+    }
+    s.connections.retain(|c| {
+        match c.kind.as_str() {
+            "local" => true,
+            // 远程连接缺关键信息时丢弃，避免出现永远连不上的死配置
+            "tcp" | "tls" => !c.host.is_empty(),
+            "ssh" => !c.host.is_empty(),
+            _ => false,
+        }
+    });
     s
 }
 
@@ -99,7 +239,7 @@ pub fn load(app: &tauri::AppHandle) -> AppSettings {
         Err(_) => return AppSettings::default(),
     };
     match std::fs::read_to_string(&path) {
-        Ok(text) => sanitize(parse_settings(&text)),
+        Ok(text) => migrate(sanitize(parse_settings(&text))),
         Err(_) => AppSettings::default(),
     }
 }
@@ -119,19 +259,15 @@ pub fn save(app: &tauri::AppHandle, s: &AppSettings) -> Result<(), String> {
 }
 
 // ------------------------------------------------------------------
-// conn.rs 启动时读取的 socket 覆盖值（不随运行中修改，重启应用生效）
+// 运行时连接访问：切换连接时由 conn.rs 维护，设置文件始终为持久化真相
 // ------------------------------------------------------------------
 
-static DOCKER_SOCKET: RwLock<Option<String>> = RwLock::new(None);
-
-pub fn set_docker_socket(path: Option<String>) {
-    if let Ok(mut g) = DOCKER_SOCKET.write() {
-        *g = path;
-    }
-}
-
-pub fn docker_socket() -> Option<String> {
-    DOCKER_SOCKET.read().ok().and_then(|g| g.clone())
+/// 按 id 查找连接配置
+pub fn find_connection<'a>(
+    s: &'a AppSettings,
+    id: &str,
+) -> Option<&'a ConnectionProfile> {
+    s.connections.iter().find(|c| c.id == id)
 }
 
 #[tauri::command]
@@ -141,7 +277,7 @@ pub async fn get_settings(app: tauri::AppHandle) -> CmdResult<AppSettings> {
 
 #[tauri::command]
 pub async fn set_settings(app: tauri::AppHandle, settings: AppSettings) -> CmdResult<AppSettings> {
-    let s = sanitize(settings);
+    let s = migrate(sanitize(settings));
     save(&app, &s)?;
     Ok(s)
 }
@@ -189,5 +325,95 @@ mod tests {
         assert_eq!(normalize_mirror("https://a.com/"), "https://a.com");
         assert_eq!(normalize_mirror("http://insecure.local///"), "http://insecure.local");
         assert_eq!(normalize_mirror("   "), "");
+    }
+
+    #[test]
+    fn migrate_converts_legacy_socket_to_local_profile() {
+        let s = migrate(sanitize(parse_settings(
+            r#"{"theme":"dark","docker_socket":"/tmp/my.sock"}"#,
+        )));
+        assert_eq!(s.docker_socket, "", "迁移后旧字段应清空");
+        assert_eq!(s.connections.len(), 1);
+        assert_eq!(s.connections[0].kind, "local");
+        assert_eq!(s.connections[0].socket_path, "/tmp/my.sock");
+        assert_eq!(s.active_connection_id, "local");
+    }
+
+    #[test]
+    fn migrate_ensures_local_fallback_and_valid_active_id() {
+        // 完全空配置 → 默认本地连接
+        let s = migrate(sanitize(parse_settings("{}")));
+        assert!(s.connections.iter().any(|c| c.kind == "local"));
+        assert_eq!(s.active_connection_id, "local");
+
+        // active_id 指向不存在的配置 → 回落 local
+        let mut s2 = AppSettings::default();
+        s2.active_connection_id = "ghost".into();
+        let s2 = migrate(sanitize(s2));
+        assert_eq!(s2.active_connection_id, "local");
+    }
+
+    #[test]
+    fn sanitize_connection_fields_and_ids() {
+        let s = sanitize(AppSettings {
+            connections: vec![
+                ConnectionProfile {
+                    id: String::new(),
+                    name: "  ".into(),
+                    kind: "unknown".into(),
+                    ..Default::default()
+                },
+                ConnectionProfile {
+                    id: "dup".into(),
+                    name: "a".into(),
+                    kind: "tcp".into(),
+                    host: "tcp://10.0.0.5".into(),
+                    ..Default::default()
+                },
+                ConnectionProfile {
+                    id: "dup".into(),
+                    name: "b".into(),
+                    kind: "tls".into(),
+                    host: "https://10.0.0.5".into(),
+                    ..Default::default()
+                },
+                // 缺 host 的远程连接应被丢弃
+                ConnectionProfile {
+                    id: "dead".into(),
+                    name: "c".into(),
+                    kind: "ssh".into(),
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        });
+        assert_eq!(s.connections.len(), 3);
+        assert_eq!(s.connections[0].kind, "local");
+        assert_eq!(s.connections[0].name, "未命名连接");
+        assert_eq!(s.connections[1].host, "10.0.0.5:2375", "tcp 缺端口应补默认");
+        assert_eq!(s.connections[2].host, "10.0.0.5:2376", "tls 缺端口应补默认");
+        assert_ne!(s.connections[1].id, s.connections[2].id, "重复 id 应重新生成");
+    }
+
+    #[test]
+    fn normalize_conn_host_strips_scheme_and_fills_port() {
+        assert_eq!(normalize_conn_host("tcp", " tcp://10.0.0.5 "), "10.0.0.5:2375");
+        assert_eq!(normalize_conn_host("tls", "https://10.0.0.5"), "10.0.0.5:2376");
+        assert_eq!(normalize_conn_host("tcp", "10.0.0.5:2377"), "10.0.0.5:2377");
+        assert_eq!(normalize_conn_host("ssh", "ssh://root@10.0.0.5:2222"), "root@10.0.0.5:2222");
+        assert_eq!(normalize_conn_host("ssh", "root@10.0.0.5"), "root@10.0.0.5");
+    }
+
+    #[test]
+    fn display_url_reflects_kind() {
+        assert_eq!(ConnectionProfile::default_local().display_url(), "unix:///var/run/docker.sock");
+        assert_eq!(
+            ConnectionProfile { kind: "ssh".into(), host: "root@10.0.0.5".into(), ..Default::default() }.display_url(),
+            "ssh://root@10.0.0.5"
+        );
+        assert_eq!(
+            ConnectionProfile { kind: "tls".into(), host: "10.0.0.5:2376".into(), ..Default::default() }.display_url(),
+            "https://10.0.0.5:2376"
+        );
     }
 }

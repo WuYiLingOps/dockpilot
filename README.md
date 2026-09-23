@@ -18,7 +18,8 @@
 - **存储和网络**：三个子页签——存储卷（列表 / 搜索 / 详情含挂载点与使用容器 / 创建 / 删除，占用大小与引用计数来自 `docker system df`，在用卷删除被后端拒绝）、网络（列表 / 详情含 IPAM 与已连接容器 / 创建（驱动、子网 / 网关、内部网络、可连接、IPv6）/ 删除，bridge / host / none 内置网络禁止删除，详情内可连接 / 断开容器）、磁盘用量（分类占比树图、构建缓存逐条明细、直达空间清理入口）；卷 / 网络数据由 Docker 事件驱动自动刷新
 - **系统概览**：Docker 引擎与宿主资源总览（基础信息、容器 CPU / 内存占用、网络与磁盘实时曲线、用量统计树图），「存储卷 / 网络」统计卡片可点击直达存储和网络页对应子页签
 - **空间清理**：统计悬空镜像 / 未使用镜像 / 已停止容器 / 未使用卷 / 构建缓存的大小与数量，勾选后一键清理并显示回收空间
-- **设置**：主题、Docker socket 路径、列表刷新间隔、日志与终端默认值；配置持久化到 `~/.config/com.dockpilot.app/settings.json`
+- **多连接管理与远程连接**：设置页统一管理多个 Docker 连接（本地 socket / SSH / TLS / 明文 TCP），支持连通性测试（延迟与版本）、添加 / 编辑 / 删除、一键切换并自动刷新数据；侧栏底部可快速切换当前连接。SSH 连接由应用自动建立加密隧道（支持指定私钥与 rootless socket 路径），TLS 走客户端证书双向认证，compose CLI 会通过 `DOCKER_HOST` / `DOCKER_CERT_PATH` 指向同一连接；配置方法与故障排查见「远程连接」章节
+- **设置**：主题、连接管理、列表刷新间隔、日志与终端默认值；配置持久化到 `~/.config/com.dockpilot.app/settings.json`
 - **镜像加速**：读写 `/etc/docker/daemon.json` 的 `registry-mirrors`（pkexec 提权，写入前自动备份，保留其他配置字段）、内置国内预设源、一键测速、pkexec 不可用时回退为可复制的终端命令
 
 ## 技术栈
@@ -26,12 +27,12 @@
 | 层 | 选型 | 说明 |
 |---|---|---|
 | 桌面框架 | Tauri 2 | 系统原生 WebView（WebKitGTK），安装包与内存占用远小于 Electron |
-| 后端 | Rust + bollard | bollard 是 Docker/Podman Engine API 的异步 Rust 客户端，直连 `/var/run/docker.sock` |
+| 后端 | Rust + bollard | Docker/Podman Engine API 的异步 Rust 客户端；本地 socket 直连，远程经 TCP / TLS / SSH 隧道 |
 | 前端 | React 19 + TypeScript + Tailwind CSS 4 | 构建用 Vite |
 | 终端 | @xterm/xterm | 与后端 exec 流通过 Tauri Channel 桥接 |
 | 状态 | TanStack Query + Docker events | 列表数据由事件推送自动失效刷新 |
 
-架构说明：所有长驻流（日志、统计、终端输出、拉取进度）在后端由 Tokio 任务驱动，通过 Tauri Channel 推送到前端，并注册统一的取消句柄（`cancel_stream`）——切页即停流，避免无主任务堆积。Docker 事件由后端单实例全局监听、广播转发。
+架构说明：所有长驻流（日志、统计、终端输出、拉取进度）在后端由 Tokio 任务驱动，通过 Tauri Channel 推送到前端，并注册统一的取消句柄（`cancel_stream`）——切页即停流，避免无主任务堆积。Docker 事件由后端单实例全局监听、广播转发。连接层支持多连接配置与运行时即时切换（切换时自动取消旧连接上的流并重建事件监听）。
 
 ### 浏览器预览（免编译走查 UI）
 
@@ -56,6 +57,100 @@ sudo apt install libwebkit2gtk-4.1-dev build-essential curl wget file \
 
 ```bash
 sudo usermod -aG docker $USER
+```
+
+## 远程连接
+
+DockPilot 支持管理多个 Docker 连接并随时切换：**本地 socket / SSH / TLS / 明文 TCP**。连接在「设置 → Docker 连接」统一管理（添加 / 编辑 / 测试 / 删除），侧栏底部可快速切换当前连接；切换即时生效并自动刷新数据，无需重启应用。
+
+### 使用方法
+
+1. 进入「设置 → Docker 连接」→「添加连接」
+2. 选择连接类型并填写地址，可先「测试连接」验证可达性（返回延迟与远程版本）
+3. 保存后点击连接行，或用侧栏底部下拉切换
+4. 切换后容器 / 镜像 / 编排 / 存储等全部数据指向新连接；compose 编排操作也经同一连接执行
+
+### SSH 连接（推荐）
+
+无需在远程机开放任何端口，数据全程加密：
+
+**前置条件**
+
+- 本机已安装 ssh 客户端
+- 远程机已安装 docker CLI（隧道通过其 `docker system dial-stdio` 通道工作，Docker 20.10+ 自带）
+- 远程登录用户需有 docker 权限（root，或已加入 docker 组）
+- 认证仅支持**密钥免密或 ssh-agent**，不支持交互式密码
+
+**配置免密登录**
+
+```bash
+ssh-copy-id user@10.0.0.115                            # 输入一次密码，装本机公钥
+ssh -o BatchMode=yes user@10.0.0.115 'docker version'  # 验证免密 + docker 权限
+```
+
+**应用内配置**
+
+| 字段 | 说明 |
+|---|---|
+| 地址 | `user@主机` 或 `user@主机:端口`（端口默认 22） |
+| 私钥路径 | 可选；留空使用 ssh-agent 或 `~/.ssh/config` |
+| 远程 Socket 路径 | 可选；rootless Docker 填 `/run/user/<uid>/docker.sock`，默认 `/var/run/docker.sock` |
+
+**实现方式**：应用在本地建立 `ssh -N -L` 加密隧道，把远程 docker socket 转发为本机 unix socket，bollard 与 compose CLI 均经由该隧道通信；隧道随连接切换、应用退出自动回收，进程意外退出会在下次使用时自动重建。
+
+### TLS 连接
+
+适合无法用 SSH 但可配置远程 daemon 的场景（双向证书认证）：
+
+1. 按 [Docker 官方文档](https://docs.docker.com/engine/security/protect-access/) 用 openssl 生成 CA、服务端与客户端证书（客户端需 `ca.pem` / `cert.pem` / `key.pem` 三个文件）
+2. 远程机开启 TLS 监听（systemd 环境用 override，避免与 daemon.json 的 `hosts` 冲突）：
+
+```bash
+sudo systemctl edit docker
+#   [Service]
+#   ExecStart=
+#   ExecStart=/usr/bin/dockerd \
+#     -H tcp://0.0.0.0:2376 --tlsverify \
+#     --tlscacert=/etc/docker/certs/ca.pem \
+#     --tlscert=/etc/docker/certs/server-cert.pem \
+#     --tlskey=/etc/docker/certs/server-key.pem
+sudo systemctl restart docker
+```
+
+3. 应用内：类型选 **TLS**，填 `主机:2376`，选择客户端证书目录（需含 `ca.pem`、`cert.pem`、`key.pem`）
+
+### 明文 TCP
+
+仅建议在可信内网使用（流量未加密且无认证，配置时会显示安全提示）：
+
+```bash
+sudo systemctl edit docker
+#   [Service]
+#   ExecStart=
+#   ExecStart=/usr/bin/dockerd -H tcp://0.0.0.0:2375 -H unix:///var/run/docker.sock
+sudo systemctl restart docker
+```
+
+应用内：类型选 **TCP**，填 `主机:2375`。
+
+### 故障排查
+
+| 现象 | 排查方向 |
+|---|---|
+| 测试连接超时 | 地址 / 端口 / 防火墙：`nc -zv 主机 端口` |
+| SSH 报 Permission denied | 免密未配置或私钥不对：`ssh -o BatchMode=yes user@host docker version` 验证 |
+| SSH 隧道建立超时 | 远程机未装 docker CLI，或登录用户无 docker 权限 |
+| TLS 报证书文件缺失 | 证书目录下需同时有 `ca.pem`、`cert.pem`、`key.pem` |
+| 拉取 / 容器操作报权限错误 | 远程用户不在 docker 组：`sudo usermod -aG docker $USER` 后重新登录 |
+| 远程机改了配置但不生效 | `systemd override` 配置后需 `sudo systemctl daemon-reload && sudo systemctl restart docker` |
+
+### 远程连接集成测试
+
+真实远程链路的回归测试（镜像拉取 → 容器创建 → exec / 日志 / 统计 → 删除，自清理），默认忽略、显式运行：
+
+```bash
+cd src-tauri
+DOCKERPILOT_REMOTE_SSH=root@10.0.0.115 cargo test --lib -- --ignored remote_ssh --nocapture
 ```
 
 ## 开发
@@ -132,6 +227,8 @@ cargo test           # 集成测试（需要本机 Docker daemon 运行）
 npm run build        # 前端 tsc + vite 构建
 ```
 
+远程连接的真实链路回归测试默认忽略，运行方式见「远程连接 → 远程连接集成测试」。
+
 ## 项目结构
 
 ```
@@ -139,18 +236,17 @@ design/
 ├── app-icon.svg              # 图标矢量源文件（舵轮 + 集装箱）
 ├── app-icon.png              # 1024px 渲染源图
 └── icon-design-philosophy.md # 图标设计哲学
-docs/
-└── ROADMAP.md                # 功能规划
 src-tauri/
 ├── icons/                    # 由 `npx tauri icon design/app-icon.png` 生成
 └── src/
     ├── lib.rs                # 应用入口：状态注册、全局事件监听、命令注册
     ├── main.rs
-    ├── settings.rs           # 应用设置读写（app_config_dir/settings.json）
+    ├── settings.rs           # 应用设置读写（含连接配置模型、旧配置迁移与清洗）
     ├── daemon_config.rs      # 镜像加速：daemon.json 读写 / pkexec 提权 / 测速
     ├── cleanup.rs            # 空间清理：磁盘占用统计与各类 prune
     └── docker/
-        ├── conn.rs           # Docker 连接（缓存复用）与统一错误类型
+        ├── conn.rs           # 多连接管理与运行时切换、连接缓存、四种传输分发
+        ├── tunnel.rs         # SSH 隧道：本地 socket 转发、进程生命周期管理
         ├── dto.rs            # 发送给前端的序列化结构
         ├── state.rs          # 流取消句柄注册表 + 终端会话表
         ├── system.rs         # docker_info / host_stats / system_df（含构建缓存明细）
@@ -162,15 +258,15 @@ src-tauri/
         ├── logs.rs           # 日志流
         ├── stats.rs          # 资源统计流（CPU/内存/网络/块 I/O 换算）
         ├── exec.rs           # 交互式终端（exec + stdin + resize）
-        └── events.rs         # Docker 事件全局监听与订阅转发
+        └── events.rs         # Docker 事件全局监听与订阅转发（切换连接时重建）
 src/
-├── components/               # Sidebar、TitleBar、通用 UI 组件、compose/ 输出面板、containers/ 创建容器弹窗、detail/ 详情页视图
+├── components/               # Sidebar（含连接切换器）、TitleBar、通用 UI 组件、compose/ 输出面板、containers/ 创建容器弹窗、detail/ 详情页视图
 ├── components/overview/      # 系统概览的纯 SVG 图表（环形 / 折线 / 树图）
-├── components/settings/      # 镜像加速设置分组
+├── components/settings/      # 连接管理（多连接增删改测/切换）与镜像加速设置分组
 ├── pages/                    # 系统概览 / 容器 / 镜像 / 容器详情 / 编排 / 编排详情 / 存储和网络 / 空间清理 / 设置
 ├── hooks/                    # 容器操作 mutation、compose 输出流
 ├── lib/api.ts                # Tauri invoke 封装（流式命令返回取消函数）
-├── lib/settings.ts           # 设置 query/mutation 与主题迁移
+├── lib/settings.ts           # 设置 query/mutation、连接切换 mutation 与主题迁移
 ├── lib/theme.ts              # 主题三态 store（跟随系统 / 浅 / 深）
 ├── lib/format.ts             # 字节 / 时间 / 端口格式化
 └── types/                    # 与 Rust DTO 一一对应的 TS 类型
@@ -180,7 +276,7 @@ src/
 
 - **NVIDIA 显卡兼容**：WebKitGTK 在部分 NVIDIA 驱动上 DMABUF 渲染可能黑屏。应用启动时检测到 NVIDIA 环境会自动设置 `WEBKIT_DISABLE_DMABUF_RENDERER=1` 兜底；如仍遇渲染异常，可手动设置该变量后启动。
 - **Alpine 容器**：默认 shell 为 bash，Alpine 系镜像请在终端页切换为 `sh` 或 `ash`（可在设置中改默认值）。
-- **Docker 连接**：默认连接 `/var/run/docker.sock`，可在设置中指定其他 socket 路径（修改需重启应用生效）；TCP 远程连接暂未支持，见 Roadmap。
+- **远程连接**：支持本地 socket / SSH / TLS / 明文 TCP 四种连接，多连接管理与切换即时生效，配置方法与故障排查详见「远程连接」章节。注意 SSH 仅支持密钥免密或 ssh-agent（不支持交互式密码）。
 - **镜像加速写入**：应用通过 `pkexec` 提权写 `/etc/docker/daemon.json` 并可一键重启 Docker；无 polkit 的环境（如纯 SSH 会话）会自动回退为生成可复制的终端命令。重启 Docker 会中断运行中的容器（开启 live-restore 则不受影响），应用会在确认弹窗中提示。
 - **编排操作依赖 compose CLI**：项目识别与查看仅依赖 Engine API；启动/停止等编排操作需要系统已安装 `docker compose` 插件（`docker-compose-plugin`）或 `docker-compose` 独立命令，未安装时编排页会提示并提供安装命令。
 

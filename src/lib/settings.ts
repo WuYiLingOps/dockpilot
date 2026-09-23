@@ -3,12 +3,25 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { api } from "./api";
 import { setThemeMode, syncThemeFromSettings } from "./theme";
-import type { AppSettings } from "../types/settings";
+import type { AppSettings, ConnectionProfile } from "../types/settings";
 
 /** 与后端 AppSettings::default() 对应，仅作 query 初始化占位（真实值以后端为准） */
 export const DEFAULT_SETTINGS: AppSettings = {
   theme: "system",
   docker_socket: "",
+  connections: [
+    {
+      id: "local",
+      name: "本地",
+      kind: "local",
+      socket_path: "",
+      host: "",
+      cert_path: "",
+      key_path: "",
+      remote_socket: "",
+    },
+  ],
+  active_connection_id: "local",
   containers_refresh_secs: 10,
   images_refresh_secs: 20,
   logs_default_tail: 1000,
@@ -16,6 +29,17 @@ export const DEFAULT_SETTINGS: AppSettings = {
   terminal_shell: "bash",
   mirror_custom: [],
 };
+
+/** 当前活跃连接配置（列表异常时回落默认本地连接） */
+export function activeConnection(settings: AppSettings | undefined): ConnectionProfile {
+  const fallback = DEFAULT_SETTINGS.connections[0];
+  if (!settings) return fallback;
+  return (
+    settings.connections.find((c) => c.id === settings.active_connection_id) ??
+    settings.connections.find((c) => c.kind === "local") ??
+    fallback
+  );
+}
 
 export function useSettings() {
   return useQuery({
@@ -41,6 +65,19 @@ export function useUpdateSettings() {
       if (ctx?.prev) qc.setQueryData(["settings"], ctx.prev);
     },
     onSuccess: (saved) => qc.setQueryData(["settings"], saved),
+  });
+}
+
+/** 切换活跃连接：成功后全量失效缓存（新连接的数据域完全不同） */
+export function useSwitchConnection() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.switchConnection(id),
+    onSuccess: (p) => {
+      void qc.invalidateQueries();
+      toast.success(`已切换到「${p.name}」`);
+    },
+    onError: (e) => toast.error(String(e)),
   });
 }
 

@@ -131,6 +131,29 @@
   const settings = {
     theme: "system",
     docker_socket: "",
+    connections: [
+      {
+        id: "local",
+        name: "本地",
+        kind: "local",
+        socket_path: "",
+        host: "",
+        cert_path: "",
+        key_path: "",
+        remote_socket: "",
+      },
+      {
+        id: "mock-ssh-1",
+        name: "测试服务器",
+        kind: "ssh",
+        socket_path: "",
+        host: "user@192.168.1.66",
+        cert_path: "",
+        key_path: "",
+        remote_socket: "",
+      },
+    ],
+    active_connection_id: "local",
     containers_refresh_secs: 10,
     images_refresh_secs: 20,
     logs_default_tail: 1000,
@@ -633,6 +656,42 @@ volumes:
         case "set_settings":
           Object.assign(settings, args.settings);
           return Promise.resolve(settings);
+        case "switch_connection": {
+          const profile = settings.connections.find((c) => c.id === args.id);
+          if (!profile) return Promise.reject(`连接配置不存在: ${args.id}`);
+          settings.active_connection_id = profile.id;
+          daemonConfig.host =
+            profile.kind === "local"
+              ? `unix://${profile.socket_path || "/var/run/docker.sock"}`
+              : profile.kind === "tls"
+                ? `https://${profile.host}`
+                : profile.kind === "ssh"
+                  ? `ssh://${profile.host}`
+                  : `tcp://${profile.host}`;
+          return new Promise((resolve) => setTimeout(() => resolve(profile), 500));
+        }
+        case "test_connection":
+          // 模拟测试：ssh/tls/tcp 类型按地址是否含 .1. 决定可达性，便于演示两种结果
+          return new Promise((resolve) =>
+            setTimeout(() => {
+              const reachable = !args.profile.host || !args.profile.host.includes(".0.");
+              if (reachable) {
+                resolve({
+                  ok: true,
+                  latency_ms: 40 + Math.floor(Math.random() * 600),
+                  version: "27.3.1",
+                  error: "",
+                });
+              } else {
+                resolve({
+                  ok: false,
+                  latency_ms: null,
+                  version: "",
+                  error: "连接不可达（mock）",
+                });
+              }
+            }, 400),
+          );
         case "read_daemon_config":
           return Promise.resolve(daemonConfig);
         case "apply_mirrors":

@@ -277,7 +277,7 @@ pub struct DockerInfoDto {
     pub logging_driver: String,
     pub plugins_volume: Vec<String>,
     pub plugins_network: Vec<String>,
-    /// daemon 连接地址（unix:///path 或 DOCKER_HOST）
+    /// daemon 连接地址（当前活跃连接的展示 URL：unix:///path、tcp、https 或 ssh）
     pub host: String,
 }
 

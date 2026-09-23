@@ -33,6 +33,13 @@ impl Streams {
     pub fn remove(&self, id: &str) {
         self.0.lock().unwrap().remove(id);
     }
+
+    /// 取消全部长驻流（切换连接时调用：旧连接上的流已无意义）
+    pub fn cancel_all(&self) {
+        for (_, token) in self.0.lock().unwrap().drain() {
+            token.cancel();
+        }
+    }
 }
 
 /// 活跃终端会话：exec_id -> stdin 写入端
@@ -41,6 +48,14 @@ pub struct ExecSessions(pub tokio::sync::Mutex<HashMap<String, ExecSession>>);
 
 pub struct ExecSession {
     pub input: Pin<Box<dyn AsyncWrite + Send>>,
+}
+
+impl ExecSessions {
+    /// 清空全部终端会话（切换连接时调用：旧连接上的 exec 已无意义，
+    /// 丢弃 stdin 写入端后对应的 attach 任务会自然结束）
+    pub async fn clear(&self) {
+        self.0.lock().await.clear();
+    }
 }
 
 /// 取消一个由 stream_* / pull_image / exec_attach 注册的后台流任务

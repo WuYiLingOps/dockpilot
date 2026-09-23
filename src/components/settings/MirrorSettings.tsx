@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { api } from "../../lib/api";
 import { copyText } from "../../lib/clipboard";
-import { useSettings, useUpdateSettings } from "../../lib/settings";
+import { activeConnection, useSettings, useUpdateSettings } from "../../lib/settings";
 import { Badge, Button, IconButton, Input, Modal, Spinner } from "../ui";
 
 /** 内置预设加速源（可用性随时间变化，测速后自行取舍；也可添加自定义源） */
@@ -181,6 +181,9 @@ export function MirrorSettings() {
     <section className="overflow-hidden rounded-card border border-edge bg-panel shadow-[var(--app-shadow)]">
       <div className="flex items-center justify-between border-b border-edge/60 bg-panel2/40 px-4 py-2.5">
         <div className="text-[13px] font-semibold text-fg">镜像加速</div>
+        {activeConnection(settings).kind !== "local" && (
+          <Badge tone="warn">当前为远程连接，此配置仅作用于本机 daemon</Badge>
+        )}
         {cfg.data && (
           <div className="flex items-center gap-1.5">
             {cfg.data.live_restore ? (

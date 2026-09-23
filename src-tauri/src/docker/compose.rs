@@ -16,7 +16,7 @@ use super::conn::{docker, CmdResult};
 use super::containers::map_container;
 use super::dto::{ComposeCliInfoDto, ComposeOutput, ComposeProjectDto, ComposeServiceDto, PortDto};
 use super::state::Streams;
-use crate::settings;
+use crate::docker::conn;
 
 /// compose 项目名标签
 pub const LABEL_PROJECT: &str = "com.docker.compose.project";
@@ -66,7 +66,8 @@ async fn probe(kind: CliKind, program: &str, args: &[&str]) -> Option<Cli> {
 }
 
 /// 组装 compose 命令：参数数组直调（无 shell，无注入风险）。
-/// 显式设置 DOCKER_HOST 与 bollard 连接的 socket 一致，避免用户环境变量把 CLI 指向别的 daemon。
+/// 显式设置 DOCKER_HOST 与 bollard 当前连接一致（本地 socket / TCP / TLS / SSH 隧道），
+/// 避免用户环境变量把 CLI 指向别的 daemon。
 fn build_cmd(cli: &Cli, project: &str, working_dir: &str, files: &[String], args: &[String]) -> Command {
     let mut cmd = match cli.kind {
         CliKind::Plugin => {
@@ -84,8 +85,9 @@ fn build_cmd(cli: &Cli, project: &str, working_dir: &str, files: &[String], args
         cmd.arg("--project-directory").arg(working_dir);
     }
     cmd.args(args);
-    let sock = settings::docker_socket().unwrap_or_else(|| "/var/run/docker.sock".to_string());
-    cmd.env("DOCKER_HOST", format!("unix://{sock}"));
+    for (k, v) in conn::cli_env(&conn::active()) {
+        cmd.env(k, v);
+    }
     cmd
 }
 
