@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api";
+import { useIsWindows } from "../lib/platform";
 import { useSettings, useUpdateSettings } from "../lib/settings";
 import { useTheme, type ThemeMode } from "../lib/theme";
 import { PageHeader, Select, Checkbox } from "../components/ui";
@@ -57,6 +58,8 @@ export function Settings() {
   const { data: settings } = useSettings();
   const update = useUpdateSettings();
   const { setMode } = useTheme();
+  // 镜像加速面向 Linux 本机 daemon（/etc/docker/daemon.json），Windows 版隐藏
+  const isWindows = useIsWindows();
   const info = useQuery({
     queryKey: ["dockerInfo"],
     queryFn: api.dockerInfo,
@@ -172,7 +175,7 @@ export function Settings() {
           </Row>
         </Card>
 
-        <MirrorSettings />
+        {!isWindows && <MirrorSettings />}
 
         <Card title="关于">
           <Row label="DockPilot 版本">
