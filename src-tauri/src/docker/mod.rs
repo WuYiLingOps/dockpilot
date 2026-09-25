@@ -13,7 +13,9 @@ pub mod system;
 pub mod tunnel;
 pub mod volumes;
 
-#[cfg(test)]
+/// 集成测试依赖本机 Docker daemon（/var/run/docker.sock），
+/// 仅在 unix 上编译运行（Windows 无本地 daemon；远程 SSH 用例见下方 ignored 测试）
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
 
@@ -430,9 +432,9 @@ mod tests {
             }
         }
 
-        // compose CLI 环境：指向隧道 socket 并实际调用本机 docker CLI 验证连通
+        // compose CLI 环境：指向隧道本地端点并实际调用本机 docker CLI 验证连通
         let active = conn::active();
-        assert!(active.tunnel_socket.is_some(), "ssh 连接激活后应记录隧道 socket");
+        assert!(active.tunnel_endpoint.is_some(), "ssh 连接激活后应记录隧道端点");
         let env = conn::cli_env(&active);
         let docker_host = env
             .iter()
