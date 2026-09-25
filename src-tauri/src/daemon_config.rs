@@ -77,8 +77,21 @@ fn trim(s: &[u8]) -> String {
     String::from_utf8_lossy(s).trim().to_string()
 }
 
+/// 本模块的读写/重启命令面向 Linux 本机 Docker（/etc/docker/daemon.json + pkexec/systemctl），
+/// Windows 版不支持本地 daemon 管理（UI 亦隐藏入口，此处双保险）
+#[cfg(windows)]
+fn unsupported_platform() -> CmdResult<()> {
+    Err("该功能仅支持 Linux 本机 Docker".to_string())
+}
+
+#[cfg(not(windows))]
+fn unsupported_platform() -> CmdResult<()> {
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn read_daemon_config() -> CmdResult<DaemonConfigDto> {
+    unsupported_platform()?;
     let (exists, v) = read_daemon_json()?;
     let registry_mirrors = v
         .get("registry-mirrors")
@@ -114,6 +127,7 @@ pub async fn read_daemon_config() -> CmdResult<DaemonConfigDto> {
 /// shell 脚本内容全部由应用侧生成（仅含固定路径），用户输入只进入 JSON 文件内容，无注入面。
 #[tauri::command]
 pub async fn apply_mirrors(mirrors: Vec<String>) -> CmdResult<()> {
+    unsupported_platform()?;
     let mirrors = clean_mirrors(&mirrors);
     let (exists, text) = merged_daemon_json(&mirrors)?;
 
@@ -150,6 +164,7 @@ pub async fn apply_mirrors(mirrors: Vec<String>) -> CmdResult<()> {
 /// 经 pkexec 重启 Docker 服务（systemctl restart docker）
 #[tauri::command]
 pub async fn restart_docker() -> CmdResult<()> {
+    unsupported_platform()?;
     let out = tokio::time::timeout(
         Duration::from_secs(60),
         tokio::process::Command::new("pkexec")
@@ -169,6 +184,7 @@ pub async fn restart_docker() -> CmdResult<()> {
 /// 生成手动执行的终端命令（pkexec 不可用时的回退），JSON 已与现有 daemon.json 合并
 #[tauri::command]
 pub async fn generate_mirrors_command(mirrors: Vec<String>) -> CmdResult<String> {
+    unsupported_platform()?;
     let mirrors = clean_mirrors(&mirrors);
     let (_, text) = merged_daemon_json(&mirrors)?;
     // shell 单引号转义，防止 JSON 内容意外闭合引号

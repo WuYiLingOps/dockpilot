@@ -13,6 +13,7 @@ import { useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { toast } from "sonner";
 import { api } from "../../lib/api";
+import { useIsWindows } from "../../lib/platform";
 import { useSettings, useSwitchConnection, useUpdateSettings } from "../../lib/settings";
 import {
   CONNECTION_KINDS,
@@ -83,6 +84,8 @@ export function ConnectionSettings() {
   const { data: settings } = useSettings();
   const update = useUpdateSettings();
   const switchConn = useSwitchConnection();
+  // Windows 版不支持本地 Docker，隐藏「本地」连接类型
+  const isWindows = useIsWindows();
 
   const [draft, setDraft] = useState<ConnectionProfile | null>(null);
   const [isNew, setIsNew] = useState(false);
@@ -303,7 +306,7 @@ export function ConnectionSettings() {
           variant="outline"
           className="shrink-0"
           onClick={() => {
-            setDraft(emptyDraft());
+            setDraft(emptyDraft(isWindows ? "ssh" : "local"));
             setIsNew(true);
           }}
         >
@@ -345,7 +348,7 @@ export function ConnectionSettings() {
             <div>
               <div className="mb-1.5 text-[12px] text-fg3">连接类型</div>
               <SegmentedControl
-                options={CONNECTION_KINDS}
+                options={CONNECTION_KINDS.filter((k) => !(isWindows && k.key === "local"))}
                 value={draft.kind}
                 onChange={(k) => setDraft({ ...draft, kind: k })}
               />

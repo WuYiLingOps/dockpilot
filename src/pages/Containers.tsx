@@ -12,6 +12,7 @@ import {
 import { useState } from "react";
 import { toast } from "sonner";
 import { api } from "../lib/api";
+import { useIsWindows } from "../lib/platform";
 import { useSettings } from "../lib/settings";
 import type { ContainerDto } from "../types/docker";
 import { useContainerActions } from "../hooks/useContainerActions";
@@ -50,6 +51,8 @@ export function Containers({
   const [createOpen, setCreateOpen] = useState(false);
   const { action } = useContainerActions();
   const { data: settings } = useSettings();
+  // Windows 版编排功能隐藏，compose 项目徽章不可点击跳转
+  const isWindows = useIsWindows();
 
   const query = useQuery({
     queryKey: ["containers"],
@@ -141,7 +144,7 @@ export function Containers({
                 <div className="min-w-0">
                   <div className="flex items-center gap-1.5">
                     <span className="truncate font-medium text-fg">{c.name}</span>
-                    {c.compose_project && (
+                    {c.compose_project && !isWindows && (
                       <button
                         type="button"
                         title={`compose 项目：${c.compose_project}，点击查看编排详情`}
@@ -153,6 +156,14 @@ export function Containers({
                       >
                         {c.compose_project}
                       </button>
+                    )}
+                    {c.compose_project && isWindows && (
+                      <span
+                        title={`compose 项目：${c.compose_project}`}
+                        className="shrink-0 rounded-full bg-accent/10 px-2 py-0.5 text-[10.5px] font-medium leading-4 text-accent"
+                      >
+                        {c.compose_project}
+                      </span>
                     )}
                   </div>
                   <div className="truncate font-mono text-[11px] text-fg3">

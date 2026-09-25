@@ -1,6 +1,7 @@
 name: CI
 
-# push 到 main 与所有 PR：跑后端测试（含依赖 Docker daemon 的集成测试）与前端构建
+# push 到 main 与所有 PR：Linux 跑后端测试（含依赖 Docker daemon 的集成测试）与前端构建；
+# Windows 跑纯逻辑单测（集成测试依赖本机 daemon，仅 unix 编译）与前端构建
 on:
   push:
     branches: [main]
@@ -39,6 +40,34 @@ jobs:
         run: docker pull busybox:stable
 
       - name: cargo test（含 Docker 集成测试，runner 自带 daemon）
+        working-directory: src-tauri
+        run: cargo test --locked
+
+      - name: 前端构建
+        run: npm run build
+
+  check-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: 缓存 Cargo 编译产物
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: 安装 Node 依赖
+        run: npm ci --include=dev --registry=https://registry.npmjs.org/
+
+      # 集成测试按 cfg(unix) 门控，Windows 上只跑纯逻辑单测（验证平台分支可编译可运行）
+      - name: cargo test
         working-directory: src-tauri
         run: cargo test --locked
 

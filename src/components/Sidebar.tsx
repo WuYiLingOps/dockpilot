@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { api } from "../lib/api";
+import { useIsWindows } from "../lib/platform";
 import { activeConnection, useSettings, useSwitchConnection } from "../lib/settings";
 import type { ConnectionKind } from "../types/settings";
 import { SidebarTopBar } from "./TitleBar";
@@ -189,6 +190,8 @@ export function Sidebar({
     enabled: page === "storage",
   });
 
+  // Windows 版依赖本机 docker CLI 的编排功能本期不可用，隐藏导航入口
+  const isWindows = useIsWindows();
   const counts: Partial<Record<PageKey, number | undefined>> = {
     containers: containers.data?.length,
     images: images.data?.length,
@@ -201,7 +204,7 @@ export function Sidebar({
       <SidebarTopBar />
 
       <nav className="mt-1.5 flex-1 space-y-0.5 px-3">
-        {NAV.map(({ key, label, icon: Icon }) => (
+        {NAV.filter(({ key }) => !(isWindows && key === "compose")).map(({ key, label, icon: Icon }) => (
           <button
             key={key}
             type="button"
