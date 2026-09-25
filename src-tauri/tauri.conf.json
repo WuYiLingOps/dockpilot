@@ -28,7 +28,8 @@
   "bundle": {
     "active": true,
     "targets": [
-      "deb"
+      "deb",
+      "nsis"
     ],
     "icon": [
       "icons/32x32.png",

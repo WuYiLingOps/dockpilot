@@ -65,7 +65,7 @@ jobs:
             exit 1;
           }
 
-      # tauri-action 按 runner 平台构建 bundle.targets 中的对应目标（Linux 出 deb，Windows 出 NSIS）
+      # tauri-action 按 runner 平台构建：Linux 出 deb，Windows 出 NSIS（bundle.targets 需同时声明两者）
       - name: 构建并发布 Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: tauri-apps/tauri-action@v0
