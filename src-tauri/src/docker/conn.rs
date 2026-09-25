@@ -15,19 +15,20 @@ const TIMEOUT: u64 = 120;
 /// 测试/切换连接时的连通性验证超时（秒），避免不可达地址长时间阻塞 UI
 const PROBE_TIMEOUT: u64 = 8;
 
-/// 当前活跃连接：profile 为原始配置；ssh 类型经本地隧道转为 socket 连接后，
-/// 隧道 socket 路径记录在 tunnel_socket（compose CLI 等子进程复用同一条隧道）
+/// 当前活跃连接：profile 为原始配置；ssh 类型经本地隧道连接，隧道本地端点记录在
+/// tunnel_endpoint（unix 为 socket 路径，windows 为 127.0.0.1:port，
+/// compose CLI 等子进程复用同一条隧道）
 #[derive(Debug, Clone)]
 pub struct ActiveConn {
     pub profile: ConnectionProfile,
-    pub tunnel_socket: Option<String>,
+    pub tunnel_endpoint: Option<String>,
 }
 
 impl ActiveConn {
     pub fn new(profile: ConnectionProfile) -> Self {
         Self {
             profile,
-            tunnel_socket: None,
+            tunnel_endpoint: None,
         }
     }
 
@@ -40,7 +41,7 @@ impl ActiveConn {
                     self.profile.socket_path.clone()
                 }
             }
-            "ssh" => self.tunnel_socket.clone().unwrap_or_default(),
+            "ssh" => self.tunnel_endpoint.clone().unwrap_or_default(),
             _ => String::new(),
         }
     }
@@ -94,12 +95,12 @@ pub async fn docker() -> CmdResult<Docker> {
             None => (0, ActiveConn::new(ConnectionProfile::default_local())),
         }
     };
-    let (d, tunnel_socket) = build_conn(&conn, TIMEOUT).await?;
+    let (d, tunnel_endpoint) = build_conn(&conn, TIMEOUT).await?;
     // 仅当活跃连接未在建连期间被切换时才缓存
     let mut w = STATE.write().unwrap();
     if let Some((cur_gen, c)) = w.current.as_mut() {
         if *cur_gen == gen {
-            c.tunnel_socket = tunnel_socket;
+            c.tunnel_endpoint = tunnel_endpoint;
             w.docker = Some((gen, d.clone()));
         }
     }
@@ -111,16 +112,27 @@ fn build_err(e: bollard::errors::Error) -> String {
     format!("连接 Docker daemon 失败: {e}")
 }
 
-/// 按连接类型构建 bollard 连接；ssh 先建立/复用本地 SSH 隧道再走 socket。
-/// 返回 (连接, 隧道 socket 路径)。
+/// 按连接类型构建 bollard 连接；ssh 先建立/复用本地 SSH 隧道再连接。
+/// 返回 (连接, 隧道本地端点)。
 pub async fn build_conn(conn: &ActiveConn, timeout: u64) -> CmdResult<(Docker, Option<String>)> {
     let p = &conn.profile;
     match p.kind.as_str() {
+        // 本地连接依赖 unix socket，Windows 版不支持本地 Docker（含 WSL），仅提供远程连接
         "local" => {
-            let path = conn.effective_socket();
-            let d = Docker::connect_with_socket(&path, timeout, API_DEFAULT_VERSION)
-                .map_err(|e| format!("连接 Docker daemon 失败（socket: {path}）: {e}"))?;
-            Ok((d, None))
+            #[cfg(unix)]
+            {
+                let path = conn.effective_socket();
+                let d = Docker::connect_with_socket(&path, timeout, API_DEFAULT_VERSION)
+                    .map_err(|e| format!("连接 Docker daemon 失败（socket: {path}）: {e}"))?;
+                Ok((d, None))
+            }
+            #[cfg(windows)]
+            {
+                Err(
+                    "Windows 版不支持本地 Docker 连接，请在设置中配置远程连接（SSH / TLS / TCP）"
+                        .into(),
+                )
+            }
         }
         "tcp" => {
             let d = Docker::connect_with_http(&format!("tcp://{}", p.host), timeout, API_DEFAULT_VERSION)
@@ -153,10 +165,24 @@ pub async fn build_conn(conn: &ActiveConn, timeout: u64) -> CmdResult<(Docker, O
             Ok((d, None))
         }
         "ssh" => {
-            let sock = tunnel::ensure(p).await?;
-            let d = Docker::connect_with_socket(&sock, timeout, API_DEFAULT_VERSION)
+            // 本地端点：unix 为 socket 文件路径，windows 为 127.0.0.1:port
+            let endpoint = tunnel::ensure(p).await?;
+            #[cfg(unix)]
+            {
+                let d = Docker::connect_with_socket(&endpoint, timeout, API_DEFAULT_VERSION)
+                    .map_err(|e| format!("经 SSH 隧道连接 Docker daemon 失败: {e}"))?;
+                Ok((d, Some(endpoint)))
+            }
+            #[cfg(windows)]
+            {
+                let d = Docker::connect_with_http(
+                    &format!("tcp://{endpoint}"),
+                    timeout,
+                    API_DEFAULT_VERSION,
+                )
                 .map_err(|e| format!("经 SSH 隧道连接 Docker daemon 失败: {e}"))?;
-            Ok((d, Some(sock)))
+                Ok((d, Some(endpoint)))
+            }
         }
         other => Err(format!("未知连接类型: {other}")),
     }
@@ -232,7 +258,7 @@ pub async fn switch_connection(app: tauri::AppHandle, id: String) -> CmdResult<C
     })?;
 
     // 验证通过后按日常超时重建正式连接（探测连接的超时偏短，不适合留给命令层）
-    let (d, tunnel_socket) = build_conn(&conn, TIMEOUT).await?;
+    let (d, tunnel_endpoint) = build_conn(&conn, TIMEOUT).await?;
 
     // 清理旧连接的资源：所有长驻流、终端会话、其他 ssh 隧道
     app.state::<super::state::Streams>().cancel_all();
@@ -245,7 +271,7 @@ pub async fn switch_connection(app: tauri::AppHandle, id: String) -> CmdResult<C
         gen,
         ActiveConn {
             profile: profile.clone(),
-            tunnel_socket,
+            tunnel_endpoint,
         },
     ));
     w.docker = Some((gen, d));
@@ -267,7 +293,7 @@ pub async fn switch_connection(app: tauri::AppHandle, id: String) -> CmdResult<C
 }
 
 /// compose 等 docker CLI 子进程所需的环境变量：与 bollard 连接指向同一 daemon。
-/// ssh 复用本地隧道 socket（认证与密钥配置与 bollard 保持一致）。
+/// ssh 复用本地隧道（认证与密钥配置与 bollard 保持一致）。
 pub fn cli_env(conn: &ActiveConn) -> Vec<(String, String)> {
     let p = &conn.profile;
     match p.kind.as_str() {
@@ -278,8 +304,12 @@ pub fn cli_env(conn: &ActiveConn) -> Vec<(String, String)> {
             ("DOCKER_CERT_PATH".into(), p.cert_path.clone()),
             ("DOCKER_TLS_VERIFY".into(), "1".into()),
         ],
-        "ssh" => match &conn.tunnel_socket {
+        "ssh" => match &conn.tunnel_endpoint {
+            // 隧道端点形态随平台不同：unix 为 socket 路径，windows 为本地 TCP 端口
+            #[cfg(unix)]
             Some(sock) => vec![("DOCKER_HOST".into(), format!("unix://{sock}"))],
+            #[cfg(windows)]
+            Some(endpoint) => vec![("DOCKER_HOST".into(), format!("tcp://{endpoint}"))],
             // 隧道尚未建立时退回 docker CLI 原生 ssh 传输（用用户自己的 ssh 配置）
             None => vec![("DOCKER_HOST".into(), format!("ssh://{}", p.host))],
         },
@@ -354,16 +384,20 @@ mod tests {
             ]
         );
 
-        let mut ssh = ActiveConn::new(ConnectionProfile {
-            kind: "ssh".into(),
-            host: "root@10.0.0.5".into(),
-            ..Default::default()
-        });
-        ssh.tunnel_socket = Some("/tmp/tunnel.sock".into());
-        assert_eq!(
-            cli_env(&ssh),
-            vec![("DOCKER_HOST".into(), "unix:///tmp/tunnel.sock".into())]
-        );
+        // ssh 隧道端点形态随平台不同（unix 为 socket 路径、windows 为本地 TCP 端口），仅 unix 断言
+        #[cfg(unix)]
+        {
+            let mut ssh = ActiveConn::new(ConnectionProfile {
+                kind: "ssh".into(),
+                host: "root@10.0.0.5".into(),
+                ..Default::default()
+            });
+            ssh.tunnel_endpoint = Some("/tmp/tunnel.sock".into());
+            assert_eq!(
+                cli_env(&ssh),
+                vec![("DOCKER_HOST".into(), "unix:///tmp/tunnel.sock".into())]
+            );
+        }
     }
 
     #[test]
