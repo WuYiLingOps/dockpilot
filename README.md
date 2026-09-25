@@ -212,26 +212,28 @@ update-desktop-database ~/.local/share/applications
 
 ## 构建与安装
 
-Linux 使用 `build_deb.sh` 打包 deb；Windows 使用 GitHub Actions 的 Windows runner 构建 NSIS 安装包。
-一键脚本（打包 / 打包并安装 / 安装 / 卸载）：
+Linux 使用 `management.sh` 打包 deb；Windows 使用 GitHub Actions 的 Windows runner 构建 NSIS 安装包。
+一键脚本支持版本同步、打包、安装和卸载：
 
 ```bash
-./build_deb.sh            # 交互菜单
-./build_deb.sh build      # 打包 deb（npm run tauri build）
-./build_deb.sh deploy     # 打包并自动安装（普通用户执行，安装时自动 sudo 提权；sudo 执行亦可，打包阶段自动降权）
-sudo ./build_deb.sh install    # 安装最新的 deb（自动检查 docker 组）
-sudo ./build_deb.sh uninstall  # 卸载 dock-pilot
+./management.sh build       # 打包 deb（使用项目当前版本）
+./management.sh build 0.3.2 # 同步版本号为 0.3.2 后打包 deb
+./management.sh version 0.3.2 # 只同步版本号，不执行构建
+./management.sh install   # 安装最新的 deb（脚本自动通过 sudo 提权）
+./management.sh uninstall # 卸载 dock-pilot（脚本自动通过 sudo 提权）
 ```
+
+`build` 完成后会输出相对项目目录的 deb 安装包路径。
 
 手动方式：
 
 ```bash
 npm run tauri build
 # 产物：src-tauri/target/release/bundle/deb/DockPilot_<版本>_<架构>.deb（deb 包名为 dock-pilot）
-sudo apt install ./src-tauri/target/release/bundle/deb/DockPilot_0.1.0+20260919_amd64.deb
+sudo apt install ./src-tauri/target/release/bundle/deb/DockPilot_0.3.1_amd64.deb
 ```
 
-说明：`./build_deb.sh build` 打包时会自动清理旧 deb，并给版本号附加当日日期（如 `0.1.0+20260919`），便于追溯与覆盖安装；`install`/`uninstall` 分别对应 `dpkg` 包 `dock-pilot` 的安装与卸载。
+说明：`version <版本号>` 会同步更新 `package.json`、`package-lock.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock` 与 `src-tauri/tauri.conf.json`；`build <版本号>` 会先执行同样的版本同步。`management.sh build` 打包时会自动清理旧 deb，并给版本号附加当日日期（如 `0.3.1+20260925`），便于追溯与覆盖安装；构建阶段通过 Cargo 命令行 `--config` 参数覆盖项目本地和用户全局配置，脚本内置阿里云、清华和中科大源，当前默认使用清华源，切换时按注释成对启用对应的 `replace-with` 和 `registry` 参数；`install`/`uninstall` 分别对应 `dpkg` 包 `dock-pilot` 的安装与卸载。
 
 ## 测试
 
