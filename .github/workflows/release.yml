@@ -1,6 +1,7 @@
 name: Release
 
-# 推送 v* tag 时自动构建 deb 并发布 GitHub Release；也可在 Actions 页手动触发（仅构建，上传 artifact 不发版）
+# 推送 v* tag 时自动构建 deb（Linux）与 NSIS 安装包（Windows）并发布 GitHub Release；
+# 也可在 Actions 页手动触发（仅构建，上传 artifact 不发版）
 on:
   push:
     tags: ["v*"]
@@ -11,12 +12,23 @@ permissions:
 
 jobs:
   release:
-    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            platform: linux
+            artifact: src-tauri/target/release/bundle/deb/*.deb
+          - os: windows-latest
+            platform: windows
+            artifact: src-tauri/target/release/bundle/nsis/*.exe
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
 
-      # Tauri v2 Linux 构建的系统依赖（官方 prerequisites）
+      # Tauri v2 Linux 构建的系统依赖（官方 prerequisites）；Windows runner 自带 WebView2 无需安装
       - name: 安装 Tauri Linux 系统依赖
+        if: matrix.platform == 'linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file \
@@ -42,9 +54,10 @@ jobs:
         run: npm run tauri -- --version
 
       # 项目惯例三处版本号同步改（package.json / Cargo.toml / tauri.conf.json），
-      # 发版 tag 必须与 tauri.conf.json 一致，避免 Release 与 deb 内版本错位
+      # 发版 tag 必须与 tauri.conf.json 一致，避免 Release 与安装包内版本错位
       - name: 校验 tag 与版本号一致
         if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
         run: |
           V=$(node -p "require('./src-tauri/tauri.conf.json').version")
           [ "v$V" = "${{ github.ref_name }}" ] || {
@@ -52,6 +65,7 @@ jobs:
             exit 1;
           }
 
+      # tauri-action 按 runner 平台构建 bundle.targets 中的对应目标（Linux 出 deb，Windows 出 NSIS）
       - name: 构建并发布 Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: tauri-apps/tauri-action@v0
@@ -60,7 +74,7 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "DockPilot ${{ github.ref_name }}"
-          releaseBody: "Ubuntu 22.04 / 24.04 的 deb 安装包见下方 Assets（构建于 ubuntu-22.04 runner，兼容 24.04）。"
+          releaseBody: "Ubuntu 22.04 / 24.04 的 deb 安装包与 Windows 10/11 的 NSIS 安装包（DockPilot_x64-setup.exe）见下方 Assets。Windows 版仅支持远程连接（SSH / TLS / TCP），需启用 OpenSSH 客户端；未签名，首次运行 SmartScreen 会提示保留。"
           releaseDraft: false
           prerelease: false
 
@@ -69,6 +83,6 @@ jobs:
         if: github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v4
         with:
-          name: DockPilot-deb
-          path: src-tauri/target/release/bundle/deb/*.deb
+          name: DockPilot-${{ matrix.platform }}
+          path: ${{ matrix.artifact }}
           if-no-files-found: error
