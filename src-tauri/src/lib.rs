@@ -9,9 +9,18 @@ use tokio::sync::broadcast;
 use docker::dto::DockerEventDto;
 use docker::state::{ExecSessions, Streams};
 
+/// 当前运行平台（std::env::consts::OS："linux" / "windows" / "macos"），
+/// 前端据此适配入口与提示文案
+#[tauri::command]
+fn platform() -> String {
+    std::env::consts::OS.to_string()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // WebKitGTK 在部分 NVIDIA 驱动上 DMABUF 渲染会黑屏/花屏，检测到 NVIDIA 时自动兜底
+    // （Windows 走 WebView2，无此问题）
+    #[cfg(target_os = "linux")]
     if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none()
         && std::path::Path::new("/proc/driver/nvidia").exists()
     {
@@ -47,6 +56,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            platform,
             docker::system::docker_info,
             docker::system::host_stats,
             docker::system::system_df,
