@@ -19,6 +19,8 @@ export interface ConnectionProfile {
   key_path: string;
   /** ssh: 远程 docker socket 路径（空 = /var/run/docker.sock） */
   remote_socket: string;
+  /** ssh: 跳板机地址（user@host[:port]，空 = 直连，经 ProxyJump 中转） */
+  jump_host: string;
 }
 
 /** 后端 test_connection 返回 */
@@ -40,6 +42,8 @@ export interface AppSettings {
   logs_timestamps: boolean;
   terminal_shell: TerminalShell;
   mirror_custom: string[];
+  /** 容器异常（非零退出/OOM/健康检查失败）时发送系统通知 */
+  notifications_enabled: boolean;
 }
 
 /** 连接类型的中文标签与说明 */
