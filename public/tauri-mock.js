@@ -614,6 +614,66 @@ volumes:
         case "container_action":
         case "remove_image":
           return Promise.resolve();
+        case "export_images": {
+          // 模拟 docker save：总量按所选镜像大小合计（浏览器端不落盘）
+          const sid = `sid-export-${Math.random().toString(36).slice(2, 8)}`;
+          streams[sid] = args;
+          const total = (args.refs ?? []).reduce((acc, ref) => {
+            const img = images.find((i) => i.tags.includes(ref) || i.id === ref);
+            return acc + (img?.size ?? 50 * 1024 * 1024);
+          }, 0);
+          let written = 0;
+          const step = Math.max(total / 14, 2 * 1024 * 1024);
+          const timer = setInterval(() => {
+            if (streams[sid] === undefined) return clearInterval(timer);
+            written = Math.min(total, written + step);
+            if (written < total) {
+              push(args.onProgress, { written, done: false, error: null, cancelled: false });
+            } else {
+              clearInterval(timer);
+              delete streams[sid];
+              push(args.onProgress, { written: total, done: true, error: null, cancelled: false });
+            }
+          }, 180);
+          return Promise.resolve(sid);
+        }
+        case "import_image": {
+          // 模拟 docker load：逐行输出加载进度，结束时往镜像列表补一条
+          const sid = `sid-import-${Math.random().toString(36).slice(2, 8)}`;
+          streams[sid] = args;
+          const lines = [
+            "Loading layer  46.67MB/46.67MB",
+            "Loading layer  12.34MB/12.34MB",
+            "Loading layer  5.89MB/5.89MB",
+          ];
+          let n = 0;
+          const timer = setInterval(() => {
+            if (streams[sid] === undefined) return clearInterval(timer);
+            if (n < lines.length) {
+              push(args.onProgress, { status: lines[n], id: null, progress: null, error: null, done: false });
+              n++;
+              return;
+            }
+            clearInterval(timer);
+            delete streams[sid];
+            push(args.onProgress, {
+              status: "Loaded image: redis:7.4-alpine",
+              id: null, progress: null, error: null, done: false,
+            });
+            images.unshift({
+              id: "sha256:c0ffee0000" + "1234567890".repeat(5) + "abcd",
+              tags: ["redis:7.4-alpine"],
+              size: 43_200_000,
+              created: Math.floor(Date.now() / 1000),
+            });
+            push(args.onProgress, { status: null, id: null, progress: null, error: null, done: true });
+          }, 320);
+          return Promise.resolve(sid);
+        }
+        case "tag_image":
+          return Promise.resolve();
+        case "untag_image":
+          return Promise.resolve(false);
         case "subscribe_events":
         case "stream_logs":
         case "stream_stats":
