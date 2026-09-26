@@ -1,6 +1,6 @@
 [package]
 name = "dockpilot"
-version = "0.3.1"
+version = "0.3.2"
 description = "轻量级 Docker 桌面管理工具"
 authors = ["hj"]
 edition = "2021"
@@ -22,6 +22,8 @@ tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
 # 编排页选择 compose 文件
 tauri-plugin-dialog = "2"
+# 容器异常（非零退出/OOM/健康检查失败）的系统桌面通知
+tauri-plugin-notification = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # ssl：远程 TLS 连接（rustls/ring，与 reqwest 的 rustls 路线一致）；默认 features 已含 http + pipe
