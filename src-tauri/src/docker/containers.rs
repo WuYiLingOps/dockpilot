@@ -10,11 +10,29 @@ use bollard::models::{
 
 use super::conn::{docker, CmdResult};
 use super::dto::{
-    ContainerCreateSpec, ContainerDto, KeyValueSpec, PortDto, PortMappingSpec, VolumeMountSpec,
+    ContainerCreateSpec, ContainerDto, ContainerHealthDto, HealthCheckLogDto, KeyValueSpec,
+    PortDto, PortMappingSpec, VolumeMountSpec,
 };
+
+/// 从 `docker ps` 的 Status 字符串解析健康检查状态：
+/// "Up 3 minutes (healthy)" → healthy，"(health: starting)" → starting，
+/// "(unhealthy)" → unhealthy；无健康检查时为 None
+fn parse_health(status: &str) -> Option<String> {
+    let inner = status
+        .split_once('(')
+        .and_then(|(_, rest)| rest.split_once(')'))
+        .map(|(inner, _)| inner.trim())?;
+    match inner {
+        "healthy" => Some("healthy".into()),
+        "unhealthy" => Some("unhealthy".into()),
+        "health: starting" => Some("starting".into()),
+        _ => None,
+    }
+}
 
 pub(super) fn map_container(c: &ContainerSummary) -> ContainerDto {
     let labels = c.labels.as_ref();
+    let status = c.status.clone().unwrap_or_default();
     ContainerDto {
         id: c.id.clone().unwrap_or_default(),
         name: c
@@ -25,7 +43,8 @@ pub(super) fn map_container(c: &ContainerSummary) -> ContainerDto {
             .unwrap_or_default(),
         image: c.image.clone().unwrap_or_default(),
         state: c.state.as_ref().map(|s| s.to_string()).unwrap_or_default(),
-        status: c.status.clone().unwrap_or_default(),
+        health: parse_health(&status),
+        status,
         created: c.created.unwrap_or(0),
         ports: c
             .ports
@@ -57,6 +76,40 @@ pub async fn list_containers(all: bool) -> CmdResult<Vec<ContainerDto>> {
         .await
         .map_err(|e| format!("获取容器列表失败: {e}"))?;
     Ok(list.iter().map(map_container).collect())
+}
+
+/// 健康检查详情（inspect 的 State.Health；未配置 healthcheck 时 status 为 "none"）
+#[tauri::command]
+pub async fn container_health(id: String) -> CmdResult<ContainerHealthDto> {
+    let d = docker().await?;
+    let inspect = d
+        .inspect_container(&id, None::<bollard::container::InspectContainerOptions>)
+        .await
+        .map_err(|e| format!("查看容器失败: {e}"))?;
+    let health = inspect.state.and_then(|s| s.health).unwrap_or_default();
+    Ok(ContainerHealthDto {
+        status: health
+            .status
+            .map(|s| s.as_ref().to_string())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| "none".into()),
+        failing_streak: health.failing_streak.unwrap_or(0),
+        log: health
+            .log
+            .unwrap_or_default()
+            .iter()
+            .rev()
+            .map(|r| HealthCheckLogDto {
+                exit_code: r.exit_code.unwrap_or(-1),
+                start: r
+                    .start
+                    .as_ref()
+                    .map(|t| t.to_string())
+                    .unwrap_or_default(),
+                output: r.output.clone().unwrap_or_default(),
+            })
+            .collect(),
+    })
 }
 
 /// action: start | stop | restart | pause | unpause | remove
@@ -333,5 +386,22 @@ mod tests {
         assert_eq!(build_resources(None, None).unwrap(), (None, None));
         assert!(build_resources(Some(0), None).is_err());
         assert!(build_resources(None, Some(-1.0)).is_err());
+    }
+
+    #[test]
+    fn health_parsing_from_status() {
+        assert_eq!(parse_health("Up 3 minutes (healthy)").as_deref(), Some("healthy"));
+        assert_eq!(
+            parse_health("Up 3 minutes (health: starting)").as_deref(),
+            Some("starting")
+        );
+        assert_eq!(
+            parse_health("Up 2 days (unhealthy)").as_deref(),
+            Some("unhealthy")
+        );
+        // 无健康检查、已退出、非健康相关的括号内容均视为 None
+        assert_eq!(parse_health("Up 51 minutes"), None);
+        assert_eq!(parse_health("Exited (0) 3 days ago"), None);
+        assert_eq!(parse_health(""), None);
     }
 }
