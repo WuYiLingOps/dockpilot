@@ -19,6 +19,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
       cert_path: "",
       key_path: "",
       remote_socket: "",
+      jump_host: "",
     },
   ],
   active_connection_id: "local",
@@ -28,6 +29,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   logs_timestamps: false,
   terminal_shell: "bash",
   mirror_custom: [],
+  notifications_enabled: true,
 };
 
 /** 当前活跃连接配置（列表异常时回落默认本地连接） */
