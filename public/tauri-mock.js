@@ -817,6 +817,8 @@ volumes:
           return Promise.resolve("/home/user/myapp-stack/compose.yaml");
         case "plugin:dialog|save":
           return Promise.resolve("/home/user/container-export.log");
+        case "plugin:opener|open_url":
+          return Promise.resolve();
         case "export_container_logs":
           return Promise.resolve(5 * 1024);
 

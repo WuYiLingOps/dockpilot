@@ -1,4 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
+import { openUrl } from "@tauri-apps/plugin-opener";
+import { ExternalLink } from "lucide-react";
 import { api } from "../lib/api";
 import { useIsWindows } from "../lib/platform";
 import { useSettings, useUpdateSettings } from "../lib/settings";
@@ -7,6 +9,8 @@ import { PageHeader, Select, Checkbox } from "../components/ui";
 import { ConnectionSettings } from "../components/settings/ConnectionSettings";
 import { MirrorSettings } from "../components/settings/MirrorSettings";
 import type { AppSettings } from "../types/settings";
+
+const GITHUB_URL = "https://github.com/WuYiLingOps/dockpilot";
 
 /** 设置分组卡片 */
 function Card({
@@ -195,6 +199,17 @@ export function Settings() {
             <span className="font-mono text-[13px] text-fg2">
               {version.data ?? "-"}
             </span>
+          </Row>
+          <Row label="GitHub" desc="项目地址，欢迎 Star / 反馈 Issue">
+            <button
+              type="button"
+              title={GITHUB_URL}
+              onClick={() => openUrl(GITHUB_URL).catch(() => {})}
+              className="inline-flex h-7 items-center gap-1.5 rounded-btn border border-edge-strong bg-panel px-2.5 text-[12px] text-fg2 transition-colors hover:bg-hover hover:text-fg"
+            >
+              <span className="font-mono">github.com/WuYiLingOps/dockpilot</span>
+              <ExternalLink size={12} className="shrink-0 text-fg3" />
+            </button>
           </Row>
           <Row label="Docker 引擎">
             <span className="font-mono text-[13px] text-fg2">
