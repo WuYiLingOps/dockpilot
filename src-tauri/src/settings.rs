@@ -8,6 +8,7 @@ use crate::docker::conn::CmdResult;
 /// - tcp:   host（host:port，明文 HTTP）
 /// - tls:   host（host:port）+ cert_path（证书目录，含 ca.pem / cert.pem / key.pem）
 /// - ssh:   host（user@host[:port]）+ 可选 key_path + 可选 remote_socket（rootless 等非默认路径）
+///          + 可选 jump_host（跳板机 user@host[:port]，经 ProxyJump 中转）
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct ConnectionProfile {
@@ -21,6 +22,8 @@ pub struct ConnectionProfile {
     pub key_path: String,
     /// ssh 类型：远程 docker socket 路径，空 = /var/run/docker.sock
     pub remote_socket: String,
+    /// ssh 类型：跳板机地址（user@host[:port]），空 = 直连
+    pub jump_host: String,
 }
 
 impl ConnectionProfile {
@@ -35,6 +38,7 @@ impl ConnectionProfile {
             cert_path: String::new(),
             key_path: String::new(),
             remote_socket: String::new(),
+            jump_host: String::new(),
         }
     }
 
@@ -83,6 +87,8 @@ pub struct AppSettings {
     pub terminal_shell: String,
     /// 用户自定义镜像加速源（区别于预设列表）
     pub mirror_custom: Vec<String>,
+    /// 容器异常（非零退出/OOM/健康检查失败）时发送系统通知
+    pub notifications_enabled: bool,
 }
 
 impl Default for AppSettings {
@@ -100,6 +106,7 @@ impl Default for AppSettings {
             logs_timestamps: false,
             terminal_shell: "bash".into(),
             mirror_custom: Vec::new(),
+            notifications_enabled: true,
         }
     }
 }
@@ -186,6 +193,7 @@ pub fn sanitize(mut s: AppSettings) -> AppSettings {
         c.cert_path = c.cert_path.trim().to_string();
         c.key_path = c.key_path.trim().to_string();
         c.remote_socket = c.remote_socket.trim().to_string();
+        c.jump_host = c.jump_host.trim().to_string();
         if c.id.is_empty() {
             c.id = uuid::Uuid::new_v4().to_string();
         }
@@ -402,6 +410,22 @@ mod tests {
         assert_eq!(normalize_conn_host("tcp", "10.0.0.5:2377"), "10.0.0.5:2377");
         assert_eq!(normalize_conn_host("ssh", "ssh://root@10.0.0.5:2222"), "root@10.0.0.5:2222");
         assert_eq!(normalize_conn_host("ssh", "root@10.0.0.5"), "root@10.0.0.5");
+    }
+
+    #[test]
+    fn sanitize_trims_jump_host() {
+        let s = sanitize(AppSettings {
+            connections: vec![ConnectionProfile {
+                id: "j1".into(),
+                name: "经跳板机".into(),
+                kind: "ssh".into(),
+                host: "root@10.0.0.9".into(),
+                jump_host: "  jump@10.0.0.1:22 ".into(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        });
+        assert_eq!(s.connections[0].jump_host, "jump@10.0.0.1:22");
     }
 
     #[test]
