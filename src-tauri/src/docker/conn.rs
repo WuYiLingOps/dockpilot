@@ -279,6 +279,7 @@ pub async fn switch_connection(app: tauri::AppHandle, id: String) -> CmdResult<C
 
     // 重启全局事件监听（旧任务持有旧连接句柄）
     super::events::start_global_listener(
+        &app,
         app.state::<tokio::sync::broadcast::Sender<crate::docker::dto::DockerEventDto>>()
             .inner()
             .clone(),
