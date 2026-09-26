@@ -37,6 +37,17 @@ type TestState =
   | { status: "ok"; ms: number; version: string }
   | { status: "fail"; error: string };
 
+function errorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === "string") return error;
+  try {
+    const serialized = JSON.stringify(error);
+    return serialized && serialized !== "{}" ? serialized : String(error);
+  } catch {
+    return String(error);
+  }
+}
+
 function displayUrl(p: ConnectionProfile): string {
   switch (p.kind) {
     case "local":
@@ -60,7 +71,12 @@ function validateDraft(p: ConnectionProfile): string | null {
     if (!p.host.trim()) return "请填写主机地址";
     if (!p.cert_path.trim()) return "请选择证书目录";
   }
-  if (p.kind === "ssh" && !p.host.trim()) return "请填写 SSH 地址";
+  if (p.kind === "ssh") {
+    if (!p.host.trim()) return "请填写 SSH 地址";
+    if (p.key_path.trim().toLowerCase().endsWith(".pub")) {
+      return "请选择私钥文件，不要选择 .pub 公钥文件（例如 id_rsa.pub）";
+    }
+  }
   return null;
 }
 
@@ -137,6 +153,7 @@ export function ConnectionSettings() {
     if (!draft || testing[draft.id]?.status === "testing") return;
     const err = validateDraft(draft);
     if (err) {
+      setTesting((t) => ({ ...t, [draft.id]: { status: "fail", error: err } }));
       toast.error(err);
       return;
     }
@@ -146,10 +163,10 @@ export function ConnectionSettings() {
       setTesting((t) =>
         r.ok
           ? { ...t, [draft.id]: { status: "ok", ms: r.latency_ms ?? 0, version: r.version } }
-          : { ...t, [draft.id]: { status: "fail", error: r.error } },
+          : { ...t, [draft.id]: { status: "fail", error: r.error || "连接失败" } },
       );
     } catch (e) {
-      setTesting((t) => ({ ...t, [draft.id]: { status: "fail", error: String(e) } }));
+      setTesting((t) => ({ ...t, [draft.id]: { status: "fail", error: errorMessage(e) } }));
     }
   };
 
@@ -161,10 +178,13 @@ export function ConnectionSettings() {
       setTesting((t) =>
         r.ok
           ? { ...t, [p.id]: { status: "ok", ms: r.latency_ms ?? 0, version: r.version } }
-          : { ...t, [p.id]: { status: "fail", error: r.error } },
+          : { ...t, [p.id]: { status: "fail", error: r.error || "连接失败" } },
       );
+      if (!r.ok) toast.error(`测试「${p.name}」失败: ${r.error || "连接失败"}`);
     } catch (e) {
-      setTesting((t) => ({ ...t, [p.id]: { status: "fail", error: String(e) } }));
+      const message = errorMessage(e);
+      setTesting((t) => ({ ...t, [p.id]: { status: "fail", error: message } }));
+      toast.error(`测试「${p.name}」失败: ${message}`);
     }
   };
 
@@ -196,7 +216,6 @@ export function ConnectionSettings() {
     try {
       const f = await open({
         multiple: false,
-        filters: [{ name: "私钥文件", extensions: ["*", "pem", "key"] }],
       });
       if (typeof f === "string" && draft) setDraft({ ...draft, key_path: f });
     } catch {
@@ -258,7 +277,11 @@ export function ConnectionSettings() {
                   {t.ms} ms{t.version ? ` · ${t.version}` : ""}
                 </Badge>
               )}
-              {t?.status === "fail" && <Badge tone="err">不可达</Badge>}
+              {t?.status === "fail" && (
+                <span title={t.error || "连接失败"}>
+                  <Badge tone="err">不可达</Badge>
+                </span>
+              )}
               <div
                 data-no-drag
                 className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100"
@@ -326,11 +349,6 @@ export function ConnectionSettings() {
             <Button variant="outline" onClick={() => void testDraft()} disabled={!draft}>
               {draftTest?.status === "testing" ? <Spinner className="h-3.5 w-3.5" /> : <Gauge size={14} />}
               测试连接
-              {draftTest?.status === "ok" && (
-                <span className="ml-1 text-[11px] text-ok">
-                  {draftTest.ms} ms{draftTest.version ? ` · ${draftTest.version}` : ""}
-                </span>
-              )}
             </Button>
             <div className="flex-1" />
             <Button variant="outline" onClick={() => setDraft(null)}>
@@ -459,10 +477,38 @@ export function ConnectionSettings() {
                   />
                 </label>
                 <div className="rounded-ctl border border-edge bg-panel2 p-2.5 text-[11px] leading-4 text-fg3">
-                  连接要求：本机已安装 ssh 客户端；认证仅支持密钥或 ssh-agent（不支持密码）；
+                  连接要求：本机已安装 ssh 客户端；认证仅支持私钥或 ssh-agent（不支持密码，不要选择 .pub 公钥文件）；
                   远程用户需有 docker 权限（已在 docker 组）。数据经 SSH 加密隧道传输。
                 </div>
               </>
+            )}
+
+            {draftTest?.status === "ok" && (
+              <div
+                role="status"
+                className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 rounded-ctl border border-ok/20 bg-ok/5 px-2.5 py-2 text-[12px]"
+              >
+                <Badge tone="ok">连接成功</Badge>
+                <span className="shrink-0 tabular-nums text-fg2">
+                  {draftTest.ms} ms
+                </span>
+                {draftTest.version && (
+                  <span
+                    className="min-w-0 max-w-full truncate font-mono text-[11px] text-fg3"
+                    title={draftTest.version}
+                  >
+                    Docker {draftTest.version}
+                  </span>
+                )}
+              </div>
+            )}
+            {draftTest?.status === "fail" && (
+              <div
+                role="alert"
+                className="max-h-28 overflow-auto whitespace-pre-wrap break-all rounded-ctl border border-err/20 bg-err/5 px-2.5 py-2 text-[12px] leading-4 text-err"
+              >
+                {draftTest.error || "连接失败"}
+              </div>
             )}
           </div>
         )}

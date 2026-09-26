@@ -11,6 +11,36 @@ use crate::settings::ConnectionProfile;
 
 use super::conn::CmdResult;
 
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+/// Windows 下优先使用系统 OpenSSH，避免命中 WindowsApps 的 ssh 应用别名。
+/// 那个别名会弹出窗口并立即退出，测试结果无法回到界面。
+#[cfg(windows)]
+fn ssh_program() -> CmdResult<std::path::PathBuf> {
+    let system = std::path::PathBuf::from(r"C:\Windows\System32\OpenSSH\ssh.exe");
+    if system.is_file() {
+        return Ok(system);
+    }
+    if let Ok(path) = std::env::var("PATH") {
+        for dir in path.split(';') {
+            if dir.to_ascii_lowercase().contains("windowsapps") {
+                continue;
+            }
+            let candidate = std::path::Path::new(dir).join("ssh.exe");
+            if candidate.is_file() {
+                return Ok(candidate);
+            }
+        }
+    }
+    Err("未找到 OpenSSH 客户端。请在「设置 → 应用 → 可选功能」中启用 OpenSSH 客户端后重试".into())
+}
+
+#[cfg(unix)]
+fn ssh_program() -> CmdResult<&'static str> {
+    Ok("ssh")
+}
+
 /// 活跃的 SSH 隧道：profile_id → 子进程 + 本地端点。
 /// 隧道进程随切换/应用退出显式回收，避免遗留孤儿 ssh。
 static TUNNELS: LazyLock<std::sync::Mutex<HashMap<String, Tunnel>>> =
@@ -115,7 +145,7 @@ async fn start(p: &ConnectionProfile) -> CmdResult<String> {
     #[cfg(windows)]
     let forward = format!("127.0.0.1:{local}:{remote}");
 
-    let mut cmd = Command::new("ssh");
+    let mut cmd = Command::new(ssh_program()?);
     cmd.arg("-N")
         // 转发失败立即退出，而不是挂着空连接
         .arg("-o")
@@ -130,12 +160,22 @@ async fn start(p: &ConnectionProfile) -> CmdResult<String> {
         .arg("BatchMode=yes")
         .arg("-L")
         .arg(&forward);
-    if !p.key_path.is_empty() {
-        cmd.arg("-i").arg(&p.key_path);
+    let key_path = p.key_path.trim();
+    if key_path.to_ascii_lowercase().ends_with(".pub") {
+        return Err(
+            "私钥路径指向了 .pub 公钥文件，请改用对应的私钥（例如 id_rsa，而不是 id_rsa.pub）"
+                .into(),
+        );
+    }
+    if !key_path.is_empty() {
+        cmd.arg("-i").arg(key_path);
     }
     cmd.arg(&p.host)
         .stdin(Stdio::null())
+        .stdout(Stdio::null())
         .stderr(Stdio::piped());
+    #[cfg(windows)]
+    cmd.creation_flags(CREATE_NO_WINDOW);
 
     let mut child = cmd.spawn().map_err(|e| spawn_ssh_err(e))?;
 

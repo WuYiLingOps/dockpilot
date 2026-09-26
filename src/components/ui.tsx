@@ -33,7 +33,7 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: ButtonVariant;
 }
 
-export function Button({ variant = "ghost", className, ...props }: ButtonProps) {
+export function Button({ variant = "ghost", className, type = "button", ...props }: ButtonProps) {
   return (
     <button
       className={cn(
@@ -41,6 +41,7 @@ export function Button({ variant = "ghost", className, ...props }: ButtonProps) 
         buttonStyles[variant],
         className,
       )}
+      type={type}
       {...props}
     />
   );
