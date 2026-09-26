@@ -1,9 +1,10 @@
+import { useQuery } from "@tanstack/react-query";
 import { useEffect, useId, useMemo, useState } from "react";
 import { Activity } from "lucide-react";
 import { api } from "../../lib/api";
 import { formatBytes } from "../../lib/format";
-import type { StatsTick } from "../../types/docker";
-import { EmptyState } from "../ui";
+import type { ContainerHealthDto, StatsTick } from "../../types/docker";
+import { Badge, EmptyState, HEALTH_META } from "../ui";
 
 const MAX_POINTS = 60;
 
@@ -170,6 +171,37 @@ function rates(cumulative: number[]): number[] {
   return cumulative.map((v, i) => (i === 0 ? 0 : Math.max(0, v - cumulative[i - 1])));
 }
 
+/** 健康检查状态卡片（未配置 healthcheck 时不渲染；不健康时展示最近一次检查输出） */
+function HealthCard({ id }: { id: string }) {
+  const { data } = useQuery({
+    queryKey: ["containerHealth", id],
+    queryFn: () => api.containerHealth(id),
+    refetchInterval: 10000,
+    retry: false,
+  });
+  const h: ContainerHealthDto | undefined = data;
+  if (!h || h.status === "none") return null;
+
+  const meta = HEALTH_META[h.status];
+  const last = h.log[0];
+  return (
+    <div className="rounded-card border border-edge bg-panel p-4 shadow-[var(--app-shadow)]">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[12px] font-medium text-fg2">健康检查</span>
+        <Badge tone={meta?.tone ?? "neutral"}>
+          {meta?.label ?? h.status}
+          {h.failing_streak > 0 ? ` · 连续失败 ${h.failing_streak} 次` : ""}
+        </Badge>
+      </div>
+      {h.status === "unhealthy" && last && (
+        <div className="mt-2 max-h-24 overflow-auto whitespace-pre-wrap break-all rounded-ctl bg-panel2 p-2.5 font-mono text-[11px] leading-4 text-fg2">
+          {last.output || "（检查命令无输出）"}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function OverviewView({ id, running }: { id: string; running: boolean }) {
   const [ticks, setTicks] = useState<StatsTick[]>([]);
 
@@ -203,6 +235,8 @@ export function OverviewView({ id, running }: { id: string; running: boolean }) 
 
   return (
     <div className="h-full space-y-4 overflow-auto p-4">
+      <HealthCard id={id} />
+
       <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">
         <StatCard label="CPU" value={`${(latest?.cpu_percent ?? 0).toFixed(1)}%`} />
         <StatCard
