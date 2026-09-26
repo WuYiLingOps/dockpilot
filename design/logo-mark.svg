@@ -1,12 +1,5 @@
-<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
-  <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#FFFFFF"/>
-      <stop offset="1" stop-color="#EFF4F9"/>
-    </linearGradient>
-  </defs>
-  <rect width="1024" height="1024" rx="224" fill="url(#bg)"/>
-  <g transform="translate(19.53,-77.27) scale(2.42)">
+<svg width="719" height="594" viewBox="55 121 297 245" xmlns="http://www.w3.org/2000/svg">
+  
   <!-- water -->
   <ellipse cx="191.5" cy="352" rx="127.5" ry="14" fill="#0A2E55"/>
   <!-- hull fill + inner shading -->
@@ -47,5 +40,5 @@
   <line x1="206.95" y1="164" x2="206.95" y2="203" stroke="#07325E" stroke-width="2.6" stroke-linecap="round"/>
   <line x1="209.55" y1="164" x2="209.55" y2="203" stroke="#2F6DAD" stroke-width="2.6" stroke-linecap="round"/>
   <!-- sparkle -->
-  <path d="M 315 121 C 321.16 148.3 325.65 153.84 350.5 160 C 325.65 166.16 321.16 171.7 315 199 C 308.84 171.7 304.35 166.16 279.5 160 C 304.35 153.84 308.84 148.3 315 121 Z" fill="#27DDF5"/></g>
+  <path d="M 315 121 C 321.16 148.3 325.65 153.84 350.5 160 C 325.65 166.16 321.16 171.7 315 199 C 308.84 171.7 304.35 166.16 279.5 160 C 304.35 153.84 308.84 148.3 315 121 Z" fill="#27DDF5"/>
 </svg>
