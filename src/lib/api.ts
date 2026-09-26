@@ -12,12 +12,20 @@ import type {
   NetworkDto,
   NetworkSpec,
   PullProgress,
+  PushProgress,
   StatsTick,
   SystemDfDto,
   VolumeDto,
   VolumeSpec,
 } from "../types/docker";
-import type { AppSettings, ConnectionProfile, ConnectionTestResult } from "../types/settings";
+import type {
+  AppSettings,
+  ConnectionProfile,
+  ConnectionTestResult,
+  RegistryProfile,
+  RegistrySpec,
+  RegistryTestResult,
+} from "../types/settings";
 import type { CleanupResultDto, DaemonConfigDto, DiskUsageDto } from "../types/daemon";
 import type {
   ComposeCliInfoDto,
@@ -104,6 +112,41 @@ export const api = {
 
   /** 移除镜像的某一个标签；返回是否连带删除了镜像（该标签是最后一个引用） */
   untagImage: (reference: string) => invoke<boolean>("untag_image", { reference }),
+
+  /** 推送镜像到 registry（凭据经请求头传给 daemon，不落远端盘）；返回取消函数 */
+  pushImage: (
+    imageRef: string,
+    registryId: string,
+    repository: string,
+    tag: string,
+    onProgress: (p: PushProgress) => void,
+  ): Unsubscribe => {
+    const ch = new Channel<PushProgress>();
+    ch.onmessage = onProgress;
+    return withCancel(
+      invoke<string>("push_image", {
+        imageRef,
+        registryId,
+        repository,
+        tag,
+        onProgress: ch,
+      }),
+    );
+  },
+
+  // ---- 镜像仓库凭据 ----
+
+  listRegistries: () => invoke<RegistryProfile[]>("list_registries"),
+
+  /** 新建或编辑凭据；password 为空串表示保留原密码 */
+  saveRegistry: (spec: RegistrySpec) =>
+    invoke<RegistryProfile>("save_registry", { spec }),
+
+  removeRegistry: (id: string) => invoke<void>("remove_registry", { id }),
+
+  /** 测试仓库连通性与凭据有效性（skipTlsVerify 仅作用于应用侧探测） */
+  testRegistry: (id: string, skipTlsVerify?: boolean) =>
+    invoke<RegistryTestResult>("test_registry", { id, skipTlsVerify }),
 
   streamLogs: (
     id: string,

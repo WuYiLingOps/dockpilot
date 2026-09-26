@@ -8,6 +8,7 @@ import { useTheme, type ThemeMode } from "../lib/theme";
 import { PageHeader, Select, Checkbox } from "../components/ui";
 import { ConnectionSettings } from "../components/settings/ConnectionSettings";
 import { MirrorSettings } from "../components/settings/MirrorSettings";
+import { RegistrySettings } from "../components/settings/RegistrySettings";
 import type { AppSettings } from "../types/settings";
 
 const GITHUB_URL = "https://github.com/WuYiLingOps/dockpilot";
@@ -116,6 +117,8 @@ export function Settings() {
         </Card>
 
         <ConnectionSettings />
+
+        <RegistrySettings />
 
         <Card title="轮询与刷新">
           <Row label="容器列表刷新间隔">

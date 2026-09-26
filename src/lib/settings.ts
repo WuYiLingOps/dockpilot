@@ -30,6 +30,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   terminal_shell: "bash",
   mirror_custom: [],
   notifications_enabled: true,
+  registries: [],
 };
 
 /** 当前活跃连接配置（列表异常时回落默认本地连接） */
