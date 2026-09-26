@@ -175,6 +175,19 @@ export function Settings() {
           </Row>
         </Card>
 
+        <Card title="通知">
+          <Row
+            label="容器异常桌面通知"
+            desc="容器非零退出、内存不足（OOM）或健康检查失败时发送系统通知"
+          >
+            <Checkbox
+              label="启用"
+              checked={settings.notifications_enabled}
+              onChange={(v) => patch({ notifications_enabled: v })}
+            />
+          </Row>
+        </Card>
+
         {!isWindows && <MirrorSettings />}
 
         <Card title="关于">
