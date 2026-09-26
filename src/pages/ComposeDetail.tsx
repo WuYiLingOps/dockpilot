@@ -111,7 +111,7 @@ export function ComposeDetail({
     <>
       <div
         {...withDragRegion()}
-        className="flex h-12 shrink-0 items-center gap-2.5 border-b border-edge bg-panel px-3"
+        className="flex h-12 shrink-0 items-center gap-2.5 border-b border-edge bg-panel px-3 pr-[8.5rem]"
       >
         <IconButton title="返回项目列表" onClick={onBack} data-no-drag>
           <ChevronLeft size={17} />

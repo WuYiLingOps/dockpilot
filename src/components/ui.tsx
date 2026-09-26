@@ -404,7 +404,7 @@ export function PageHeader({
   return (
     <div
       {...withDragRegion()}
-      className="flex h-12 shrink-0 flex-wrap items-center justify-between gap-3 border-b border-edge bg-panel px-4"
+      className="flex h-12 shrink-0 flex-wrap items-center justify-between gap-3 border-b border-edge bg-panel px-4 pr-[8.5rem]"
     >
       <div className="flex min-w-0 items-baseline gap-2.5">
         <h1 className="truncate text-[15px] font-semibold text-fg">{title}</h1>

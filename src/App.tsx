@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Container, RefreshCw, Settings as SettingsIcon } from "lucide-react";
 import { Sidebar, type PageKey } from "./components/Sidebar";
+import { WindowControls } from "./components/TitleBar";
 import { Button } from "./components/ui";
 import { Overview } from "./pages/Overview";
 import { Containers } from "./pages/Containers";
@@ -117,7 +118,8 @@ export default function App() {
   });
 
   return (
-    <div className="flex h-full bg-canvas text-fg">
+    <div className="relative flex h-full bg-canvas text-fg">
+      <WindowControls />
       <Sidebar
         page={page}
         onChange={(p) => {
