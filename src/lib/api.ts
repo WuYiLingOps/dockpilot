@@ -1,6 +1,7 @@
 import { invoke, Channel } from "@tauri-apps/api/core";
 import type {
   ContainerDto,
+  ContainerHealthDto,
   ContainerSpec,
   DockerEventDto,
   DockerInfoDto,
@@ -95,6 +96,14 @@ export const api = {
       invoke<string>("stream_logs", { id, follow, tail, timestamps, onChunk: ch }),
     );
   },
+
+  /** 健康检查详情（inspect 的 State.Health；未配置 healthcheck 时 status 为 "none"） */
+  containerHealth: (id: string) =>
+    invoke<ContainerHealthDto>("container_health", { id }),
+
+  /** 导出容器日志到指定文件（系统保存对话框取得路径），返回写入字节数 */
+  exportLogs: (id: string, tail: string, timestamps: boolean, path: string) =>
+    invoke<number>("export_container_logs", { id, tail, timestamps, path }),
 
   streamStats: (id: string, onTick: (t: StatsTick) => void): Unsubscribe => {
     const ch = new Channel<StatsTick>();
