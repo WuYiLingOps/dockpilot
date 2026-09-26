@@ -111,7 +111,7 @@ export function ComposeDetail({
     <>
       <div
         {...withDragRegion()}
-        className="flex h-12 shrink-0 items-center gap-2.5 border-b border-edge bg-panel px-3 pr-[8.5rem]"
+        className="flex h-12 shrink-0 items-center gap-2.5 border-b border-edge bg-panel px-3"
       >
         <IconButton title="返回项目列表" onClick={onBack} data-no-drag>
           <ChevronLeft size={17} />
@@ -133,7 +133,7 @@ export function ComposeDetail({
         ) : (
           <Spinner className="h-4 w-4" />
         )}
-        <div className="ml-auto flex items-center gap-1" data-no-drag>
+        <div className="ml-auto mr-[8.25rem] flex items-center gap-1" data-no-drag>
           <Button
             variant="tinted"
             disabled={!cliReady || run.running}

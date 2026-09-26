@@ -404,14 +404,14 @@ export function PageHeader({
   return (
     <div
       {...withDragRegion()}
-      className="flex h-12 shrink-0 flex-wrap items-center justify-between gap-3 border-b border-edge bg-panel px-4 pr-[8.5rem]"
+      className="flex h-12 shrink-0 flex-wrap items-center justify-between gap-3 border-b border-edge bg-panel py-0 pl-4 pr-0"
     >
       <div className="flex min-w-0 items-baseline gap-2.5">
         <h1 className="truncate text-[15px] font-semibold text-fg">{title}</h1>
         {desc && <p className="hidden truncate text-xs text-fg3 md:block">{desc}</p>}
       </div>
       {children && (
-        <div className="flex flex-wrap items-center gap-2" data-no-drag>
+        <div className="mr-[8.25rem] flex flex-wrap items-center gap-2" data-no-drag>
           {children}
         </div>
       )}
