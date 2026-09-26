@@ -30,6 +30,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             // Linux 下窗口图标需要手动设置：X11 会话的标题栏/任务栏读取窗口图标，
             // Wayland 会话则由 app-id 与 .desktop 文件匹配（deb 安装后生效）
@@ -52,7 +53,7 @@ pub fn run() {
             app.manage(Streams::default());
             app.manage(ExecSessions::default());
 
-            docker::events::start_global_listener(tx);
+            docker::events::start_global_listener(app.handle(), tx);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -81,6 +82,7 @@ pub fn run() {
             docker::images::remove_image,
             docker::images::pull_image,
             docker::logs::stream_logs,
+            docker::logs::export_container_logs,
             docker::stats::stream_stats,
             docker::events::subscribe_events,
             docker::exec::exec_create,
@@ -90,6 +92,7 @@ pub fn run() {
             docker::state::cancel_stream,
             docker::conn::switch_connection,
             docker::conn::test_connection,
+            docker::containers::container_health,
             settings::get_settings,
             settings::set_settings,
             daemon_config::read_daemon_config,
