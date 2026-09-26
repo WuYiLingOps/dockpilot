@@ -160,6 +160,18 @@ export interface ExportProgress {
   cancelled: boolean;
 }
 
+/** 镜像推送进度：按层逐条（引擎不提供字节总量）；current/total 为该层字节数 */
+export interface PushProgress {
+  status: string | null;
+  /** 引擎格式化的进度条文本 */
+  progress: string | null;
+  current: number | null;
+  total: number | null;
+  error: string | null;
+  done: boolean;
+  cancelled: boolean;
+}
+
 // ---- 容器创建（与 Rust ContainerCreateSpec 对应，snake_case）----
 
 export interface PortMappingSpec {
