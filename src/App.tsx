@@ -166,7 +166,7 @@ export default function App() {
         ) : (
           <Settings />
         )}
-        {info.isError && (
+        {info.isError && page !== "settings" && (
           <DisconnectedOverlay
             message={String(info.error)}
             retrying={info.isFetching}
