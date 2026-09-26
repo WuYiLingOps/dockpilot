@@ -166,6 +166,31 @@
     notifications_enabled: true,
   };
 
+  // ---- 镜像仓库凭据（密码不入前端，mock 中同样不落地） ----
+  const registries = [
+    {
+      id: "mock-reg-aliyun",
+      name: "阿里云杭州",
+      kind: "aliyun",
+      registry: "registry.cn-hangzhou.aliyuncs.com",
+      username: "wyl-dev",
+      secret_backend: "keyring",
+      skip_tls_verify: false,
+      created_at: now - 86400 * 20,
+    },
+    {
+      id: "mock-reg-harbor",
+      name: "内网 Harbor",
+      kind: "harbor",
+      registry: "harbor.local:8443",
+      username: "robot$wyl+ci",
+      secret_backend: "keyring",
+      skip_tls_verify: true,
+      created_at: now - 86400 * 8,
+    },
+  ];
+  settings.registries = registries;
+
   // ---- 编排（docker compose）----
   const composeProjectDir = (name) => `/home/user/${name}`;
 
@@ -674,6 +699,121 @@ volumes:
           return Promise.resolve();
         case "untag_image":
           return Promise.resolve(false);
+        case "push_image": {
+          // 模拟 docker push：分层推送进度 → Pushed → digest，结束时给本地镜像补目标标签
+          const sid = `sid-push-${Math.random().toString(36).slice(2, 8)}`;
+          streams[sid] = args;
+          const reg = registries.find((r) => r.id === args.registryId);
+          const target = `${reg?.registry ?? "registry.example.com"}/${args.repository}:${args.tag}`;
+          const src = images.find(
+            (i) => i.tags.includes(args.imageRef) || i.id === args.imageRef,
+          );
+          const size = src?.size ?? 120_000_000;
+          const fmtMb = (b) => `${(b / 1048576).toFixed(2)}MB`;
+          let sent = 0;
+          const step = size / 5;
+          const timer = setInterval(() => {
+            if (streams[sid] === undefined) return clearInterval(timer);
+            sent += step;
+            if (sent < size) {
+              push(args.onProgress, {
+                status: "Pushing",
+                progress: `[======>      ]  ${fmtMb(sent)}/${fmtMb(size)}`,
+                current: Math.round(sent),
+                total: Math.round(size),
+                error: null,
+                done: false,
+                cancelled: false,
+              });
+              return;
+            }
+            clearInterval(timer);
+            delete streams[sid];
+            push(args.onProgress, {
+              status: "Pushed",
+              progress: null,
+              current: Math.round(size),
+              total: Math.round(size),
+              error: null,
+              done: false,
+              cancelled: false,
+            });
+            push(args.onProgress, {
+              status: `${args.tag}: digest: sha256:${"a1b2c3d4".repeat(16)} size: 528`,
+              progress: null,
+              current: null,
+              total: null,
+              error: null,
+              done: false,
+              cancelled: false,
+            });
+            if (src && !src.tags.includes(target)) src.tags.push(target);
+            push(args.onProgress, {
+              status: null,
+              progress: null,
+              current: null,
+              total: null,
+              error: null,
+              done: true,
+              cancelled: false,
+            });
+          }, 320);
+          return Promise.resolve(sid);
+        }
+
+        // ---- 镜像仓库凭据 ----
+        case "list_registries":
+          return Promise.resolve(registries);
+        case "save_registry": {
+          const spec = args.spec ?? {};
+          const registry = (spec.registry ?? "").trim().toLowerCase();
+          if (!registry || !spec.username?.trim()) {
+            return Promise.reject("请完善仓库地址与用户名（mock）");
+          }
+          if (!spec.password && !spec.id) {
+            return Promise.reject("请填写密码或访问令牌（mock）");
+          }
+          let profile = spec.id ? registries.find((r) => r.id === spec.id) : null;
+          if (!profile) {
+            profile = {
+              id: `mock-reg-${Math.random().toString(36).slice(2, 8)}`,
+              secret_backend: "keyring",
+              skip_tls_verify: false,
+              created_at: Math.floor(Date.now() / 1000),
+            };
+            registries.push(profile);
+          }
+          profile.name = spec.name?.trim() || "未命名仓库";
+          profile.kind = ["aliyun", "harbor", "generic"].includes(spec.kind)
+            ? spec.kind
+            : "generic";
+          profile.registry = registry;
+          profile.username = spec.username.trim();
+          profile.skip_tls_verify = !!spec.skip_tls_verify;
+          return Promise.resolve(profile);
+        }
+        case "remove_registry": {
+          const idx = registries.findIndex((r) => r.id === args.id);
+          if (idx !== -1) registries.splice(idx, 1);
+          return Promise.resolve();
+        }
+        case "test_registry":
+          // 地址含 "fail." 的仓库模拟不可达，便于走查失败态
+          return new Promise((resolve) =>
+            setTimeout(() => {
+              const host =
+                registries.find((r) => r.id === args.id)?.registry ?? "";
+              const ok = !host.includes("fail.");
+              resolve({
+                ok,
+                latency_ms: 60 + Math.floor(Math.random() * 400),
+                error: ok
+                  ? null
+                  : `连接仓库失败（mock）：${host} 不可达\n提示：检查网络与仓库地址；远程连接时需远端可访问该仓库`,
+                via_http: false,
+              });
+            }, 500),
+          );
         case "subscribe_events":
         case "stream_logs":
         case "stream_stats":
