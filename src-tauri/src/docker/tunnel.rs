@@ -126,6 +126,36 @@ fn spawn_ssh_err(e: std::io::Error) -> String {
     )
 }
 
+/// 组装 ssh 选项参数（除程序名、目标主机与 stdio 之外的固定部分），纯函数便于单测。
+/// -N 不执行远端命令；ExitOnForwardFailure 保证转发失败立即退出；
+/// accept-new 自动接受新主机密钥（变更仍拒绝）；BatchMode 禁交互式密码提示（GUI 内无法输入）
+fn build_args(p: &ConnectionProfile, forward: &str) -> Vec<String> {
+    let mut args: Vec<String> = vec![
+        "-N".into(),
+        "-o".into(),
+        "ExitOnForwardFailure=yes".into(),
+        "-o".into(),
+        "ConnectTimeout=10".into(),
+        "-o".into(),
+        "StrictHostKeyChecking=accept-new".into(),
+        "-o".into(),
+        "BatchMode=yes".into(),
+        "-L".into(),
+        forward.into(),
+    ];
+    let key_path = p.key_path.trim();
+    if !key_path.is_empty() {
+        args.push("-i".into());
+        args.push(key_path.into());
+    }
+    let jump = p.jump_host.trim();
+    if !jump.is_empty() {
+        args.push("-J".into());
+        args.push(jump.into());
+    }
+    args
+}
+
 async fn start(p: &ConnectionProfile) -> CmdResult<String> {
     let remote = remote_socket(p);
 
@@ -145,21 +175,6 @@ async fn start(p: &ConnectionProfile) -> CmdResult<String> {
     #[cfg(windows)]
     let forward = format!("127.0.0.1:{local}:{remote}");
 
-    let mut cmd = Command::new(ssh_program()?);
-    cmd.arg("-N")
-        // 转发失败立即退出，而不是挂着空连接
-        .arg("-o")
-        .arg("ExitOnForwardFailure=yes")
-        .arg("-o")
-        .arg("ConnectTimeout=10")
-        // 首次连接自动接受新主机密钥；主机密钥变更仍会拒绝
-        .arg("-o")
-        .arg("StrictHostKeyChecking=accept-new")
-        // 禁止交互式密码提示（GUI 内无法输入，认证仅支持密钥/agent）
-        .arg("-o")
-        .arg("BatchMode=yes")
-        .arg("-L")
-        .arg(&forward);
     let key_path = p.key_path.trim();
     if key_path.to_ascii_lowercase().ends_with(".pub") {
         return Err(
@@ -167,10 +182,10 @@ async fn start(p: &ConnectionProfile) -> CmdResult<String> {
                 .into(),
         );
     }
-    if !key_path.is_empty() {
-        cmd.arg("-i").arg(key_path);
-    }
-    cmd.arg(&p.host)
+
+    let mut cmd = Command::new(ssh_program()?);
+    cmd.args(build_args(p, &forward))
+        .arg(&p.host)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::piped());
@@ -260,5 +275,38 @@ pub fn stop_all() {
     let ids: Vec<String> = tunnels().keys().cloned().collect();
     for id in ids {
         stop(&id);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn profile(host: &str, key_path: &str, jump_host: &str) -> ConnectionProfile {
+        ConnectionProfile {
+            id: "t-test".into(),
+            kind: "ssh".into(),
+            host: host.into(),
+            key_path: key_path.into(),
+            jump_host: jump_host.into(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn args_contain_forward_and_defaults() {
+        let args = build_args(&profile("root@10.0.0.5", "", ""), "/tmp/t.sock:/var/run/docker.sock");
+        assert!(args.windows(2).any(|w| w[0] == "-L" && w[1] == "/tmp/t.sock:/var/run/docker.sock"));
+        assert!(args.contains(&"-N".into()), "不执行远端命令");
+        assert!(args.windows(2).any(|w| w[0] == "-o" && w[1] == "BatchMode=yes"), "应禁交互式密码");
+        assert!(!args.contains(&"-i".into()), "未配置私钥时不应带 -i");
+        assert!(!args.contains(&"-J".into()), "未配置跳板机时不应带 -J");
+    }
+
+    #[test]
+    fn args_include_key_and_jump_host() {
+        let args = build_args(&profile("root@10.0.0.5", "/home/me/.ssh/id_rsa", "jump@10.0.0.1:2222"), "f");
+        assert!(args.windows(2).any(|w| w[0] == "-i" && w[1] == "/home/me/.ssh/id_rsa"));
+        assert!(args.windows(2).any(|w| w[0] == "-J" && w[1] == "jump@10.0.0.1:2222"), "跳板机应经 -J 传入");
     }
 }
