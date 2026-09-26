@@ -16,6 +16,7 @@ import { OverviewView } from "../components/detail/OverviewView";
 import { TerminalView } from "../components/detail/TerminalView";
 import {
   Button,
+  HealthBadge,
   IconButton,
   Modal,
   SegmentedControl,
@@ -68,6 +69,7 @@ export function ContainerDetail({
           <>
             <h1 className="truncate text-[15px] font-semibold text-fg">{c.name}</h1>
             <StateBadge state={c.state} />
+            {c.health && <HealthBadge health={c.health} />}
             <span
               className="hidden font-mono text-[11px] text-fg3 lg:inline"
               title={c.image}
