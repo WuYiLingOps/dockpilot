@@ -13,13 +13,13 @@
 - **容器**：列表 / 搜索 / 启动 / 停止 / 重启 / 暂停 / 恢复 / 删除，Docker 事件驱动实时刷新；配置了 healthcheck 的容器在名称旁显示健康检查徽标（健康 / 不健康 / 检查中）；compose 容器带项目徽标，点击直达编排详情
 - **容器创建**（容器页「创建容器」/ 镜像页行内「运行」入口）：镜像选择（本地不存在时自动拉取，进度实时显示）、容器名（可留空自动生成）、端口映射（多行、tcp/udp）、卷挂载（多行、只读）、环境变量、标签、资源限制（内存 MB/GB、CPU 核数可小数）、命令覆盖（按 shell 词法解析）、工作目录、网络选择、主机名、重启策略、自动移除 / 特权模式 / TTY / 标准输入；与 Docker Desktop 的 Run 能力对齐
 - **容器详情**：概览（CPU / 内存 / 网络 / 磁盘 I/O 实时曲线约 1 秒刷新；配置了 healthcheck 的容器显示健康检查状态，不健康时展示最近一次检查输出）、日志（流式输出、自动跟随、关键字过滤、时间戳、stderr 红色高亮、按当前参数一键导出到文件）、终端（交互式 shell：bash / sh / ash，自适应窗口尺寸）
-- **镜像**：列表 / 搜索 / 来源筛选（自动按镜像地址前缀归组）/ 删除（可强制）/ 拉取（实时进度）；导出为 tar 归档（docker save，支持勾选批量导出、共享层去重、写入进度与取消）、导入 tar 归档（docker load，归档内含多个镜像时全部导入）、添加标签与标签管理（逐个移除标签，移除最后一个标签即删除镜像）
+- **镜像**：列表 / 搜索 / 来源筛选（自动按镜像地址前缀归组）/ 删除（可强制）/ 拉取（实时进度）；导出为 tar 归档（docker save，支持勾选批量导出、共享层去重、写入进度与取消）、导入 tar 归档（docker load，归档内含多个镜像时全部导入）、添加标签与标签管理（逐个移除标签，移除最后一个标签即删除镜像）；推送到镜像仓库（阿里云 ACR / Harbor 等，详见「镜像推送」章节）
 - **编排（docker compose）**：自动识别引擎上的 compose 项目并按项目聚合服务（基于容器标准标签，无需重新读取文件）；项目级启动 / 停止 / 重启 / 暂停 / 下线（可选删卷删镜像）/ 构建 / 拉取，服务级启停与重启，操作输出流式展示可中途取消；「部署新项目」选择 compose 文件一键 `up -d`；compose 配置在线编辑（保存前自动语法预检、原文件备份为 `.bak`，保存后可一键「重新应用」变更）。编排操作调用系统 `docker compose` CLI（自动探测插件版与独立版，未安装时仍可查看并提示）；自定义 socket 会同步注入 `DOCKER_HOST`，保证 CLI 与界面连接同一 daemon。Windows 版本期隐藏编排入口。
 - **存储和网络**：三个子页签——存储卷（列表 / 搜索 / 详情含挂载点与使用容器 / 创建 / 删除，占用大小与引用计数来自 `docker system df`，在用卷删除被后端拒绝）、网络（列表 / 详情含 IPAM 与已连接容器 / 创建（驱动、子网 / 网关、内部网络、可连接、IPv6）/ 删除，bridge / host / none 内置网络禁止删除，详情内可连接 / 断开容器）、磁盘用量（分类占比树图、构建缓存逐条明细、直达空间清理入口）；卷 / 网络数据由 Docker 事件驱动自动刷新
 - **系统概览**：Docker 引擎与宿主资源总览（基础信息、容器 CPU / 内存占用、网络与磁盘实时曲线、用量统计树图），「存储卷 / 网络」统计卡片可点击直达存储和网络页对应子页签
 - **空间清理**：统计悬空镜像 / 未使用镜像 / 已停止容器 / 未使用卷 / 构建缓存的大小与数量，勾选后一键清理并显示回收空间
 - **多连接管理与远程连接**：设置页统一管理多个 Docker 连接（Linux 支持本地 socket / SSH / TLS / 明文 TCP；Windows 仅支持 SSH / TLS / 明文 TCP），支持连通性测试（延迟与版本）、添加 / 编辑 / 删除、一键切换并自动刷新数据；侧栏底部可快速切换当前连接。SSH 连接由应用自动建立加密隧道（支持指定私钥与远程 rootless socket 路径，可经跳板机中转），TLS 走客户端证书双向认证；配置方法与故障排查见「远程连接」章节
-- **设置**：主题、连接管理、列表刷新间隔、日志与终端默认值、容器异常桌面通知开关；配置持久化到 `~/.config/com.dockpilot.app/settings.json`
+- **设置**：主题、连接管理、镜像仓库凭据、列表刷新间隔、日志与终端默认值、容器异常桌面通知开关；配置持久化到 `~/.config/com.dockpilot.app/settings.json`
 - **镜像加速（Linux）**：读写 `/etc/docker/daemon.json` 的 `registry-mirrors`（pkexec 提权，写入前自动备份，保留其他配置字段）、内置国内预设源、一键测速、pkexec 不可用时回退为可复制的终端命令；Windows 版本隐藏此入口
 
 ## 技术栈
@@ -168,6 +168,34 @@ cd src-tauri
 DOCKERPILOT_REMOTE_SSH=root@10.0.0.115 cargo test --lib -- --ignored remote_ssh --nocapture
 ```
 
+## 镜像推送
+
+支持把本地镜像推送到 Docker Registry v2 兼容仓库，优先适配**阿里云容器镜像服务（ACR）**与**自建 Harbor**，也支持 Nexus、Quay、Distribution 等通用仓库。凭据在「设置 → 镜像仓库」统一管理（添加 / 编辑 / 测试连接 / 删除），镜像页行内「推送」入口也可就地快捷新建凭据。
+
+### 使用方法
+
+1. 「设置 → 镜像仓库」→「添加仓库」，选择类型（阿里云 ACR / Harbor / 通用）并填写地址、用户名与密码；「测试连接」验证连通性与凭据
+2. 镜像页点击镜像行的「推送」按钮，选择仓库凭据、填写目标仓库名与标签（默认值从镜像引用推导）
+3. 目标引用与本地引用不同时自动打标签（指向同一镜像，无额外存储），推送进度按层实时显示，可中途取消
+
+阿里云 ACR（个人版免费）：用户名即阿里云登录账号，密码建议在镜像服务控制台「访问凭证管理」中设置固定密码；命名空间需提前创建，内置常用地域地址预设。Harbor：支持普通账号与机器人账户（`robot$项目+名称`），项目需提前存在且账号有推送权限；自签名证书可勾选「测试连接时跳过 TLS 证书校验」。
+
+### 安全说明
+
+- 密码保存在本机：优先写入**系统钥匙串**（Linux Secret Service / macOS 钥匙串 / Windows 凭据管理器）；无钥匙串的环境（无桌面的 Linux）自动回退为**机器绑定加密文件**（`~/.config/com.dockpilot.app/secrets.bin`，AES-256-GCM，密钥由 machine-id 派生）——该回退属混淆级防护，换机或重装系统后需重新录入密码
+- 推送时密码经 Docker Engine API 的请求头传给 daemon 执行推送，不写入 `~/.docker/config.json`，不落远端磁盘
+- 推送由**当前连接的 Docker daemon** 执行：SSH 远程连接时在远端主机推送，需远端可访问仓库地址
+
+### 常见问题
+
+| 推送报错 | 原因与处理 |
+|---|---|
+| authentication required / unauthorized | 凭据无效：检查用户名密码；Harbor 机器人账户需已启用且未过期；阿里云需使用登录账号或固定密码 |
+| denied: requested access … | 无推送权限：Harbor 项目需已存在且账号有写权限；阿里云命名空间需已创建 |
+| server gave HTTP response to HTTPS client | 仓库为 HTTP 服务：需在该 daemon 的 `daemon.json` 中将仓库地址加入 `insecure-registries` 后重启 Docker |
+| x509: certificate signed by unknown authority | 自签名证书：同样加入 `insecure-registries`，或向系统导入 CA 证书 |
+| connection refused / timeout | 网络不通：远程连接时需远端 Docker 宿主机可访问该仓库地址 |
+
 ## 开发
 
 ```bash
@@ -259,7 +287,9 @@ src-tauri/
 └── src/
     ├── lib.rs                # 应用入口：状态注册、全局事件监听、命令注册
     ├── main.rs
-    ├── settings.rs           # 应用设置读写（含连接配置模型、旧配置迁移与清洗）
+    ├── settings.rs           # 应用设置读写（含连接配置与镜像仓库凭据模型、旧配置迁移与清洗）
+    ├── secret_store.rs       # 凭据密钥存储：系统钥匙串优先，回退机器绑定 AES-256-GCM 加密文件
+    ├── registries.rs         # 镜像仓库凭据 CRUD 与连通性测试（/v2/ 探测 + Bearer/Basic 分派）
     ├── daemon_config.rs      # 镜像加速：daemon.json 读写 / pkexec 提权 / 测速
     ├── cleanup.rs            # 空间清理：磁盘占用统计与各类 prune
     └── docker/
@@ -273,6 +303,7 @@ src-tauri/
         ├── volumes.rs        # 卷列表（合并 df 占用与容器挂载）/ 创建 / 删除
         ├── compose.rs        # 编排：标签分组识别项目 + 调用 docker compose CLI（流式输出）
         ├── images.rs         # 镜像列表 / 删除 / 拉取 / 导出导入（save & load 流式）/ 标签管理
+        ├── push.rs           # 镜像推送（凭据经 X-Registry-Auth 头传给 daemon，自动打标签、流式进度）
         ├── logs.rs           # 日志流
         ├── stats.rs          # 资源统计流（CPU/内存/网络/块 I/O 换算）
         ├── exec.rs           # 交互式终端（exec + stdin + resize）
@@ -280,11 +311,12 @@ src-tauri/
 src/
 ├── components/               # Sidebar（含连接切换器）、TitleBar、通用 UI 组件、compose/ 输出面板、containers/ 创建容器弹窗、detail/ 详情页视图
 ├── components/overview/      # 系统概览的纯 SVG 图表（环形 / 折线 / 树图）
-├── components/settings/      # 连接管理（多连接增删改测/切换）与镜像加速设置分组
+├── components/settings/      # 连接管理、镜像仓库凭据管理与镜像加速设置分组
 ├── pages/                    # 系统概览 / 容器 / 镜像 / 容器详情 / 编排 / 编排详情 / 存储和网络 / 空间清理 / 设置
 ├── hooks/                    # 容器操作 mutation、compose 输出流
 ├── lib/api.ts                # Tauri invoke 封装（流式命令返回取消函数）
 ├── lib/settings.ts           # 设置 query/mutation、连接切换 mutation 与主题迁移
+├── lib/registries.ts         # 镜像仓库凭据 query/mutation hooks
 ├── lib/theme.ts              # 主题三态 store（跟随系统 / 浅 / 深）
 ├── lib/format.ts             # 字节 / 时间 / 端口格式化
 └── types/                    # 与 Rust DTO 一一对应的 TS 类型
@@ -297,6 +329,7 @@ src/
 - **远程连接**：Linux 支持本地 socket / SSH / TLS / 明文 TCP，Windows 支持 SSH / TLS / 明文 TCP；多连接管理与切换即时生效，配置方法与故障排查详见「远程连接」章节。注意 SSH 仅支持密钥免密或 ssh-agent（不支持交互式密码）。
 - **Windows 版范围**：不连接本机 Docker Desktop / WSL，Compose 与 Linux 本机镜像加速入口暂时隐藏。
 - **镜像加速写入**：应用通过 `pkexec` 提权写 `/etc/docker/daemon.json` 并可一键重启 Docker；无 polkit 的环境（如纯 SSH 会话）会自动回退为生成可复制的终端命令。重启 Docker 会中断运行中的容器（开启 live-restore 则不受影响），应用会在确认弹窗中提示。
+- **凭据密钥存储**：系统钥匙串不可用时（无桌面的 Linux）自动回退为机器绑定加密文件，属混淆级防护；换机或重装系统后原密钥文件不可解密，需重新录入密码（应用会在测试连接时报错提示）。
 - **编排操作依赖 compose CLI**：Linux 上项目识别与查看仅依赖 Engine API；启动/停止等编排操作需要系统已安装 `docker compose` 插件（`docker-compose-plugin`）或 `docker-compose` 独立命令。Windows 版本期隐藏编排入口。
 
 ## License
