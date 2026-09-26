@@ -68,7 +68,7 @@ cleanup_build_files() {
 
 # 注入 Cargo 镜像参数
 # --config 的优先级高于项目本地和用户全局 Cargo 配置。
-# 切换镜像时，成对取消注释目标镜像的两行，并注释当前启用的两行。
+# 切换镜像时，成组取消注释目标镜像的三行（镜像名称 + 两行参数），并注释当前启用的三行。
 # npm run tauri build 会自行调用 cargo / cargo metadata，不会带上脚本里的 --config，
 # 因此需要把同名包装命令放到 PATH 前面，给每一次 cargo 调用补上镜像参数。
 setup_cargo_mirror() {
@@ -79,17 +79,30 @@ setup_cargo_mirror() {
         exit 1
     fi
 
+    # Nexus 内网源（当前启用）
+    CARGO_MIRROR_NAME='Nexus 内网源'
+    CARGO_REPLACE_ARG='source.crates-io.replace-with="nexus"'
+    CARGO_REGISTRY_ARG='source.nexus.registry="sparse+http://nexus.huang.org/repository/cargo-proxy/"'
+
     # 阿里云源
+    # CARGO_MIRROR_NAME='阿里云源'
     # CARGO_REPLACE_ARG='source.crates-io.replace-with="aliyun"'
     # CARGO_REGISTRY_ARG='source.aliyun.registry="sparse+https://mirrors.aliyun.com/crates.io-index/"'
 
-    # 清华源（当前启用）
-    CARGO_REPLACE_ARG='source.crates-io.replace-with="tuna"'
-    CARGO_REGISTRY_ARG='source.tuna.registry="sparse+https://mirrors.tuna.tsinghua.edu.cn/crates.io-index/"'
+    # 清华源
+    # CARGO_MIRROR_NAME='清华源'
+    # CARGO_REPLACE_ARG='source.crates-io.replace-with="tuna"'
+    # CARGO_REGISTRY_ARG='source.tuna.registry="sparse+https://mirrors.tuna.tsinghua.edu.cn/crates.io-index/"'
 
     # 中科大源
+    # CARGO_MIRROR_NAME='中科大源'
     # CARGO_REPLACE_ARG='source.crates-io.replace-with="ustc"'
     # CARGO_REGISTRY_ARG='source.ustc.registry="sparse+https://mirrors.ustc.edu.cn/crates.io-index/"'
+
+    if [ -z "${CARGO_MIRROR_NAME}" -o -z "${CARGO_REPLACE_ARG}" -o -z "${CARGO_REGISTRY_ARG}" ]; then
+        color "未启用任何 Cargo 镜像源，请取消注释 setup_cargo_mirror 中的目标镜像" 1
+        exit 1
+    fi
 
     CARGO_WRAPPER_DIR=$(mktemp -d /tmp/dockpilot-cargo-wrapper-XXXX)
     cat > "${CARGO_WRAPPER_DIR}/cargo" <<EOF
@@ -102,7 +115,7 @@ EOF
     chmod +x "${CARGO_WRAPPER_DIR}/cargo"
     export PATH="${CARGO_WRAPPER_DIR}:${PATH}"
     trap cleanup_build_files EXIT
-    color "已注入 Cargo 镜像参数（清华源）" 0
+    color "已注入 Cargo 镜像参数（${CARGO_MIRROR_NAME}）" 0
 }
 
 # 需要 root 权限的命令自动通过 sudo 重新执行
