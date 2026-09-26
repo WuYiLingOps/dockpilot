@@ -395,3 +395,15 @@ pub struct ExportProgress {
     /// 被用户取消（后端已删除半成品文件）
     pub cancelled: bool,
 }
+
+/// 镜像推送进度：按层逐条（引擎不提供字节总量与层 id）；current/total 为该层字节数，progress 为引擎格式化的进度条文本
+#[derive(Debug, Clone, Serialize)]
+pub struct PushProgress {
+    pub status: Option<String>,
+    pub progress: Option<String>,
+    pub current: Option<u64>,
+    pub total: Option<u64>,
+    pub error: Option<String>,
+    pub done: bool,
+    pub cancelled: bool,
+}

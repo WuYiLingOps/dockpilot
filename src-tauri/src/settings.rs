@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 use crate::docker::conn::CmdResult;
+use crate::secret_store::SecretBackend;
 
 /// Docker 连接配置。kind 决定其余字段的语义：
 /// - local: socket_path（空 = 默认 /var/run/docker.sock）
@@ -61,6 +62,27 @@ impl ConnectionProfile {
     }
 }
 
+/// 镜像仓库凭据档案（推送用）。密码等敏感信息不落 settings.json，
+/// 由 secret_store 存入系统钥匙串或机器绑定加密文件，secret_backend 记录实际落点。
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct RegistryProfile {
+    pub id: String,
+    pub name: String,
+    /// "aliyun" | "harbor" | "generic"（决定域名预设与错误提示文案）
+    pub kind: String,
+    /// registry 地址：域名[:端口]，无 scheme（如 registry.cn-hangzhou.aliyuncs.com）
+    pub registry: String,
+    pub username: String,
+    /// 密钥实际存储位置："keyring" | "file"
+    pub secret_backend: String,
+    /// 测试连接时跳过 TLS 证书校验（自签名 Harbor 用；仅作用于应用侧探测，
+    /// 推送侧证书校验由 Docker daemon 决定）
+    pub skip_tls_verify: bool,
+    /// 创建时间（unix 秒）
+    pub created_at: i64,
+}
+
 /// 应用设置：持久化到 app_config_dir()/settings.json。
 /// 反序列化带 #[serde(default)]，旧文件缺字段自动补默认值，
 /// 文件缺失或损坏时整体回落默认值。
@@ -89,6 +111,8 @@ pub struct AppSettings {
     pub mirror_custom: Vec<String>,
     /// 容器异常（非零退出/OOM/健康检查失败）时发送系统通知
     pub notifications_enabled: bool,
+    /// 镜像仓库凭据列表（密码不在此处，见 secret_store）
+    pub registries: Vec<RegistryProfile>,
 }
 
 impl Default for AppSettings {
@@ -107,6 +131,7 @@ impl Default for AppSettings {
             terminal_shell: "bash".into(),
             mirror_custom: Vec::new(),
             notifications_enabled: true,
+            registries: Vec::new(),
         }
     }
 }
@@ -211,6 +236,40 @@ pub fn sanitize(mut s: AppSettings) -> AppSettings {
             _ => false,
         }
     });
+
+    // 镜像仓库凭据：字段归一化 + 空 id 生成 + id 去重（保留首个，重复者换新 id）
+    let mut seen_registry = HashSet::new();
+    for r in &mut s.registries {
+        r.id = r.id.trim().to_string();
+        r.name = r.name.trim().to_string();
+        if r.name.is_empty() {
+            r.name = "未命名仓库".into();
+        }
+        if !matches!(r.kind.as_str(), "aliyun" | "harbor" | "generic") {
+            r.kind = "generic".into();
+        }
+        r.registry = normalize_registry_host(&r.registry);
+        r.username = r.username.trim().to_string();
+        if SecretBackend::parse(&r.secret_backend).is_none() {
+            r.secret_backend = SecretBackend::Keyring.as_str().into();
+        }
+        if r.created_at <= 0 {
+            r.created_at = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(0);
+        }
+        if r.id.is_empty() {
+            r.id = uuid::Uuid::new_v4().to_string();
+        }
+        if !seen_registry.insert(r.id.clone()) {
+            r.id = uuid::Uuid::new_v4().to_string();
+            seen_registry.insert(r.id.clone());
+        }
+    }
+    // 缺地址或用户名的凭据无法使用，直接丢弃
+    s.registries
+        .retain(|r| !r.registry.is_empty() && !r.username.is_empty());
     s
 }
 
@@ -225,6 +284,18 @@ pub fn normalize_mirror(url: &str) -> String {
     } else {
         format!("https://{u}")
     }
+}
+
+/// registry 地址归一化：去 scheme 与首尾空白/斜杠，转小写（docker 引用要求小写域名）
+pub fn normalize_registry_host(host: &str) -> String {
+    let mut h = host.trim().to_lowercase();
+    for prefix in ["https://", "http://"] {
+        if let Some(rest) = h.strip_prefix(prefix) {
+            h = rest.to_string();
+            break;
+        }
+    }
+    h.trim().trim_end_matches('/').to_string()
 }
 
 /// 从 JSON 文本解析（缺失/损坏均回落默认值），供测试与 load 复用
@@ -439,5 +510,83 @@ mod tests {
             ConnectionProfile { kind: "tls".into(), host: "10.0.0.5:2376".into(), ..Default::default() }.display_url(),
             "https://10.0.0.5:2376"
         );
+    }
+
+    #[test]
+    fn normalize_registry_host_strips_scheme_and_lowercases() {
+        assert_eq!(normalize_registry_host(" registry.cn-hangzhou.aliyuncs.com "), "registry.cn-hangzhou.aliyuncs.com");
+        assert_eq!(normalize_registry_host("https://Harbor.Example.com/"), "harbor.example.com");
+        assert_eq!(normalize_registry_host("http://harbor.local:5000/"), "harbor.local:5000");
+        assert_eq!(normalize_registry_host("   "), "");
+    }
+
+    #[test]
+    fn sanitize_registry_profiles_fields_and_ids() {
+        let s = sanitize(AppSettings {
+            registries: vec![
+                RegistryProfile {
+                    id: String::new(),
+                    name: "  ".into(),
+                    kind: "unknown".into(),
+                    registry: " HTTPS://Aliyun.COM/ ".into(),
+                    username: " user ".into(),
+                    ..Default::default()
+                },
+                // 缺 registry 或 username 的凭据应被丢弃
+                RegistryProfile {
+                    id: "no-host".into(),
+                    name: "a".into(),
+                    kind: "harbor".into(),
+                    username: "u".into(),
+                    ..Default::default()
+                },
+                RegistryProfile {
+                    id: "no-user".into(),
+                    name: "b".into(),
+                    kind: "harbor".into(),
+                    registry: "h.local".into(),
+                    ..Default::default()
+                },
+                // 重复 id 重新生成
+                RegistryProfile {
+                    id: "dup".into(),
+                    name: "c".into(),
+                    kind: "aliyun".into(),
+                    registry: "r1.aliyuncs.com".into(),
+                    username: "u1".into(),
+                    ..Default::default()
+                },
+                RegistryProfile {
+                    id: "dup".into(),
+                    name: "d".into(),
+                    kind: "aliyun".into(),
+                    registry: "r2.aliyuncs.com".into(),
+                    username: "u2".into(),
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        });
+        assert_eq!(s.registries.len(), 3);
+        let first = &s.registries[0];
+        assert_eq!(first.name, "未命名仓库");
+        assert_eq!(first.kind, "generic", "未知 kind 应回落 generic");
+        assert_eq!(first.registry, "aliyun.com");
+        assert_eq!(first.username, "user");
+        assert_eq!(first.secret_backend, "keyring", "非法 backend 应回落 keyring");
+        assert!(first.created_at > 0, "空 created_at 应回落当前时间");
+        assert_ne!(s.registries[1].id, s.registries[2].id, "重复 id 应重新生成");
+    }
+
+    #[test]
+    fn parse_keeps_registries_field_from_old_configs() {
+        // 旧配置无 registries 字段 → serde default 补空列表；新配置可正常读回
+        let old = parse_settings(r#"{"theme":"dark"}"#);
+        assert!(old.registries.is_empty());
+        let new = parse_settings(
+            r#"{"registries":[{"id":"r1","name":"aliyun","kind":"aliyun","registry":"registry.cn-hangzhou.aliyuncs.com","username":"u","secret_backend":"keyring","created_at":100}]}"#,
+        );
+        assert_eq!(new.registries.len(), 1);
+        assert_eq!(new.registries[0].registry, "registry.cn-hangzhou.aliyuncs.com");
     }
 }

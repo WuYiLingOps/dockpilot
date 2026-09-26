@@ -50,6 +50,20 @@ pub async fn remove_image(id: String, force: bool) -> CmdResult<()> {
     Ok(())
 }
 
+/// 拉取引用规范化：缺 tag 时默认补 latest（如 `nginx` → `nginx:latest`），
+/// digest 引用（name@sha256:…）原样透传由引擎解析
+fn normalize_pull_reference(image: &str) -> Result<String, String> {
+    let image = image.trim();
+    if image.is_empty() {
+        return Err("请填写镜像名称".into());
+    }
+    if image.contains('@') {
+        return Ok(image.to_string());
+    }
+    let (repo, tag) = parse_image_reference(image)?;
+    Ok(format!("{repo}:{tag}"))
+}
+
 /// 拉取镜像，进度通过 Channel 推送；返回 stream_id 供前端取消
 #[tauri::command]
 pub async fn pull_image(
@@ -57,6 +71,7 @@ pub async fn pull_image(
     image: String,
     on_progress: Channel<PullProgress>,
 ) -> CmdResult<String> {
+    let image = normalize_pull_reference(&image)?;
     let d = docker().await?;
     let (sid, token) = app.state::<Streams>().register();
     let sid_task = sid.clone();
@@ -281,7 +296,7 @@ pub async fn import_image(
 
 /// 拆分镜像引用为 repo + tag：最后一个冒号后不含斜杠时视为 tag
 /// （兼容 `registry:5000/ns/name:v1` 的端口写法），缺 tag 补 latest
-fn parse_image_reference(reference: &str) -> Result<(String, String), String> {
+pub(crate) fn parse_image_reference(reference: &str) -> Result<(String, String), String> {
     let r = reference.trim();
     if r.is_empty() {
         return Err("请填写镜像引用".into());
@@ -389,5 +404,37 @@ mod tests {
             parse_image_reference("nginx@sha256:abcd").is_err(),
             "digest 引用应拒绝"
         );
+    }
+
+    #[test]
+    fn pull_reference_defaults_to_latest_tag() {
+        // 缺 tag 补 latest
+        assert_eq!(normalize_pull_reference("nginx").unwrap(), "nginx:latest");
+        assert_eq!(normalize_pull_reference("  nginx ").unwrap(), "nginx:latest");
+        // 已带 tag 原样保留
+        assert_eq!(normalize_pull_reference("nginx:1.27").unwrap(), "nginx:1.27");
+        assert_eq!(
+            normalize_pull_reference("redis:7-alpine").unwrap(),
+            "redis:7-alpine"
+        );
+        // 命名空间 / registry 端口写法不受端口误导
+        assert_eq!(
+            normalize_pull_reference("registry.cn-hangzhou.aliyuncs.com/ns/redis").unwrap(),
+            "registry.cn-hangzhou.aliyuncs.com/ns/redis:latest"
+        );
+        assert_eq!(
+            normalize_pull_reference("localhost:5000/img").unwrap(),
+            "localhost:5000/img:latest"
+        );
+        // digest 引用透传
+        assert_eq!(
+            normalize_pull_reference("nginx@sha256:abcd").unwrap(),
+            "nginx@sha256:abcd"
+        );
+        // 非法输入报错
+        assert!(normalize_pull_reference("").is_err());
+        assert!(normalize_pull_reference("   ").is_err());
+        assert!(normalize_pull_reference("nginx:").is_err());
+        assert!(normalize_pull_reference("nginx :x").is_err());
     }
 }

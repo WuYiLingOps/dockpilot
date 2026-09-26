@@ -7,6 +7,7 @@ pub mod exec;
 pub mod images;
 pub mod logs;
 pub mod networks;
+pub mod push;
 pub mod state;
 pub mod stats;
 pub mod system;

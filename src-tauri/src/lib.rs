@@ -1,6 +1,8 @@
 mod cleanup;
 mod daemon_config;
 mod docker;
+mod registries;
+mod secret_store;
 mod settings;
 
 use tauri::Manager;
@@ -85,6 +87,11 @@ pub fn run() {
             docker::images::import_image,
             docker::images::tag_image,
             docker::images::untag_image,
+            docker::push::push_image,
+            registries::list_registries,
+            registries::save_registry,
+            registries::remove_registry,
+            registries::test_registry,
             docker::logs::stream_logs,
             docker::logs::export_container_logs,
             docker::stats::stream_stats,
