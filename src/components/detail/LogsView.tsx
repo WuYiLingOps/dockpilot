@@ -1,6 +1,9 @@
-import { Eraser } from "lucide-react";
+import { Download, Eraser } from "lucide-react";
+import { save } from "@tauri-apps/plugin-dialog";
+import { toast } from "sonner";
 import { useEffect, useRef, useState } from "react";
 import { api } from "../../lib/api";
+import { formatBytes } from "../../lib/format";
 import { useSettings } from "../../lib/settings";
 import { cn, Button, Checkbox, Input, Select } from "../ui";
 
@@ -25,6 +28,7 @@ export function LogsView({ id }: { id: string }) {
   );
   const [filter, setFilter] = useState("");
   const [lines, setLines] = useState<Line[]>([]);
+  const [exporting, setExporting] = useState(false);
 
   const boxRef = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
@@ -75,6 +79,26 @@ export function LogsView({ id }: { id: string }) {
     ? lines.filter((l) => l.text.toLowerCase().includes(keyword))
     : lines;
 
+  /** 按当前参数（回看行数/时间戳）把日志写入用户选择的文件 */
+  const exportLogs = async () => {
+    if (exporting) return;
+    try {
+      const path = await save({
+        title: "导出容器日志",
+        defaultPath: `container-${id.slice(0, 12)}.log`,
+        filters: [{ name: "日志文件", extensions: ["log", "txt"] }],
+      });
+      if (!path) return;
+      setExporting(true);
+      const size = await api.exportLogs(id, tail, timestamps, path);
+      toast.success(`已导出 ${formatBytes(size)} 日志到 ${path}`);
+    } catch (e) {
+      toast.error(`导出日志失败: ${e}`);
+    } finally {
+      setExporting(false);
+    }
+  };
+
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div
@@ -102,6 +126,16 @@ export function LogsView({ id }: { id: string }) {
         <Button variant="ghost" className="h-7" onClick={() => setLines([])}>
           <Eraser size={14} />
           清屏
+        </Button>
+        <Button
+          variant="ghost"
+          className="h-7"
+          title="按当前参数导出日志到文件"
+          disabled={exporting}
+          onClick={() => void exportLogs()}
+        >
+          <Download size={14} />
+          导出
         </Button>
       </div>
 
