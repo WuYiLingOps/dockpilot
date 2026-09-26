@@ -32,7 +32,8 @@
       name: "nexus3",
       image: "registry.cn-hangzhou.aliyuncs.com/wylhub/nexus3:3.93.2",
       state: "running",
-      status: "Up 2 days",
+      status: "Up 2 days (unhealthy)",
+      health: "unhealthy",
       created: now - 3600 * 50,
       ports: [{ ip: "0.0.0.0", private_port: 8081, public_port: 8081, proto: "tcp" }],
     },
@@ -42,6 +43,7 @@
       image: "registry.cn-hangzhou.aliyuncs.com/wylhub/jellyfin:latest",
       state: "running",
       status: "Up 5 days (healthy)",
+      health: "healthy",
       created: now - 3600 * 120,
       ports: [{ ip: "0.0.0.0", private_port: 8096, public_port: 8096, proto: "tcp" }],
     },
@@ -151,6 +153,7 @@
         cert_path: "",
         key_path: "",
         remote_socket: "",
+        jump_host: "user@192.168.1.1",
       },
     ],
     active_connection_id: "local",
@@ -160,6 +163,7 @@
     logs_timestamps: false,
     terminal_shell: "bash",
     mirror_custom: ["https://docker.example.dev"],
+    notifications_enabled: true,
   };
 
   // ---- 编排（docker compose）----
@@ -463,6 +467,26 @@ volumes:
           return Promise.resolve(info);
         case "list_containers":
           return Promise.resolve(containers);
+        case "container_health": {
+          const c = containers.find((x) => x.id === args.id);
+          if (!c || !c.health || c.health === "none") {
+            return Promise.resolve({ status: "none", failing_streak: 0, log: [] });
+          }
+          const failed = c.health === "unhealthy";
+          return Promise.resolve({
+            status: c.health,
+            failing_streak: failed ? 3 : 0,
+            log: [
+              {
+                exit_code: failed ? 1 : 0,
+                start: new Date((now - 55) * 1000).toISOString(),
+                output: failed
+                  ? "curl: (7) Failed to connect to localhost port 8081: Connection refused (mock)"
+                  : "OK (mock)",
+              },
+            ],
+          });
+        }
         case "create_container": {
           const spec = args.spec ?? {};
           const id =
@@ -484,6 +508,7 @@ volumes:
             })),
             compose_project: null,
             compose_service: null,
+            health: null,
           });
           return Promise.resolve(id.slice(0, 64));
         }
@@ -730,6 +755,10 @@ volumes:
           return new Promise((resolve) => setTimeout(resolve, 400));
         case "plugin:dialog|open":
           return Promise.resolve("/home/user/myapp-stack/compose.yaml");
+        case "plugin:dialog|save":
+          return Promise.resolve("/home/user/container-export.log");
+        case "export_container_logs":
+          return Promise.resolve(5 * 1024);
 
         case "cleanup":
           return new Promise((resolve) =>
