@@ -123,6 +123,36 @@ export function StateBadge({ state }: { state: string }) {
   );
 }
 
+/** 健康检查状态：文案与色调的单一来源（列表徽标、详情卡片共用） */
+export const HEALTH_META: Record<
+  string,
+  { tone: "ok" | "warn" | "err"; label: string; title: string }
+> = {
+  healthy: { tone: "ok", label: "健康", title: "健康检查通过" },
+  unhealthy: { tone: "err", label: "不健康", title: "健康检查未通过" },
+  starting: { tone: "warn", label: "检查中", title: "健康检查启动中" },
+};
+
+/** 健康检查徽标：着色小圆片，与 compose 项目徽标同视觉语言，置于容器名旁 */
+export function HealthBadge({ health }: { health: string }) {
+  const meta = HEALTH_META[health];
+  if (!meta) return null;
+  return (
+    <span
+      aria-label={meta.title}
+      title={meta.title}
+      className={cn(
+        "inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-[10.5px] font-medium leading-4",
+        meta.tone === "ok" && "bg-ok/10 text-ok",
+        meta.tone === "warn" && "bg-warn/10 text-warn",
+        meta.tone === "err" && "bg-err/10 text-err",
+      )}
+    >
+      {meta.label}
+    </span>
+  );
+}
+
 export function Badge({
   tone = "neutral",
   children,
