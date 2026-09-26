@@ -151,6 +151,15 @@ export interface PullProgress {
   done: boolean;
 }
 
+/** 镜像导出进度：written 为已写入 tar 归档的字节数（引擎不提供总量） */
+export interface ExportProgress {
+  written: number;
+  done: boolean;
+  error: string | null;
+  /** 被用户取消（后端已删除半成品文件） */
+  cancelled: boolean;
+}
+
 // ---- 容器创建（与 Rust ContainerCreateSpec 对应，snake_case）----
 
 export interface PortMappingSpec {
