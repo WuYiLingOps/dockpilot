@@ -5,6 +5,7 @@ import type {
   ContainerSpec,
   DockerEventDto,
   DockerInfoDto,
+  ExportProgress,
   HostStatsDto,
   ImageDto,
   LogChunk,
@@ -82,6 +83,27 @@ export const api = {
     ch.onmessage = onProgress;
     return withCancel(invoke<string>("pull_image", { image, onProgress: ch }));
   },
+
+  /** 导出镜像为 tar（docker save；单/批量共用，共享层去重），written 为已写入字节数 */
+  exportImages: (refs: string[], path: string, onProgress: (p: ExportProgress) => void): Unsubscribe => {
+    const ch = new Channel<ExportProgress>();
+    ch.onmessage = onProgress;
+    return withCancel(invoke<string>("export_images", { refs, path, onProgress: ch }));
+  },
+
+  /** 导入镜像 tar（docker load；归档内可含多个镜像），进度复用拉取的消息结构 */
+  importImage: (path: string, onProgress: (p: PullProgress) => void): Unsubscribe => {
+    const ch = new Channel<PullProgress>();
+    ch.onmessage = onProgress;
+    return withCancel(invoke<string>("import_image", { path, onProgress: ch }));
+  },
+
+  /** 为镜像打新标签（docker tag），引用缺 tag 时后端补 latest */
+  tagImage: (id: string, reference: string) =>
+    invoke<void>("tag_image", { id, reference }),
+
+  /** 移除镜像的某一个标签；返回是否连带删除了镜像（该标签是最后一个引用） */
+  untagImage: (reference: string) => invoke<boolean>("untag_image", { reference }),
 
   streamLogs: (
     id: string,
