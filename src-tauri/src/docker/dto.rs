@@ -17,12 +17,34 @@ pub struct ContainerDto {
     pub image: String,
     pub state: String,
     pub status: String,
+    /// 健康检查状态："healthy" | "unhealthy" | "starting"（未配置 healthcheck 为 None）
+    pub health: Option<String>,
     pub created: i64,
     pub ports: Vec<PortDto>,
     /// compose 项目名（来自容器标签 com.docker.compose.project，非 compose 容器为 None）
     pub compose_project: Option<String>,
     /// compose 服务名（来自标签 com.docker.compose.service）
     pub compose_service: Option<String>,
+}
+
+/// 单次健康检查结果（inspect 的 State.Health.Log，仅保留最近几条）
+#[derive(Debug, Clone, Serialize)]
+pub struct HealthCheckLogDto {
+    pub exit_code: i64,
+    /// RFC3339 时间字符串（引擎可能返回空串）
+    pub start: String,
+    pub output: String,
+}
+
+/// 容器健康检查详情（inspect 的 State.Health）
+#[derive(Debug, Clone, Serialize)]
+pub struct ContainerHealthDto {
+    /// "none" | "starting" | "healthy" | "unhealthy"
+    pub status: String,
+    /// 连续失败次数
+    pub failing_streak: i64,
+    /// 最近的检查记录（引擎保留最后几条，时间升序）
+    pub log: Vec<HealthCheckLogDto>,
 }
 
 #[derive(Debug, Clone, Serialize)]
