@@ -385,3 +385,13 @@ pub struct PullProgress {
     pub error: Option<String>,
     pub done: bool,
 }
+
+/// 镜像导出进度：written 为已写入 tar 归档的字节数（引擎不提供总量，百分比由前端按已知镜像大小计算）
+#[derive(Debug, Clone, Serialize)]
+pub struct ExportProgress {
+    pub written: u64,
+    pub done: bool,
+    pub error: Option<String>,
+    /// 被用户取消（后端已删除半成品文件）
+    pub cancelled: bool,
+}
