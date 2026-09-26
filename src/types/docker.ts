@@ -11,12 +11,32 @@ export interface ContainerDto {
   image: string;
   state: string;
   status: string;
+  /** 健康检查状态："healthy" | "unhealthy" | "starting"（未配置 healthcheck 为 null） */
+  health: string | null;
   created: number;
   ports: PortDto[];
   /** compose 项目名（来自容器标签，非 compose 容器为 null） */
   compose_project: string | null;
   /** compose 服务名 */
   compose_service: string | null;
+}
+
+/** 单次健康检查结果 */
+export interface HealthCheckLogDto {
+  exit_code: number;
+  /** RFC3339 时间字符串 */
+  start: string;
+  output: string;
+}
+
+/** 容器健康检查详情（inspect 的 State.Health） */
+export interface ContainerHealthDto {
+  /** "none" | "starting" | "healthy" | "unhealthy" */
+  status: string;
+  /** 连续失败次数 */
+  failing_streak: number;
+  /** 最近的检查记录（时间升序，前端取最近一条展示） */
+  log: HealthCheckLogDto[];
 }
 
 export interface ImageDto {
