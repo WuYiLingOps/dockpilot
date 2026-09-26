@@ -22,6 +22,7 @@ import {
   Button,
   EmptyState,
   ErrorNote,
+  HealthBadge,
   IconButton,
   Modal,
   PageHeader,
@@ -144,6 +145,7 @@ export function Containers({
                 <div className="min-w-0">
                   <div className="flex items-center gap-1.5">
                     <span className="truncate font-medium text-fg">{c.name}</span>
+                    {c.health && <HealthBadge health={c.health} />}
                     {c.compose_project && !isWindows && (
                       <button
                         type="button"
