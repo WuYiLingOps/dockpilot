@@ -7,7 +7,7 @@
 [![License](https://img.shields.io/badge/License-MIT-blue)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/WuYiLingOps/dockpilot)](https://github.com/WuYiLingOps/dockpilot/releases)
 [![Tauri](https://img.shields.io/badge/Tauri-2-24C8D8?logo=tauri&logoColor=white)](https://tauri.app)
-[![Rust](https://img.shields.io/badge/Rust-1.77+-DEA584?logo=rust&logoColor=white)](https://rustup.rs)
+[![Rust](https://img.shields.io/badge/Rust-1.90+-DEA584?logo=rust&logoColor=white)](https://rustup.rs)
 [![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=white)](https://react.dev)
 
 **开源地址**：[GitHub](https://github.com/WuYiLingOps/dockpilot) · [Gitee](https://gitee.com/WuYiLingOps/dockpilot)
@@ -54,6 +54,10 @@ DockPilot 把这套能力装进桌面应用：Tauri 2 单窗口 + Rust 内核直
 
 ![设置](./screenshots/settings.png)
 
+**连接管理**
+![设置](./screenshots/connection.png)
+
+
 OrbStack 式布局：侧栏导航（顶部按钮可收起为图标栏，状态本地记忆）+ 点击进入详情，日志、终端、监控收敛为详情页内的 Tab；亮 / 暗双主题（跟随系统）与自定义一体化标题栏。窗口四角为 8px Fluent 圆角：Linux 走透明窗口 + CSS 裁剪，Windows 11 走系统原生 DWM 圆角（自带抗锯齿与阴影，Windows 10 无原生圆角 API 显示直角），最大化或全屏时自动恢复直角。
 
 ## 它能做什么
@@ -68,9 +72,9 @@ OrbStack 式布局：侧栏导航（顶部按钮可收起为图标栏，状态�
 - **空间清理** — 悬空镜像 / 未使用镜像 / 已停止容器 / 未使用卷 / 构建缓存的大小与数量统计，勾选一键清理并显示回收空间
 - **多连接管理** — 多个 Docker 连接的配置、连通性测试（延迟与版本）、添加 / 编辑 / 删除、一键切换即时生效；侧栏底部快速切换。SSH 由应用自动建立加密隧道（私钥、rootless socket、跳板机），见「[远程连接](#远程连接)」
 - **镜像仓库凭据** — 阿里云 ACR / Harbor 凭据管理与连通性测试，密码存入系统钥匙串，推送镜像用（见「[镜像推送](#镜像推送)」）
-- **多设备云同步** — 连接配置、镜像仓库条目与显示设置端到端加密后同步到 GitHub 私有 Gist，多台设备自动合并；云端只存密文，同步密码不落任何存储，见「[云同步](#云同步)」
+- **多设备云同步** — 连接配置、镜像仓库条目与显示设置端到端加密后同步到 GitHub 私有 Gist，多台设备自动合并；云端只存密文，同步密码解锁后记住在本机密钥库、启动自动解锁（可随时锁定清除），见「[云同步](#云同步)」
 - **后台常驻** — 系统托盘常驻，首次关闭窗口弹窗询问「最小化到托盘 / 退出应用」（可勾选记住选择，设置 → 后台与关闭 可随时修改）；最小化后容器异常桌面通知持续生效，单实例运行、二次启动自动唤起已有窗口
-- **设置** — 主题、连接管理、镜像仓库凭据、多设备云同步、列表刷新间隔、日志与终端默认值、容器异常桌面通知、关闭窗口行为（每次询问 / 最小化到托盘 / 完全退出），持久化到 `~/.config/com.dockpilot.app/settings.json`
+- **设置** — 主题、连接管理、镜像仓库凭据、多设备云同步、列表刷新间隔、日志与终端默认值、容器异常桌面通知、关闭窗口行为（每次询问 / 最小化到托盘 / 完全退出）、故障诊断（使用日志查看、调试日志开关、日志定时清理、导出诊断包），持久化到 `~/.config/com.dockpilot.app/settings.json`
 - **镜像加速 / daemon.json 编辑（Linux）** — Docker Desktop 式直接编辑 `/etc/docker/daemon.json` 全文（pkexec 提权写入、覆盖前自动备份），实时校验（JSON 语法 + 语义检查 + dockerd `--validate` 深度校验，旧版 Docker 自动降级）、内置国内预设源快捷开关、一键测速、pkexec 不可用时回退为可复制的终端命令
 
 ### 它不是什么
@@ -124,7 +128,7 @@ __它不是__容器编排平台——面向单台 Docker daemon（本机或远�
 
 ## 快速开始
 
-**前置要求**：[Rust](https://rustup.rs) ≥ 1.77 与 Node.js ≥ 20（开发构建）。Linux 需 Ubuntu 22.04 / 24.04（其他发行版理论可用，未验证）；Windows 10 / 11 仅支持远程连接（SSH / TLS / 明文 TCP）。
+**前置要求**：[Rust](https://rustup.rs) ≥ 1.90 与 Node.js ≥ 20（开发构建）。Linux 需 Ubuntu 22.04 / 24.04（其他发行版理论可用，未验证）；Windows 10 / 11 仅支持远程连接（SSH / TLS / 明文 TCP）。
 
 ```bash
 git clone https://github.com/WuYiLingOps/dockpilot.git
@@ -348,7 +352,7 @@ DOCKERPILOT_REMOTE_SSH=root@10.0.0.115 cargo test --lib -- --ignored remote_ssh 
 
 1. 注册一个 GitHub OAuth App（无需 client secret）：在 [github.com/settings/developers](https://github.com/settings/developers) 新建并勾选 **Enable Device Flow**，拿到 Client ID
 2. 「设置 → 云同步」→「连接 GitHub」，在浏览器输入应用显示的设备码完成授权（登录令牌存入系统钥匙串，不落明文文件）
-3. 首次使用设置一个**同步密码**——它用于加密云端数据，只在内存中持有、不落任何存储；**多台设备必须使用相同密码**
+3. 首次使用设置一个**同步密码**——它用于加密云端数据；解锁后自动记住在本机密钥库、启动时自动解锁，不想记住可随时「锁定」清除；**多台设备必须使用相同密码**
 4. 之后配置变更 3 秒后自动上传，启动与窗口切回时自动检查云端更新；也可随时点「立即同步」
 
 ### 同步范围
@@ -363,13 +367,21 @@ DOCKERPILOT_REMOTE_SSH=root@10.0.0.115 cargo test --lib -- --ignored remote_ssh 
 
 ### 安全说明
 
-- 云端 Gist 中只有 `meta（明文参数）+ payload（密文）`：解密钥匙由同步密码派生且密码不做任何保存，**遗忘同步密码后云端数据无法解密**（只能删除同步 Gist 重来）
+- 云端 Gist 中只有 `meta（明文参数）+ payload（密文）`：解密钥匙由同步密码派生，密码只保存在本机密钥库（钥匙串优先，回退机器绑定加密文件），可随时在同步卡片「锁定」清除，**遗忘同步密码后云端数据无法解密**（只能删除同步 Gist 重来）
 - 新设备首次同步按**合并**而非覆盖：连接与仓库条目按 id 三方合并（增删改双方自动合并，同时修改以本机优先并计冲突）；标量设置双改本地优先
 - 内置护栏：本机数据异常减少时暂停推送（可选恢复云端或强制推送）、本机为空而云端有数据时弹窗确认，避免误覆盖云端
 - GitHub OAuth token 优先存系统钥匙串，无钥匙串环境回退机器绑定加密文件
 - 官方安装包已内置 Client ID；**自行构建**需复制 `.env.example` 为 `.env` 并填入自己 OAuth App 的 Client ID（构建期经 Vite 注入）
 
 ## 常见问题与已知说明
+
+**应用闪退 / 异常退出后如何排查？**
+DockPilot 自带崩溃诊断：异常退出后的下次启动会显示顶部横幅（能归因时给出 panic 位置与原因，强制结束 / 断电等仅提示"未正常退出"），原因详情保留到下一次正常退出。使用日志可在「设置 → 故障诊断 → 查看日志」中浏览（级别过滤 / 关键字搜索 / 导出），日志文件位置：
+
+- Linux：`~/.local/share/com.dockpilot.app/logs/`
+- Windows：`%LOCALAPPDATA%\com.dockpilot.app\logs\`
+
+日志按会话分文件（`dockpilot.log` 为当前会话，`dockpilot_时间.log` 为历史会话归档，最多保留 14 个），排查闪退优先看最近归档的尾部。也可以直接在「故障诊断 → 导出诊断包」打包最近日志与崩溃详情随 Issue 反馈（不含任何密码 / 私钥 / 令牌）。排查疑难问题时可临时开启「调试日志」（Debug 级别，立即生效）。
 
 **Linux 上画面黑屏或花屏？**
 WebKitGTK 在部分 NVIDIA 驱动上 DMABUF 渲染可能黑屏。应用启动时检测到 NVIDIA 环境会自动设置 `WEBKIT_DISABLE_DMABUF_RENDERER=1` 兜底（Windows 走 WebView2，不执行该 workaround）；如仍遇异常，可手动设置该变量后启动。
@@ -396,7 +408,7 @@ Linux 上项目识别与查看仅依赖 Engine API；启动 / 停止等编排操
 优先系统钥匙串，无钥匙串时（无桌面的 Linux）存机器绑定加密文件，属混淆级防护；换机或重装系统后原密钥文件不可解密，需重新录入密码（应用会在测试连接时报错提示）。
 
 **忘记同步密码怎么办？**
-同步密码不存储在任何地方，遗忘后云端密文无法解密。处理：到 GitHub 删除同步 Gist（描述为 "DockPilot Encrypted Vault" 的私有 Gist），各设备在「设置 → 云同步」断开重连、设置新密码后重新上传。
+本机记住的同步密码可在同步卡片「锁定」清除；若密码本身遗忘，云端密文无法解密。处理：到 GitHub 删除同步 Gist（描述为 "DockPilot Encrypted Vault" 的私有 Gist），各设备在「设置 → 云同步」断开重连、设置新密码后重新上传。
 
 **云同步提示解密失败（同步密码可能不同）？**
 两台设备设置过不同的同步密码。在冲突提示中选「使用云端」并输入云端数据的密码（本机同步密码将被重置为云端密码），或选「使用本地覆盖云端」以本机为准。
