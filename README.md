@@ -226,22 +226,33 @@ DockPilot 支持管理多个 Docker 连接并随时切换：Linux 支持 **本�
 
 - 本机已安装 ssh 客户端（Windows 请启用 OpenSSH Client）
 - 远程机已运行 Docker daemon，并允许登录用户访问对应的 Docker socket
-- 认证仅支持**密钥免密或 ssh-agent**，不支持交互式密码
+- 认证仅支持**密钥类方式**（显式私钥、ssh-agent、默认私钥 `~/.ssh/id_*` 或 `~/.ssh/config` 配置均可），不支持交互式密码
 
 **配置免密登录**
+
+Linux / macOS：
 
 ```bash
 ssh-copy-id user@10.0.0.115                            # 输入一次密码，装本机公钥
 ssh -o BatchMode=yes user@10.0.0.115 'docker version'  # 验证免密 + docker 权限
 ```
 
+Windows（OpenSSH 不带 ssh-copy-id，无密钥先在 PowerShell 执行 `ssh-keygen -t ed25519`，一路回车）：
+
+```powershell
+type $env:USERPROFILE\.ssh\id_ed25519.pub | ssh user@10.0.0.115 "mkdir -p ~/.ssh && cat >> ~/.ssh/authorized_keys"
+ssh -o BatchMode=yes user@10.0.0.115 "docker version"
+```
+
+Windows 如需使用 ssh-agent，先启用 OpenSSH Authentication Agent 服务（管理员 PowerShell：`Set-Service ssh-agent -StartupType Automatic; Start-Service ssh-agent`）。
+
 **应用内配置**
 
 | 字段 | 说明 |
 |---|---|
 | 地址 | `user@主机` 或 `user@主机:端口`（端口默认 22） |
-| 私钥路径 | 可选；留空使用 ssh-agent 或 `~/.ssh/config` |
-| 跳板机地址 | 可选；目标主机仅可经跳板机访问时填 `user@跳板机[:端口]`（经 ProxyJump 中转，跳板机认证同样使用本机私钥或 ssh-agent） |
+| 私钥路径 | 可选；留空依次尝试默认私钥（`~/.ssh/id_*`）、ssh-agent 或 `~/.ssh/config` 配置 |
+| 跳板机地址 | 可选；目标主机仅可经跳板机访问时填 `user@跳板机[:端口]`（经 ProxyJump 中转，跳板机认证同样走密钥类方式） |
 | 远程 Socket 路径 | 可选；rootless Docker 填 `/run/user/<uid>/docker.sock`，默认 `/var/run/docker.sock` |
 
 **实现方式**：Linux 上应用在本地建立 `ssh -N -L` 加密隧道，把远程 Docker socket 转发为本机 Unix socket；Windows 上使用 OpenSSH 将远程 Docker socket 转发到本机 TCP 端口。bollard 经对应端点通信；SSH 连接的 compose 编排操作则经 SSH 直接在远程服务器上执行。隧道随连接切换、应用退出自动回收，进程意外退出会在下次使用时自动重建。

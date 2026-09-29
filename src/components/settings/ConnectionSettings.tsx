@@ -97,6 +97,15 @@ function emptyDraft(kind: ConnectionKind = "local"): ConnectionProfile {
   };
 }
 
+/** SSH 连接要求说明。首次部署公钥的指引按平台给出：Windows 的 OpenSSH
+ * 不带 ssh-copy-id，用 PowerShell 管道把公钥追加到远程（远程均为 Linux） */
+function sshConnectionNotes(isWindows: boolean): string {
+  const deploy = isWindows
+    ? '首次使用需在 PowerShell 执行 type $env:USERPROFILE\\.ssh\\id_ed25519.pub | ssh 用户@主机 "mkdir -p ~/.ssh && cat >> ~/.ssh/authorized_keys" 部署公钥（输入一次密码，无密钥先 ssh-keygen -t ed25519）'
+    : "首次使用需先在终端执行 ssh-copy-id 用户@主机 部署公钥（输入一次密码）";
+  return `连接要求：本机已安装 ssh 客户端。认证使用密钥类方式——显式私钥、ssh-agent、默认私钥（~/.ssh/id_*）或 ~/.ssh/config 配置均可，不支持密码，不要选择 .pub 公钥文件。${deploy}，否则会报 Permission denied；远程用户需有 docker 权限（已在 docker 组）。数据经 SSH 加密隧道传输。`;
+}
+
 /** 设置页 · Docker 连接分组：多连接配置的增删改、连通性测试与切换 */
 export function ConnectionSettings() {
   const qc = useQueryClient();
@@ -460,7 +469,7 @@ export function ConnectionSettings() {
                     <Input
                       value={draft.key_path}
                       onChange={(e) => setDraft({ ...draft, key_path: e.target.value })}
-                      placeholder="留空使用 ssh-agent 或 ~/.ssh/config 配置"
+                      placeholder="留空则依次尝试默认私钥（~/.ssh/id_*）、ssh-agent 与 ~/.ssh/config 配置"
                       className="flex-1 font-mono"
                       spellCheck={false}
                     />
@@ -479,7 +488,7 @@ export function ConnectionSettings() {
                     spellCheck={false}
                   />
                   <span className="mt-1 block text-[11px] text-fg3">
-                    目标主机仅可经跳板机访问时填写；跳板机的认证同样使用本机私钥或 ssh-agent
+                    目标主机仅可经跳板机访问时填写；跳板机的认证同样走密钥（默认私钥 / ssh-agent / ~/.ssh/config）
                   </span>
                 </label>
                 <label className="block">
@@ -493,8 +502,7 @@ export function ConnectionSettings() {
                   />
                 </label>
                 <div className="rounded-ctl border border-edge bg-panel2 p-2.5 text-[11px] leading-4 text-fg3">
-                  连接要求：本机已安装 ssh 客户端；认证仅支持私钥或 ssh-agent（不支持密码，不要选择 .pub 公钥文件）；
-                  远程用户需有 docker 权限（已在 docker 组）。数据经 SSH 加密隧道传输。
+                  {sshConnectionNotes(isWindows)}
                 </div>
               </>
             )}
