@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { api } from "./api";
+import { firstLine } from "./format";
 import { setThemeMode, syncThemeFromSettings } from "./theme";
 import type { AppSettings, ConnectionProfile } from "../types/settings";
 
@@ -30,6 +31,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   terminal_shell: "bash",
   notifications_enabled: true,
   close_action: "minimize",
+  debug_logging: false,
+  log_retention_days: 14,
   registries: [],
 };
 
@@ -80,7 +83,7 @@ export function useSwitchConnection() {
       void qc.invalidateQueries();
       toast.success(`已切换到「${p.name}」`);
     },
-    onError: (e) => toast.error(String(e)),
+    onError: (e) => toast.error(firstLine(String(e))),
   });
 }
 

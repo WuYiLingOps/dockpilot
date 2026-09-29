@@ -41,6 +41,12 @@ import type {
   ComposeOutput,
   ComposeProjectDto,
 } from "../types/compose";
+import type {
+  AppLogCleanupResult,
+  AppLogPage,
+  LastCrashInfo,
+  LogFileMeta,
+} from "../types/diagnostics";
 
 type Unsubscribe = () => void;
 
@@ -311,6 +317,33 @@ export const api = {
   diskUsage: () => invoke<DiskUsageDto>("disk_usage"),
 
   cleanup: (kinds: string[]) => invoke<CleanupResultDto>("cleanup", { kinds }),
+
+  // ---- 诊断 / 应用使用日志 ----
+
+  /** 上次异常退出信息（后端启动时检测并缓存；正常退出/首次运行为 null） */
+  getLastCrash: () => invoke<LastCrashInfo | null>("get_last_crash"),
+
+  getLogDir: () => invoke<string>("get_log_dir"),
+
+  listLogFiles: () => invoke<LogFileMeta[]>("list_log_files"),
+
+  /** 读取应用日志：offset 为空读整个文件尾部（首屏），否则从该字节增量读取 */
+  readAppLog: (file: string | null, offset: number | null, limit?: number) =>
+    invoke<AppLogPage>("read_app_log", { file, offset, limit }),
+
+  /** 调试日志开关：后端即时切换级别并持久化 */
+  setDebugLogging: (enabled: boolean) =>
+    invoke<void>("set_debug_logging", { enabled }),
+
+  /** 导出诊断包（tar：日志 + panic 报告 + 系统信息），path 为保存对话框返回的完整路径 */
+  exportDiagnostics: (path: string) => invoke<string>("export_diagnostics", { path }),
+
+  /** 把某个日志文件复制到用户选择的路径，返回字节数 */
+  exportAppLogFile: (file: string, dest: string) =>
+    invoke<number>("copy_log_file", { file, dest }),
+
+  /** 按当前设置的保留天数立即清理过期日志 */
+  cleanupAppLogs: () => invoke<AppLogCleanupResult>("cleanup_app_logs"),
 
   // ---- 编排（docker compose）----
 

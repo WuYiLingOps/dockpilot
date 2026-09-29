@@ -1,5 +1,10 @@
 import type { PortDto } from "../types/docker";
 
+/** 多行错误消息取首行短原因：完整原因与操作指引在日志、悬停提示或引导页中查看 */
+export function firstLine(s: string): string {
+  return s.split("\n", 1)[0]?.trim() || s;
+}
+
 export function formatBytes(n: number, digits = 1): string {
   if (!Number.isFinite(n) || n < 0) return "-";
   const units = ["B", "KB", "MB", "GB", "TB", "PB"];

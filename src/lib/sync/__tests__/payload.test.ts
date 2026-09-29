@@ -17,6 +17,8 @@ const localSettings = (): AppSettings => ({
   terminal_shell: "bash",
   notifications_enabled: true,
   close_action: "exit",
+  debug_logging: false,
+  log_retention_days: 14,
   registries: [
     { id: "r1", name: "本机仓库", kind: "harbor", registry: "harbor.local", username: "u", secret_backend: "file", skip_tls_verify: false, created_at: 1 },
   ],

@@ -1042,6 +1042,53 @@ volumes:
           );
         case "plugin:app|version":
           return Promise.resolve("0.2.0-mock");
+        // ---- 诊断 / 应用使用日志（浏览器走查用） ----
+        case "get_last_crash":
+          return Promise.resolve(null);
+        case "get_log_dir":
+          return Promise.resolve("~/.local/share/com.dockpilot.app/logs (mock)");
+        case "list_log_files":
+          return Promise.resolve([
+            { name: "dockpilot.log", size: 48_213, modified: now - 60 },
+            { name: "dockpilot_2026-09-29_18-03-21.log", size: 5_242_880, modified: now - 86_400 },
+            { name: "dockpilot_2026-09-28_09-12-44.log", size: 1_310_720, modified: now - 172_800 },
+          ]);
+        case "read_app_log": {
+          // offset 字节语义在 mock 里简化为：未消费前返回样例日志，之后增量返回空
+          const END = 48_213;
+          const offset = args?.offset ?? 0;
+          if (offset >= END) {
+            return Promise.resolve({ entries: [], next_offset: offset, size: END });
+          }
+          const mk = (ts, level, target, message) => ({ ts, level, target, message });
+          const entries = [
+            mk("2026-09-30 09:41:02", "INFO", "tauri_app_lib", "DockPilot v1.0.1 启动（linux x86_64，日志级别 Info）"),
+            mk("2026-09-30 09:41:02", "INFO", "tauri_app_lib::docker::conn", "初始化连接：本地（local）"),
+            mk("2026-09-30 09:41:05", "INFO", "tauri_app_lib::docker::events", "全局事件监听已启动"),
+            mk("2026-09-30 09:42:11", "INFO", "tauri_app_lib::docker::images", "拉取镜像 redis:7-alpine"),
+            mk("2026-09-30 09:42:38", "WARN", "tauri_app_lib::docker::compose", "compose 项目 myapp-stack 执行 up（服务：全部）"),
+            mk("2026-09-30 09:42:41", "ERROR", "tauri_app_lib::docker::push", "推送镜像失败: unauthorized: authentication required (mock)"),
+            mk("2026-09-30 09:43:02", "INFO", "tauri_app_lib::docker::conn", "连接已切换：生产服务器（ssh）"),
+            mk("2026-09-30 09:43:20", "INFO", "webview", "前端日志示例：查询失败 containers (mock)"),
+          ];
+          return Promise.resolve({ entries, next_offset: END, size: END });
+        }
+        case "set_debug_logging":
+          return Promise.resolve();
+        case "export_diagnostics":
+          return Promise.resolve(args?.path ?? "~/Downloads/dockpilot-diagnostics.tar");
+        case "copy_log_file":
+          return Promise.resolve(args ? 48_213 : 0);
+        case "cleanup_app_logs":
+          return Promise.resolve({ removed: 0, bytes: 0 });
+        case "sync_save_sync_password":
+          return Promise.resolve("keyring");
+        case "sync_load_sync_password":
+          return Promise.resolve(null);
+        case "sync_delete_sync_password":
+          return Promise.resolve();
+        case "plugin:log|log":
+          return Promise.resolve();
         default:
           console.warn("[tauri-mock] unhandled invoke:", cmd, args);
           return Promise.resolve();

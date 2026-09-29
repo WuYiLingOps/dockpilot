@@ -46,6 +46,10 @@ export interface AppSettings {
   notifications_enabled: boolean;
   /** 关闭窗口行为：ask 每次关闭时弹窗询问（默认）；minimize 最小化到托盘；exit 完全退出 */
   close_action: CloseAction;
+  /** 调试日志：开启后应用运行日志降为 Debug 级别（立即生效），供故障排查 */
+  debug_logging: boolean;
+  /** 使用日志保留天数（0 = 永久保留；历史会话日志超期后自动清理） */
+  log_retention_days: number;
   /** 镜像仓库凭据列表（密码不在此处，由系统钥匙串/加密文件保存） */
   registries: RegistryProfile[];
 }
