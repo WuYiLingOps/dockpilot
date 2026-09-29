@@ -81,7 +81,19 @@ fn show_main(app: &tauri::AppHandle) {
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+/// 进程级 rustls crypto provider：依赖图同时启用 ring（bollard ssl）与 aws-lc-rs
+/// （reqwest 0.13 rustls），rustls 无法从 features 自动二选一；不显式安装时
+/// bollard TLS 建连的 ClientConfig::builder() 会 panic（release 下 panic=abort 闪退）。
+/// reqwest 构建客户端时也优先使用进程默认，两侧统一走 ring
+pub fn install_crypto_provider() {
+    // 已被安装时返回 Err，属于并发竞争下的正常结果，接受即可
+    let _ = rustls::crypto::ring::default_provider().install_default();
+}
+
 pub fn run() {
+    // 必须在任何 TLS 建连（bollard TLS / reqwest）之前完成
+    install_crypto_provider();
+
     // WebKitGTK 在部分 NVIDIA 驱动上 DMABUF 渲染会黑屏/花屏，检测到 NVIDIA 时自动兜底
     // （Windows 走 WebView2，无此问题）
     #[cfg(target_os = "linux")]

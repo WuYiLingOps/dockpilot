@@ -408,4 +408,30 @@ mod tests {
         assert_eq!(conn.profile.kind, "local");
         assert_eq!(conn.effective_socket(), "/var/run/docker.sock");
     }
+
+    #[test]
+    fn tls_connect_sync_phase_does_not_panic() {
+        // 依赖图同时启用 ring 与 aws-lc-rs 时，rustls 无法从 features 自动选择 provider，
+        // 未安装进程默认时建连同步段的 ClientConfig::builder() 会 panic（release 下闪退）。
+        // 安装后整个同步段（含 builder）应正常返回 Ok，后续错误只出现在真正发起请求时
+        crate::install_crypto_provider();
+
+        let dir = std::env::temp_dir().join(format!("dockpilot-tls-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        // 证书文件留空即可：ca.pem 解析为空集后即到达 builder()（原 panic 点）
+        for f in ["key.pem", "cert.pem", "ca.pem"] {
+            std::fs::write(dir.join(f), b"").unwrap();
+        }
+
+        let r = Docker::connect_with_ssl(
+            "tcp://127.0.0.1:2376",
+            &dir.join("key.pem"),
+            &dir.join("cert.pem"),
+            &dir.join("ca.pem"),
+            1,
+            API_DEFAULT_VERSION,
+        );
+        r.expect("connect_with_ssl 同步建连不应 panic 或失败");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
