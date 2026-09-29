@@ -107,6 +107,11 @@ pub async fn save_registry(app: tauri::AppHandle, spec: RegistrySpec) -> CmdResu
         .id
         .as_deref()
         .and_then(|id| s.registries.iter().find(|r| r.id == id).cloned());
+    log::info!(
+        "{}镜像仓库凭据：{}（{registry}）",
+        if existing.is_some() { "更新" } else { "添加" },
+        spec.name.trim()
+    );
 
     let (mut profile, is_new) = match existing {
         Some(p) => (p, false),
@@ -150,6 +155,7 @@ pub async fn save_registry(app: tauri::AppHandle, spec: RegistrySpec) -> CmdResu
 pub async fn remove_registry(app: tauri::AppHandle, id: String) -> CmdResult<()> {
     let mut s = settings::load(&app);
     let profile = find_profile(&s, &id)?.clone();
+    log::info!("删除镜像仓库凭据：{}", profile.name);
     s.registries.retain(|r| r.id != id);
     settings::save(&app, &s)?;
 
@@ -178,7 +184,22 @@ pub async fn test_registry(
 
     // 未显式指定时使用凭据档案中保存的开关
     let skip_tls = skip_tls_verify.unwrap_or(profile.skip_tls_verify);
-    Ok(probe_registry(&profile.registry, &profile.username, &password, skip_tls).await)
+    let result = probe_registry(&profile.registry, &profile.username, &password, skip_tls).await;
+    if result.ok {
+        log::info!(
+            "测试仓库「{}」成功：{} ms{}",
+            profile.name,
+            result.latency_ms,
+            if result.via_http { "（HTTP 回退）" } else { "" }
+        );
+    } else {
+        log::warn!(
+            "测试仓库「{}」失败：{}",
+            profile.name,
+            result.error.as_deref().unwrap_or("未知错误")
+        );
+    }
+    Ok(result)
 }
 
 /// 按标准 Docker Registry v2 探测：/v2/ 未认证请求 → 按 WWW-Authenticate 分派验证
