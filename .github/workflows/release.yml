@@ -1,0 +1,136 @@
+name: Release
+
+# 推送 v* tag 时自动构建 deb（Linux）与 NSIS 安装包（Windows）并发布 GitHub Release；
+# 也可在 Actions 页手动触发（仅构建，上传 artifact 不发版）
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write # tauri-action 创建 Release 需要写权限
+
+jobs:
+  release:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            platform: linux
+            artifact: src-tauri/target/release/bundle/deb/*.deb
+          - os: windows-latest
+            platform: windows
+            artifact: src-tauri/target/release/bundle/nsis/*.exe
+    runs-on: ${{ matrix.os }}
+    env:
+      # 云同步的 GitHub OAuth App client_id（公开值，构建期经 Vite 注入前端产物，见 .env.example）；
+      # 存放在仓库 Secret VITE_SYNC_GITHUB_CLIENT_ID 中，tag 构建与手动构建验证两条路径共用
+      VITE_SYNC_GITHUB_CLIENT_ID: ${{ secrets.VITE_SYNC_GITHUB_CLIENT_ID }}
+    steps:
+      # fetch-depth: 0 拉全量历史与 tag，「生成 Release 说明」步骤的 git log 需要对比上一个 tag
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Tauri v2 Linux 构建的系统依赖（官方 prerequisites）；Windows runner 自带 WebView2 无需安装
+      - name: 安装 Tauri Linux 系统依赖
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: 缓存 Cargo 编译产物
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      # 锁文件使用公共 npm registry，避免 CI 依赖本地内网镜像；Tauri CLI 在 devDependencies
+      - name: 安装 Node 依赖
+        run: npm ci --include=dev --registry=https://registry.npmjs.org/
+
+      - name: 校验 Tauri CLI
+        run: npm run tauri -- --version
+
+      # 项目惯例三处版本号同步改（package.json / Cargo.toml / tauri.conf.json），
+      # 发版 tag 必须与 tauri.conf.json 一致，避免 Release 与安装包内版本错位
+      - name: 校验 tag 与版本号一致
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          V=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          [ "v$V" = "${{ github.ref_name }}" ] || {
+            echo "tag ${{ github.ref_name }} 与 tauri.conf.json 的 v$V 不一致，请同步三处版本号后重新打 tag";
+            exit 1;
+          }
+
+      # 按模板生成 Release 说明（版本 / Commit / 构建时间 / 自上个 tag 以来的提交列表），
+      # 多行内容经定界符写入 $GITHUB_OUTPUT，供 tauri-action 的 releaseBody 引用
+      - name: 生成 Release 说明
+        id: notes
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          PREV_TAG=$(git describe --tags --abbrev=0 "${VERSION}^" 2>/dev/null || true)
+          if [ -n "$PREV_TAG" ]; then
+            COMMITS=$(git log --pretty=format:"- %h %s" "${PREV_TAG}..${GITHUB_SHA}")
+          else
+            COMMITS="- 首个发布版本"
+          fi
+          cat > release_notes.md <<EOF
+          ## 🎉 DockPilot ${VERSION} 发布
+
+          ### 📋 构建信息
+          - **版本**: ${VERSION}
+          - **Commit**: ${GITHUB_SHA:0:7}
+          - **构建时间**: $(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+          ### 📦 安装包
+          - Ubuntu 22.04 / 24.04 的 deb 安装包见下方 Assets
+          - Windows 10/11 的 NSIS 安装包（DockPilot_x64-setup.exe）见下方 Assets；Windows 版仅支持远程连接（SSH / TLS / TCP），需启用 OpenSSH 客户端；未签名，首次运行 SmartScreen 会提示保留
+
+          ### 📝 更新内容
+          ${COMMITS}
+          EOF
+          {
+            echo 'body<<NOTES_EOF'
+            cat release_notes.md
+            echo 'NOTES_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      # tauri-action 按 runner 平台构建：Linux 出 deb，Windows 出 NSIS（bundle.targets 需同时声明两者）
+      - name: 构建并发布 Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: "DockPilot ${{ github.ref_name }}"
+          releaseBody: ${{ steps.notes.outputs.body }}
+          releaseDraft: false
+          prerelease: false
+
+      # 手动触发走普通 tauri build 做构建验证（不创建 Release）；tauri-action 仅在 tag 推送时运行
+      - name: 仅构建验证（手动触发）
+        if: github.event_name == 'workflow_dispatch'
+        run: npm run tauri build
+
+      # 手动触发只做构建验证：产物可在本次运行页面的 Artifacts 下载
+      - name: 上传构建产物
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: DockPilot-${{ matrix.platform }}
+          path: ${{ matrix.artifact }}
+          if-no-files-found: error

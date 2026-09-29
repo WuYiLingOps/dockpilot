@@ -1,0 +1,44 @@
+<svg width="719" height="594" viewBox="55 121 297 245" xmlns="http://www.w3.org/2000/svg">
+  
+  <!-- water -->
+  <ellipse cx="191.5" cy="352" rx="127.5" ry="14" fill="#0A2E55"/>
+  <!-- hull fill + inner shading -->
+  <path d="M 63 291 C 190 282 290 263 345 258 C 338 278 318 318 302 338 C 285 350 245 356 200 356 C 158 356 112 353 90 347 C 76 330 66 310 63 291 Z" fill="#FFFFFF"/>
+  <clipPath id="hullClip"><path d="M 63 291 C 190 282 290 263 345 258 C 338 278 318 318 302 338 C 285 350 245 356 200 356 C 158 356 112 353 90 347 C 76 330 66 310 63 291 Z"/></clipPath>
+  <path d="M 345 258 C 338 278 318 318 302 338 C 290 348 268 353 236 355 C 262 347 285 338 298 322 C 312 304 324 284 332 266 C 336 261 341 259 345 258 Z" fill="#C9D3DD" clip-path="url(#hullClip)"/>
+  <!-- bottom containers: white outline separates them from hull; corrugated door faces -->
+  <rect x="98" y="213" width="66.33333333333333" height="66" rx="9" fill="#0A2E55" stroke="#FFFFFF" stroke-width="4"/>
+  <line x1="113.28333333333333" y1="222" x2="113.28333333333333" y2="270" stroke="#051C36" stroke-width="2.6" stroke-linecap="round"/>
+  <line x1="115.88333333333333" y1="222" x2="115.88333333333333" y2="270" stroke="#2A5480" stroke-width="2.6" stroke-linecap="round"/>
+  <line x1="129.86666666666665" y1="222" x2="129.86666666666665" y2="270" stroke="#051C36" stroke-width="2.6" stroke-linecap="round"/>
+  <line x1="132.46666666666667" y1="222" x2="132.46666666666667" y2="270" stroke="#2A5480" stroke-width="2.6" stroke-linecap="round"/>
+  <line x1="146.45" y1="222" x2="146.45" y2="270" stroke="#051C36" stroke-width="2.6" stroke-linecap="round"/>
+  <line x1="149.05" y1="222" x2="149.05" y2="270" stroke="#2A5480" stroke-width="2.6" stroke-linecap="round"/>
+  <rect x="165.83333333333331" y="213" width="66.33333333333333" height="60" rx="9" fill="#0CC7BD" stroke="#FFFFFF" stroke-width="4"/>
+  <line x1="181.11666666666665" y1="222" x2="181.11666666666665" y2="264" stroke="#08998F" stroke-width="2.6" stroke-linecap="round"/>
+  <line x1="183.71666666666667" y1="222" x2="183.71666666666667" y2="264" stroke="#52E0D7" stroke-width="2.6" stroke-linecap="round"/>
+  <line x1="197.69999999999996" y1="222" x2="197.69999999999996" y2="264" stroke="#08998F" stroke-width="2.6" stroke-linecap="round"/>
+  <line x1="200.29999999999998" y1="222" x2="200.29999999999998" y2="264" stroke="#52E0D7" stroke-width="2.6" stroke-linecap="round"/>
+  <line x1="214.2833333333333" y1="222" x2="214.2833333333333" y2="264" stroke="#08998F" stroke-width="2.6" stroke-linecap="round"/>
+  <line x1="216.88333333333333" y1="222" x2="216.88333333333333" y2="264" stroke="#52E0D7" stroke-width="2.6" stroke-linecap="round"/>
+  <rect x="233.66666666666666" y="213" width="66.33333333333333" height="51" rx="9" fill="#0CC7BD" stroke="#FFFFFF" stroke-width="4"/>
+  <line x1="248.95" y1="222" x2="248.95" y2="255" stroke="#08998F" stroke-width="2.6" stroke-linecap="round"/>
+  <line x1="251.55" y1="222" x2="251.55" y2="255" stroke="#52E0D7" stroke-width="2.6" stroke-linecap="round"/>
+  <line x1="265.5333333333333" y1="222" x2="265.5333333333333" y2="255" stroke="#08998F" stroke-width="2.6" stroke-linecap="round"/>
+  <line x1="268.1333333333333" y1="222" x2="268.1333333333333" y2="255" stroke="#52E0D7" stroke-width="2.6" stroke-linecap="round"/>
+  <line x1="282.1166666666666" y1="222" x2="282.1166666666666" y2="255" stroke="#08998F" stroke-width="2.6" stroke-linecap="round"/>
+  <line x1="284.71666666666664" y1="222" x2="284.71666666666664" y2="255" stroke="#52E0D7" stroke-width="2.6" stroke-linecap="round"/>
+  <!-- hull stroke in front of the cargo -->
+  <path d="M 63 291 C 190 282 290 263 345 258 C 338 278 318 318 302 338 C 285 350 245 356 200 356 C 158 356 112 353 90 347 C 76 330 66 310 63 291 Z" fill="none" stroke="#0A2E55" stroke-width="13" stroke-linejoin="round" stroke-linecap="round"/>
+  <!-- top container: 3D depth card + royal front + corrugated door face -->
+  <rect x="149" y="151" width="59" height="57" rx="9" fill="#072A50"/>
+  <rect x="164" y="155" width="59" height="57" rx="9" fill="#0B4C8C" stroke="#0A2E55" stroke-width="4"/>
+  <line x1="177.45" y1="164" x2="177.45" y2="203" stroke="#07325E" stroke-width="2.6" stroke-linecap="round"/>
+  <line x1="180.05" y1="164" x2="180.05" y2="203" stroke="#2F6DAD" stroke-width="2.6" stroke-linecap="round"/>
+  <line x1="192.2" y1="164" x2="192.2" y2="203" stroke="#07325E" stroke-width="2.6" stroke-linecap="round"/>
+  <line x1="194.8" y1="164" x2="194.8" y2="203" stroke="#2F6DAD" stroke-width="2.6" stroke-linecap="round"/>
+  <line x1="206.95" y1="164" x2="206.95" y2="203" stroke="#07325E" stroke-width="2.6" stroke-linecap="round"/>
+  <line x1="209.55" y1="164" x2="209.55" y2="203" stroke="#2F6DAD" stroke-width="2.6" stroke-linecap="round"/>
+  <!-- sparkle -->
+  <path d="M 315 121 C 321.16 148.3 325.65 153.84 350.5 160 C 325.65 166.16 321.16 171.7 315 199 C 308.84 171.7 304.35 166.16 279.5 160 C 304.35 153.84 308.84 148.3 315 121 Z" fill="#27DDF5"/>
+</svg>
