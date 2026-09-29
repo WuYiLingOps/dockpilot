@@ -155,3 +155,17 @@ export const loadToken = async (backend: TokenBackend): Promise<string | null> =
 export const deleteToken = async (backend: TokenBackend): Promise<void> => {
   await invoke("sync_delete_github_token", { backend });
 };
+
+// ---------------------------------------------------------------------------
+// 同步密码持久化（记住密码：解锁后自动保存，锁定时清除）
+// ---------------------------------------------------------------------------
+
+export const saveSyncPassword = async (password: string): Promise<TokenBackend> =>
+  invoke<TokenBackend>("sync_save_sync_password", { password });
+
+export const loadSyncPassword = async (backend: TokenBackend): Promise<string | null> =>
+  invoke<string | null>("sync_load_sync_password", { backend });
+
+export const deleteSyncPassword = async (backend: TokenBackend): Promise<void> => {
+  await invoke("sync_delete_sync_password", { backend });
+};

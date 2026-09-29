@@ -183,6 +183,8 @@ export interface SyncConfig {
   gistId: string | null;
   /** GitHub token 的实际落点（钥匙串/加密文件），由 Rust 侧返回 */
   tokenBackend: "keyring" | "file" | null;
+  /** 记住的同步密码的实际落点（解锁后自动保存，锁定时清除） */
+  passwordBackend: "keyring" | "file" | null;
   /** OAuth 账号信息（展示用） */
   account: ProviderAccount | null;
   /** 上次成功同步时间（含一致性检查；持久化，重启后展示不丢） */
@@ -195,6 +197,7 @@ export const DEFAULT_SYNC_CONFIG: SyncConfig = {
   autoSync: true,
   gistId: null,
   tokenBackend: null,
+  passwordBackend: null,
   account: null,
   lastSyncAt: null,
   lastSyncVersion: null,

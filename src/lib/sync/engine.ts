@@ -22,6 +22,7 @@
  */
 
 import { getAppVersion } from "../platform";
+import { applog } from "../applog";
 import type { AppSettings } from "../../types/settings";
 import type {
   ConflictInfo,
@@ -239,6 +240,19 @@ export async function initialize(): Promise<void> {
     }
   }
   state.connected = accessToken !== null;
+  // 自动解锁：记住的同步密码（钥匙串/加密文件）直接恢复，免去每次启动手动解锁；
+  // 校验失败（云端密码配置已变）时清除失效记忆，回到锁定态
+  if (state.connected && masterKeyConfigExists() && config.passwordBackend) {
+    try {
+      const stored = await auth.loadSyncPassword(config.passwordBackend);
+      if (stored) {
+        const ok = await unlock(stored);
+        if (!ok) await forgetStoredPassword(config.passwordBackend);
+      }
+    } catch {
+      // 密钥库不可用：保持锁定，不阻塞启动
+    }
+  }
   notify();
 }
 
@@ -344,6 +358,7 @@ export async function setMasterPassword(password: string): Promise<void> {
   const config = await createMasterKeyConfig(password);
   saveMasterKeyConfig(config);
   masterPassword = password;
+  await rememberPassword(password);
   notify();
 }
 
@@ -359,8 +374,38 @@ export async function unlock(password: string): Promise<boolean> {
   return ok;
 }
 
+/** 解锁并记住密码到本机密钥库（下次启动自动解锁）；记住失败不影响本次解锁 */
+export async function unlockAndRemember(password: string): Promise<boolean> {
+  const ok = await unlock(password);
+  if (ok) await rememberPassword(password);
+  return ok;
+}
+
+async function rememberPassword(password: string): Promise<void> {
+  try {
+    const backend = await auth.saveSyncPassword(password);
+    saveConfig({ ...loadConfig(), passwordBackend: backend });
+  } catch {
+    // 密钥库不可用（无钥匙串且加密文件失败）：仅本次内存持有
+  }
+}
+
+/** 清除本机记住的同步密码（backend 缺省取当前记录的落点） */
+async function forgetStoredPassword(backend?: auth.TokenBackend): Promise<void> {
+  const target = backend ?? loadConfig().passwordBackend;
+  if (!target) return;
+  try {
+    await auth.deleteSyncPassword(target);
+  } catch {
+    // 条目不存在 / 密钥库不可用：视为已清除
+  }
+  saveConfig({ ...loadConfig(), passwordBackend: null });
+}
+
 export function lock(): void {
   masterPassword = null;
+  // 锁定即忘记：记住的同步密码一并清除，下次启动回到锁定态
+  void forgetStoredPassword();
   notify();
 }
 
@@ -376,6 +421,8 @@ export async function changePassword(oldPassword: string, newPassword: string): 
   if (!next) return false;
   saveMasterKeyConfig(next);
   masterPassword = newPassword;
+  // 同步更新记住的密码，避免下次启动自动解锁失败
+  await rememberPassword(newPassword);
   notify();
   return true;
 }
@@ -493,7 +540,9 @@ export async function syncNow(settings: AppSettings, opts: SyncOptions): Promise
   notify();
 
   try {
-    return await runSync(settings, opts, seq);
+    const result = await runSync(settings, opts, seq);
+    logSyncOutcome(opts.reason, result);
+    return result;
   } catch (error) {
     if (seq !== syncSeq) {
       return { success: false, action: "none", error: String(error) };
@@ -503,7 +552,31 @@ export async function syncNow(settings: AppSettings, opts: SyncOptions): Promise
     state.syncState = "ERROR";
     state.lastError = message;
     notify();
+    applog.error(`云同步异常（${opts.reason}）：${message}`);
     return { success: false, action: "none", error: message };
+  }
+}
+
+const SYNC_ACTION_LABEL: Record<SyncResult["action"], string> = {
+  upload: "已上传本地数据",
+  download: "已拉取云端数据",
+  merge: "已合并云端数据",
+  none: "云端与本地一致",
+};
+
+/** 同步结果写入应用日志：成功 Info / 失败 Error / 需用户决策（冲突、护栏、空库确认）Warn */
+function logSyncOutcome(reason: SyncOptions["reason"], r: SyncResult): void {
+  if (r.success) {
+    applog.info(
+      `云同步完成（${reason}）：${SYNC_ACTION_LABEL[r.action]}${r.version != null ? `（v${r.version}）` : ""}`,
+    );
+    return;
+  }
+  if (!r.error) return;
+  if (r.conflictDetected || r.shrinkBlocked || r.error === "empty-vault-guard") {
+    applog.warn(`云同步暂停（${reason}）：${r.error}`);
+  } else {
+    applog.error(`云同步失败（${reason}）：${r.error}`);
   }
 }
 
@@ -712,6 +785,8 @@ export async function resolveConflictUseRemote(
     const config = await createMasterKeyConfig(cloudPassword);
     saveMasterKeyConfig(config);
     masterPassword = cloudPassword;
+    // 同步更新记住的密码，避免下次启动自动解锁失败
+    await rememberPassword(cloudPassword);
     await adoptRemote(payload, file, state.gistId ?? "", applyLocal);
     state.conflict = null;
     conflictRemoteFile = null;

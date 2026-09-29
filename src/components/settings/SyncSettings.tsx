@@ -98,7 +98,8 @@ export function SyncSettings() {
     setUnlocking(true);
     setUnlockError(null);
     try {
-      const ok = await engine.unlock(unlockPassword);
+      // 解锁成功后自动记住密码（钥匙串/加密文件），下次启动自动解锁
+      const ok = await engine.unlockAndRemember(unlockPassword);
       if (ok) {
         setUnlockPassword("");
       } else {
@@ -217,10 +218,10 @@ export function SyncSettings() {
               <div className="text-[13px] text-fg">同步密码</div>
               <div className="text-[11px] text-fg3">
                 {state.securityState === "NO_KEY"
-                  ? "用于加密云端数据，密码不保存在本机（遗忘后云端数据无法恢复）"
+                  ? "用于端到端加密云端数据（遗忘后云端数据无法恢复）"
                   : state.securityState === "LOCKED"
-                    ? "输入密码解锁后才能同步"
-                    : "密码仅在本次运行内存中持有"}
+                    ? "解锁后本机会记住密码，下次启动自动解锁"
+                    : "密码已记住到本机密钥库，启动时自动解锁"}
               </div>
             </div>
           </div>
@@ -254,9 +255,20 @@ export function SyncSettings() {
               </div>
             )}
             {unlocked && (
-              <IconButton title="修改同步密码" onClick={() => setPasswordModal("change")}>
-                <Pencil size={13} />
-              </IconButton>
+              <>
+                <IconButton title="修改同步密码" onClick={() => setPasswordModal("change")}>
+                  <Pencil size={13} />
+                </IconButton>
+                <IconButton
+                  title="锁定并清除本机记住的密码（下次启动需手动解锁）"
+                  onClick={() => {
+                    engine.lock();
+                    toast.success("已锁定并清除记住的同步密码");
+                  }}
+                >
+                  <Lock size={13} />
+                </IconButton>
+              </>
             )}
           </div>
         </div>
