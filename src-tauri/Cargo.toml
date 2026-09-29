@@ -1,6 +1,6 @@
 [package]
 name = "dockpilot"
-version = "1.0.0"
+version = "1.0.1"
 description = "轻量级 Docker 桌面管理工具"
 authors = ["hj"]
 edition = "2021"
@@ -26,6 +26,10 @@ tauri-plugin-dialog = "2"# 容器异常（非零退出/OOM/健康检查失败）
 tauri-plugin-notification = "2"
 # 托盘常驻后二次启动只唤起已有窗口，不拉起新实例
 tauri-plugin-single-instance = "2"
+# 运行日志落盘（fern 内核）：按大小轮转 + KeepSome 自动清理 + 每会话归档；
+# 使用日志查看器与崩溃诊断依赖它（要求 Rust ≥ 1.90）
+log = "0.4"
+tauri-plugin-log = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # ssl：远程 TLS 连接（rustls/ring）；默认 features 已含 http + pipe
