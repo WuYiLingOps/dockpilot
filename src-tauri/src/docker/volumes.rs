@@ -130,6 +130,7 @@ pub async fn create_volume(spec: VolumeCreateSpec) -> CmdResult<()> {
     }
 
     let d = docker().await?;
+    log::info!("创建卷：{name}（驱动 {driver}）");
     d.create_volume(VolumeCreateOptions {
         name: Some(name.to_string()),
         driver: Some(driver),
@@ -144,6 +145,10 @@ pub async fn create_volume(spec: VolumeCreateSpec) -> CmdResult<()> {
 /// 删除卷；被容器引用时拒绝（force 时跳过本地检查，交给 daemon 强制删除）
 #[tauri::command]
 pub async fn remove_volume(name: String, force: bool) -> CmdResult<()> {
+    log::info!(
+        "删除卷：{name}{}",
+        if force { "（force）" } else { "" }
+    );
     let d = docker().await?;
     if !force {
         let users = volume_users(&d).await?;

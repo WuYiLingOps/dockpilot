@@ -107,6 +107,7 @@ pub async fn push_image(
 
     let target = compose_target_ref(&profile.registry, &repository, &tag)?;
     let (target_repo, target_tag) = parse_image_reference(&target)?;
+    log::info!("推送镜像 {image_ref} → {target}");
 
     let d = docker().await?;
     // 本地引用 ≠ 目标引用时先打标签（同一镜像 ID，无额外存储）
@@ -181,6 +182,13 @@ pub async fn push_image(
         } else {
             last_err.as_deref().map(compose_push_error)
         };
+        if cancelled {
+            log::info!("推送镜像 {target} 已取消");
+        } else if let Some(err) = &last_err {
+            log::warn!("推送镜像 {target} 失败: {}", compose_push_error(err));
+        } else {
+            log::info!("推送镜像 {target} 完成");
+        }
         let _ = on_progress.send(PushProgress {
             status: None,
             progress: None,

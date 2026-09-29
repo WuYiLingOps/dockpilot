@@ -157,6 +157,12 @@ pub async fn container_top(id: String, ps_args: Option<String>) -> CmdResult<Con
 /// action: start | stop | restart | pause | unpause | remove
 #[tauri::command]
 pub async fn container_action(id: String, action: String, force: bool) -> CmdResult<()> {
+    log::info!(
+        "容器 {} 执行 {}{}",
+        super::short_id(&id),
+        action,
+        if force { "（force）" } else { "" }
+    );
     let d = docker().await?;
     match action.as_str() {
         "start" => d
@@ -182,7 +188,10 @@ pub async fn container_action(id: String, action: String, force: bool) -> CmdRes
             .await,
         _ => return Err(format!("未知操作: {action}")),
     }
-    .map_err(|e| format!("容器执行 {action} 失败: {e}"))
+    .map_err(|e| {
+        log::warn!("容器 {} {} 失败: {e}", super::short_id(&id), action);
+        format!("容器执行 {action} 失败: {e}")
+    })
 }
 
 /// 在线更新运行中容器的配置（docker update）：None 的字段保持不变。
@@ -193,6 +202,7 @@ pub async fn update_container_config(
     id: String,
     spec: ContainerUpdateSpec,
 ) -> CmdResult<()> {
+    log::info!("容器 {} 更新配置", super::short_id(&id));
     let (memory, nano_cpus) = match (spec.memory_mb, spec.cpus) {
         (None, None) => (None, None),
         (mb, cpu) => {
@@ -223,7 +233,10 @@ pub async fn update_container_config(
         },
     )
     .await
-    .map_err(|e| format!("更新容器配置失败: {e}"))
+    .map_err(|e| {
+        log::warn!("容器 {} 更新配置失败: {e}", super::short_id(&id));
+        format!("更新容器配置失败: {e}")
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -322,6 +335,15 @@ pub async fn create_container(spec: ContainerCreateSpec) -> CmdResult<String> {
     if spec.image.trim().is_empty() {
         return Err("镜像不能为空".into());
     }
+    log::info!(
+        "创建容器：{}（镜像 {}）",
+        spec.name
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .unwrap_or("<自动命名>"),
+        spec.image.trim()
+    );
     let policy = map_restart_policy(spec.restart_policy.as_deref().unwrap_or("no"))?;
     // daemon 会拒绝二者并存，这里提前给出可读错误
     if spec.auto_remove && policy.is_some() {

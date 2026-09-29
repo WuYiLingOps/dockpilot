@@ -10,6 +10,11 @@ use super::state::{ExecSession, ExecSessions, Streams};
 /// 在容器内创建 exec 实例，返回 exec_id
 #[tauri::command]
 pub async fn exec_create(id: String, shell: Option<String>) -> CmdResult<String> {
+    log::info!(
+        "容器 {} 打开终端（{}）",
+        super::short_id(&id),
+        shell.as_deref().unwrap_or("bash")
+    );
     let d = docker().await?;
     let cfg = CreateExecOptions::<String> {
         attach_stdin: Some(true),

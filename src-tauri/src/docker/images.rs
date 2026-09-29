@@ -36,6 +36,10 @@ pub async fn list_images() -> CmdResult<Vec<ImageDto>> {
 
 #[tauri::command]
 pub async fn remove_image(id: String, force: bool) -> CmdResult<()> {
+    log::info!(
+        "删除镜像 {id}{}",
+        if force { "（force）" } else { "" }
+    );
     let d = docker().await?;
     d.remove_image(
         &id,
@@ -72,22 +76,28 @@ pub async fn pull_image(
     on_progress: Channel<PullProgress>,
 ) -> CmdResult<String> {
     let image = normalize_pull_reference(&image)?;
+    log::info!("拉取镜像 {image}");
     let d = docker().await?;
     let (sid, token) = app.state::<Streams>().register();
     let sid_task = sid.clone();
     let app = app.clone();
 
     tauri::async_runtime::spawn(async move {
+        let image_label = image.clone();
         let opts = CreateImageOptions::<String> {
             from_image: image,
             ..Default::default()
         };
         let mut stream = d.create_image(Some(opts), None, None);
         let mut last_err: Option<String> = None;
+        let mut cancelled = false;
 
         loop {
             tokio::select! {
-                _ = token.cancelled() => break,
+                _ = token.cancelled() => {
+                    cancelled = true;
+                    break;
+                }
                 item = stream.next() => match item {
                     Some(Ok(info)) => {
                         let msg = PullProgress {
@@ -98,6 +108,7 @@ pub async fn pull_image(
                             done: false,
                         };
                         if on_progress.send(msg).is_err() {
+                            cancelled = true;
                             break;
                         }
                     }
@@ -108,6 +119,14 @@ pub async fn pull_image(
                     None => break,
                 }
             }
+        }
+
+        if let Some(err) = &last_err {
+            log::warn!("拉取镜像 {image_label} 失败: {err}");
+        } else if cancelled {
+            log::info!("拉取镜像 {image_label} 已取消");
+        } else {
+            log::info!("拉取镜像 {image_label} 完成");
         }
 
         let _ = on_progress.send(PullProgress {
@@ -150,6 +169,7 @@ pub async fn export_images(
     let sid_task = sid.clone();
     let app = app.clone();
 
+    log::info!("导出镜像 ×{} → {path}", names.len());
     tauri::async_runtime::spawn(async move {
         use tokio::io::AsyncWriteExt;
 
@@ -204,6 +224,17 @@ pub async fn export_images(
             // 半成品 tar 无法使用，直接清理
             let _ = tokio::fs::remove_file(&path).await;
         }
+        if let Some(err) = &error {
+            log::warn!("导出镜像失败（{path}）: {err}");
+        } else if cancelled {
+            log::info!("导出镜像已取消（{path}）");
+        } else {
+            log::info!(
+                "导出镜像完成：{} 个镜像，{} → {path}",
+                names.len(),
+                crate::format_bytes(written)
+            );
+        }
         let _ = on_progress.send(ExportProgress {
             written,
             done: true,
@@ -227,6 +258,7 @@ pub async fn import_image(
     if path.is_empty() {
         return Err("导入路径不能为空".into());
     }
+    log::info!("导入镜像：{path}");
 
     let d = docker().await?;
     let (sid, token) = app.state::<Streams>().register();
@@ -281,6 +313,14 @@ pub async fn import_image(
             Err(e) => error = Some(format!("读取文件失败: {e}")),
         }
 
+        if cancelled {
+            log::info!("导入镜像已取消（{path}）");
+        } else if let Some(err) = &error {
+            log::warn!("导入镜像失败（{path}）: {err}");
+        } else {
+            log::info!("导入镜像完成：{path}");
+        }
+
         let _ = on_progress.send(PullProgress {
             status: None,
             id: None,
@@ -325,6 +365,7 @@ pub(crate) fn parse_image_reference(reference: &str) -> Result<(String, String),
 /// 为镜像打新标签（docker tag），新旧标签指向同一镜像 ID
 #[tauri::command]
 pub async fn tag_image(id: String, reference: String) -> CmdResult<()> {
+    log::info!("镜像打标签：{id} → {reference}");
     let (repo, tag) = parse_image_reference(&reference)?;
     let d = docker().await?;
     d.tag_image(&id, Some(TagImageOptions { repo, tag }))
@@ -337,6 +378,7 @@ pub async fn tag_image(id: String, reference: String) -> CmdResult<()> {
 /// 返回值表示镜像本体是否已被删除
 #[tauri::command]
 pub async fn untag_image(reference: String) -> CmdResult<bool> {
+    log::info!("移除镜像标签：{reference}");
     let reference = reference.trim();
     if reference.is_empty() {
         return Err("镜像引用不能为空".into());

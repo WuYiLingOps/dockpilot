@@ -15,6 +15,11 @@ pub mod system;
 pub mod tunnel;
 pub mod volumes;
 
+/// 日志里用的短 ID（12 位，与 docker CLI 展示一致）
+pub(crate) fn short_id(id: &str) -> &str {
+    &id[..id.len().min(12)]
+}
+
 /// 集成测试依赖本机 Docker daemon（/var/run/docker.sock），
 /// 仅在 unix 上编译运行（Windows 无本地 daemon；远程 SSH 用例见下方 ignored 测试）
 #[cfg(all(test, unix))]

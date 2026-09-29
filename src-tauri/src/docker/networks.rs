@@ -129,6 +129,7 @@ pub async fn create_network(spec: NetworkCreateSpec) -> CmdResult<String> {
         }]),
         options: None,
     });
+    log::info!("创建网络：{name}（驱动 {driver}）");
 
     let d = docker().await?;
     let created = d
@@ -153,6 +154,7 @@ pub async fn remove_network(name: String) -> CmdResult<()> {
     if is_builtin(&name) {
         return Err("内置网络不可删除".into());
     }
+    log::info!("删除网络：{name}");
     let d = docker().await?;
     d.remove_network(&name)
         .await
@@ -163,6 +165,7 @@ pub async fn remove_network(name: String) -> CmdResult<()> {
 /// 将容器接入网络（容器须存在；运行状态等由 daemon 校验）
 #[tauri::command]
 pub async fn connect_network(network: String, container: String) -> CmdResult<()> {
+    log::info!("网络 {network} 接入容器 {container}");
     let d = docker().await?;
     d.connect_network(
         &network,
@@ -179,6 +182,10 @@ pub async fn connect_network(network: String, container: String) -> CmdResult<()
 /// 将容器从网络断开；force 时忽略活动端点错误
 #[tauri::command]
 pub async fn disconnect_network(network: String, container: String, force: bool) -> CmdResult<()> {
+    log::info!(
+        "网络 {network} 断开容器 {container}{}",
+        if force { "（force）" } else { "" }
+    );
     let d = docker().await?;
     d.disconnect_network(
         &network,

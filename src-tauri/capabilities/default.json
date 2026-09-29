@@ -13,7 +13,15 @@
     "core:window:allow-is-maximized",
     "core:window:allow-close",
     "opener:default",
+    {
+      "identifier": "opener:allow-open-path",
+      "allow": [
+        { "path": "$APPLOG" },
+        { "path": "$APPLOG/**" }
+      ]
+    },
     "dialog:default",
-    "notification:default"
+    "notification:default",
+    "log:default"
   ]
 }

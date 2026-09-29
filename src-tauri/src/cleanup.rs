@@ -132,10 +132,24 @@ fn filters(kv: &[(&str, &str)]) -> Option<HashMap<String, Vec<String>>> {
     )
 }
 
+/// 清理类别的日志展示名
+fn kind_label(kind: &str) -> &str {
+    match kind {
+        "dangling_images" => "悬空镜像",
+        "unused_images" => "未使用镜像",
+        "stopped_containers" => "已停止容器",
+        "unused_volumes" => "未使用卷",
+        "build_cache" => "构建缓存",
+        other => other,
+    }
+}
+
 /// 按类别清理。单类失败不影响其他类别，错误记录在对应条目里返回。
 #[tauri::command]
 pub async fn cleanup(kinds: Vec<String>) -> CmdResult<CleanupResultDto> {
     let d = docker().await?;
+    let labels: Vec<&str> = kinds.iter().map(|k| kind_label(k)).collect();
+    log::info!("空间清理：{}", labels.join("、"));
     let mut items = Vec::new();
     let mut total_reclaimed = 0u64;
 
@@ -202,6 +216,12 @@ pub async fn cleanup(kinds: Vec<String>) -> CmdResult<CleanupResultDto> {
         match r {
             Ok((removed, space)) => {
                 total_reclaimed += space.max(0) as u64;
+                log::info!(
+                    "空间清理 {}：删除 {} 项，回收 {}",
+                    kind_label(&kind),
+                    removed,
+                    crate::format_bytes(space.max(0) as u64)
+                );
                 items.push(CleanupItemResult {
                     kind,
                     removed,
@@ -209,15 +229,19 @@ pub async fn cleanup(kinds: Vec<String>) -> CmdResult<CleanupResultDto> {
                     error: None,
                 });
             }
-            Err(e) => items.push(CleanupItemResult {
-                kind,
-                removed: 0,
-                space_reclaimed: 0,
-                error: Some(e),
-            }),
+            Err(e) => {
+                log::warn!("空间清理 {} 失败: {e}", kind_label(&kind));
+                items.push(CleanupItemResult {
+                    kind,
+                    removed: 0,
+                    space_reclaimed: 0,
+                    error: Some(e),
+                });
+            }
         }
     }
 
+    log::info!("空间清理完成：共回收 {}", crate::format_bytes(total_reclaimed));
     Ok(CleanupResultDto {
         items,
         total_reclaimed,

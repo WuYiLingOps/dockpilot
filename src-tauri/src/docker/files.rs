@@ -157,6 +157,7 @@ pub async fn container_download_file<R: tauri::Runtime>(
     if dest.trim().is_empty() {
         return Err("请先选择保存位置".into());
     }
+    log::info!("容器 {} 下载文件：{} → {}", super::short_id(&id), src, dest);
     let d = docker().await?;
     let (sid, token) = app.state::<Streams>().register();
     let sid_task = sid.clone();
@@ -293,6 +294,12 @@ pub async fn container_upload_file<R: tauri::Runtime>(
     if local_paths.is_empty() {
         return Err("请选择要上传的文件".into());
     }
+    log::info!(
+        "容器 {} 上传 {} 个文件到 {}",
+        super::short_id(&id),
+        local_paths.len(),
+        container_dir
+    );
 
     // 同步打包（本地磁盘 IO）；打包失败直接报错
     let packed = tauri::async_runtime::spawn_blocking(move || -> Result<Vec<u8>, String> {
@@ -369,6 +376,12 @@ pub async fn container_delete_file(id: String, path: String, recursive: bool) ->
     if path.trim() == "/" {
         return Err("不能删除根目录".into());
     }
+    log::info!(
+        "容器 {} 删除文件：{}{}",
+        super::short_id(&id),
+        path,
+        if recursive { "（递归）" } else { "" }
+    );
     // 以 - 开头的路径会被当成 rm 的选项，补 ./ 前缀规避
     let arg = if path.starts_with('-') {
         format!("./{path}")

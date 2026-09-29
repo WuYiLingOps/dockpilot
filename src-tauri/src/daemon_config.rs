@@ -257,8 +257,17 @@ pub async fn write_daemon_json(content: String) -> CmdResult<()> {
         if stderr.contains("dismissed") || stderr.contains("cancelled") {
             return Err("已取消授权，未修改配置".into());
         }
+        log::warn!("daemon.json 写入失败：{stderr}");
         return Err(format!("写入 daemon.json 失败: {stderr}（可在下方改用终端命令手动执行）"));
     }
+    log::info!(
+        "daemon.json 已写入（{}）",
+        if exists {
+            format!("原文件已备份为 {DAEMON_JSON_BAK}")
+        } else {
+            "新建配置".to_string()
+        }
+    );
     Ok(())
 }
 
@@ -266,6 +275,7 @@ pub async fn write_daemon_json(content: String) -> CmdResult<()> {
 #[tauri::command]
 pub async fn restart_docker() -> CmdResult<()> {
     unsupported_platform()?;
+    log::info!("重启 Docker 服务（systemctl restart docker）");
     let out = tokio::time::timeout(
         Duration::from_secs(60),
         tokio::process::Command::new("pkexec")
@@ -277,8 +287,10 @@ pub async fn restart_docker() -> CmdResult<()> {
     .map_err(|e| format!("无法启动 pkexec: {e}（请确认系统安装了 polkit）"))?;
 
     if !out.status.success() {
+        log::warn!("重启 Docker 失败: {}", trim(&out.stderr));
         return Err(format!("重启 Docker 失败: {}", trim(&out.stderr)));
     }
+    log::info!("Docker 服务已重启");
     Ok(())
 }
 
@@ -321,7 +333,9 @@ pub async fn test_mirror(url: String) -> CmdResult<u64> {
         .send()
         .await
         .map_err(|e| format!("{url} 不可达: {e}"))?;
-    Ok(start.elapsed().as_millis() as u64)
+    let ms = start.elapsed().as_millis() as u64;
+    log::info!("镜像源测速：{url} → {ms} ms");
+    Ok(ms)
 }
 
 #[cfg(test)]

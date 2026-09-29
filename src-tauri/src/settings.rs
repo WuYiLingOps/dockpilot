@@ -111,6 +111,10 @@ pub struct AppSettings {
     pub notifications_enabled: bool,
     /// 关闭窗口行为："ask" 关闭时前端弹窗询问（默认）| "minimize" 最小化到托盘后台 | "exit" 完全退出
     pub close_action: String,
+    /// 调试日志：开启后运行日志级别降为 Debug（立即生效，用于排查问题）
+    pub debug_logging: bool,
+    /// 使用日志保留天数（0 = 永久保留；历史会话日志超期后启动/定时清理）
+    pub log_retention_days: u32,
     /// 镜像仓库凭据列表（密码不在此处，见 secret_store）
     pub registries: Vec<RegistryProfile>,
 }
@@ -131,6 +135,8 @@ impl Default for AppSettings {
             terminal_shell: "bash".into(),
             notifications_enabled: true,
             close_action: "ask".into(),
+            debug_logging: false,
+            log_retention_days: 14,
             registries: Vec::new(),
         }
     }
@@ -352,9 +358,30 @@ pub async fn get_settings(app: tauri::AppHandle) -> CmdResult<AppSettings> {
 
 #[tauri::command]
 pub async fn set_settings(app: tauri::AppHandle, settings: AppSettings) -> CmdResult<AppSettings> {
+    let old = load(&app);
     let s = migrate(sanitize(settings));
+    log_setting_changes(&old, &s);
     save(&app, &s)?;
     Ok(s)
+}
+
+/// 把发生变化的设置字段名写进使用日志（只记字段名，不记值，
+/// 避免连接配置等敏感内容进入日志；云同步回填也会经过这里）
+fn log_setting_changes(old: &AppSettings, new: &AppSettings) {
+    let (Ok(a), Ok(b)) = (serde_json::to_value(old), serde_json::to_value(new)) else {
+        return;
+    };
+    let (Some(a), Some(b)) = (a.as_object(), b.as_object()) else {
+        return;
+    };
+    let changed: Vec<&str> = a
+        .iter()
+        .filter(|(k, v)| b.get(*k) != Some(*v))
+        .map(|(k, _)| k.as_str())
+        .collect();
+    if !changed.is_empty() {
+        log::info!("设置已更新：{}", changed.join(", "));
+    }
 }
 
 #[cfg(test)]

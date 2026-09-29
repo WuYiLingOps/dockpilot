@@ -211,6 +211,7 @@ pub struct ConnectionTestResult {
 /// 测试任意连接配置（不落盘、不影响当前连接）
 #[tauri::command]
 pub async fn test_connection(profile: ConnectionProfile) -> ConnectionTestResult {
+    log::info!("测试连接「{}」（{}）", profile.name, profile.kind);
     let conn = ActiveConn::new(profile);
     match probe(&conn).await {
         Ok((ms, version)) => {
@@ -218,6 +219,7 @@ pub async fn test_connection(profile: ConnectionProfile) -> ConnectionTestResult
             if conn.profile.kind == "ssh" && active().profile.id != conn.profile.id {
                 tunnel::stop(&conn.profile.id);
             }
+            log::info!("测试连接成功：{ms} ms，Docker {version}");
             ConnectionTestResult {
                 ok: true,
                 latency_ms: Some(u64::try_from(ms).unwrap_or(u64::MAX)),
@@ -229,6 +231,7 @@ pub async fn test_connection(profile: ConnectionProfile) -> ConnectionTestResult
             if conn.profile.kind == "ssh" && active().profile.id != conn.profile.id {
                 tunnel::stop(&conn.profile.id);
             }
+            log::warn!("测试连接失败: {e}");
             ConnectionTestResult {
                 ok: false,
                 latency_ms: None,
@@ -254,7 +257,9 @@ pub async fn switch_connection(app: tauri::AppHandle, id: String) -> CmdResult<C
         if profile.kind == "ssh" && active().profile.id != profile.id {
             tunnel::stop(&profile.id);
         }
-        format!("切换到「{}」失败: {e}", profile.name)
+        let msg = format!("切换到「{}」失败: {e}", profile.name);
+        log::warn!("{msg}");
+        msg
     })?;
 
     // 验证通过后按日常超时重建正式连接（探测连接的超时偏短，不适合留给命令层）
@@ -276,6 +281,7 @@ pub async fn switch_connection(app: tauri::AppHandle, id: String) -> CmdResult<C
     ));
     w.docker = Some((gen, d));
     drop(w);
+    log::info!("连接已切换：{}（{}）", profile.name, profile.kind);
 
     // 重启全局事件监听（旧任务持有旧连接句柄）
     super::events::start_global_listener(

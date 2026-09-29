@@ -460,6 +460,7 @@ fn pump(
 fn spawn_stream(
     app: &tauri::AppHandle,
     mut cmd: Command,
+    label: String,
     on_output: Channel<ComposeOutput>,
 ) -> CmdResult<String> {
     cmd.stdin(Stdio::null())
@@ -485,6 +486,11 @@ fn spawn_stream(
                 tokio::select! {
                     status = child.wait() => {
                         let code = status.ok().and_then(|s| s.code()).unwrap_or(-1);
+                        if code == 0 {
+                            log::info!("compose {label} 完成");
+                        } else {
+                            log::warn!("compose {label} 失败（退出码 {code}）");
+                        }
                         let _ = on_output.send(ComposeOutput {
                             stream: "exit".into(),
                             data: code.to_string(),
@@ -495,6 +501,7 @@ fn spawn_stream(
                     _ = token.cancelled() => {
                         let _ = child.kill().await;
                         let _ = child.wait().await;
+                        log::info!("compose {label} 已取消");
                         let _ = on_output.send(ComposeOutput {
                             stream: "exit".into(),
                             data: String::new(),
@@ -508,6 +515,7 @@ fn spawn_stream(
                 }
             }
             Err(e) => {
+                log::warn!("compose {label} 启动失败: {e}");
                 let _ = on_output.send(ComposeOutput {
                     stream: "exit".into(),
                     data: String::new(),
@@ -578,9 +586,13 @@ pub async fn compose_action(
     if config_files.is_empty() {
         return Err(format!("项目 {project} 缺少 compose 配置文件标签，无法执行 CLI 操作"));
     }
+    log::info!(
+        "compose 项目 {project} 执行 {action}（服务：{}）",
+        if services.is_empty() { "全部".to_string() } else { services.join(", ") }
+    );
     let args = build_action_args(&action, remove_volumes, remove_images, &services)?;
     let cmd = build_cmd(&cli, &project, &working_dir, &config_files, &args)?;
-    spawn_stream(&app, cmd, on_output)
+    spawn_stream(&app, cmd, format!("{project} {action}"), on_output)
 }
 
 /// 只读查看 compose 文件内容（限制扩展名与大小；ssh 连接时读取远程文件）
@@ -620,6 +632,7 @@ pub async fn write_compose_file(path: String, content: String) -> CmdResult<()> 
     if content.trim().is_empty() {
         return Err("文件内容不能为空".into());
     }
+    log::info!("保存 compose 文件：{path}");
     if content.len() > 2 * 1024 * 1024 {
         return Err("文件超过 2MB，不予保存".into());
     }

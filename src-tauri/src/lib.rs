@@ -1,10 +1,27 @@
 mod cleanup;
 mod daemon_config;
+mod diagnostics;
 mod docker;
 mod github_sync;
 mod registries;
 mod secret_store;
 mod settings;
+
+/// 日志用的字节数人类可读格式（如 2.5 GB）
+pub(crate) fn format_bytes(n: u64) -> String {
+    const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
+    let mut v = n as f64;
+    let mut i = 0;
+    while v >= 1024.0 && i < UNITS.len() - 1 {
+        v /= 1024.0;
+        i += 1;
+    }
+    if i == 0 {
+        format!("{n} B")
+    } else {
+        format!("{v:.1} {}", UNITS[i])
+    }
+}
 
 use tauri::{
     menu::{Menu, MenuItem},
@@ -35,6 +52,10 @@ fn apply_close_action(app: tauri::AppHandle, action: String, remember: bool) -> 
         s.close_action = action.clone();
         settings::save(&app, &s)?;
     }
+    log::info!(
+        "关闭窗口：{action}{}",
+        if remember { "（记住选择）" } else { "" }
+    );
     match action.as_str() {
         "minimize" => {
             if let Some(window) = app.get_webview_window("main") {
@@ -91,6 +112,10 @@ pub fn install_crypto_provider() {
 }
 
 pub fn run() {
+    // 崩溃报告最先就位：此后任何 panic（含早期初始化）都有据可查
+    // （release panic=abort 下 hook 仍在 abort 前执行，last_panic.json 是唯一归因来源）
+    diagnostics::install_panic_hook();
+
     // 必须在任何 TLS 建连（bollard TLS / reqwest）之前完成
     install_crypto_provider();
 
@@ -103,7 +128,44 @@ pub fn run() {
         std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
     }
 
+    // 运行日志：每会话一个文件（Rotate 归档旧会话）+ 大小轮转 + KeepSome 自动清理。
+    // fern 闸门全开（Debug），实际级别由 diagnostics::log_level_allows 动态控制
+    // （默认 debug 构建 Debug / release 构建 Info，设置页"调试日志"即时切换）
+    let log_plugin = tauri_plugin_log::Builder::new()
+        .targets({
+            let mut targets = vec![
+                tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {
+                    file_name: Some("dockpilot".into()),
+                }),
+                // devtools console 可见（诊断排查用）
+                tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Webview),
+            ];
+            if cfg!(debug_assertions) {
+                targets.push(tauri_plugin_log::Target::new(
+                    tauri_plugin_log::TargetKind::Stdout,
+                ));
+            }
+            targets
+        })
+        .timezone_strategy(tauri_plugin_log::TimezoneStrategy::UseLocal)
+        .max_file_size(5 * 1024 * 1024)
+        .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepSome(14))
+        .file_open_strategy(tauri_plugin_log::FileOpenStrategy::Rotate)
+        .level(log::LevelFilter::Debug)
+        // 第三方库的 Debug 是请求/响应全文转储或密钥库内部操作流水
+        // （bollard 轮询下每 2 分钟数 MB），任何级别设置（含调试日志开启时）都封顶 Info
+        .level_for("bollard", log::LevelFilter::Info)
+        .level_for("hyper", log::LevelFilter::Info)
+        .level_for("reqwest", log::LevelFilter::Info)
+        .level_for("rustls", log::LevelFilter::Info)
+        .level_for("keyring", log::LevelFilter::Warn)
+        .level_for("rustls_platform_verifier", log::LevelFilter::Warn)
+        .filter(|meta| diagnostics::log_level_allows(meta.level()))
+        .build();
+
     tauri::Builder::default()
+        // 日志插件最先注册：之后的初始化过程都可被记录
+        .plugin(log_plugin)
         // 单实例：托盘常驻后二次启动只唤起已有窗口，官方要求注册在第一个
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             show_main(app);
@@ -112,6 +174,10 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .setup(|app| {
+            // 日志目录与上次退出检测：panic 报告 / 退出标记 / 查看器命令都依赖该路径
+            diagnostics::init_log_dir(app.handle());
+            diagnostics::check_last_exit();
+
             // Linux 下窗口图标需要手动设置：X11 会话的标题栏/任务栏读取窗口图标，
             // Wayland 会话则由 app-id 与 .desktop 文件匹配（deb 安装后生效）
             if let Some(window) = app.get_webview_window("main") {
@@ -170,9 +236,39 @@ pub fn run() {
 
             // 加载设置（含旧配置迁移），初始化活跃连接；连接在首次命令时惰性建立
             let s = settings::load(app.handle());
+            diagnostics::apply_debug_logging(s.debug_logging);
+            log::info!(
+                "DockPilot v{} 启动（{} {}，日志级别 {}）",
+                env!("CARGO_PKG_VERSION"),
+                std::env::consts::OS,
+                std::env::consts::ARCH,
+                if s.debug_logging { "Debug" } else { "Info" }
+            );
+
+            // 日志定时清理：启动清一次过期归档，之后每 6 小时按最新保留设置复查
+            let cleanup_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                loop {
+                    let days = crate::settings::load(&cleanup_handle).log_retention_days;
+                    match diagnostics::cleanup_old_logs(days) {
+                        Ok(r) if r.removed > 0 => {
+                            log::info!(
+                                "日志定时清理：删除 {} 个过期文件（{}）",
+                                r.removed,
+                                format_bytes(r.bytes)
+                            );
+                        }
+                        Ok(_) => {}
+                        Err(e) => log::warn!("日志定时清理失败: {e}"),
+                    }
+                    tokio::time::sleep(std::time::Duration::from_secs(6 * 3600)).await;
+                }
+            });
             if let Some(profile) = settings::find_connection(&s, &s.active_connection_id) {
+                log::info!("初始化连接：{}（{}）", profile.name, profile.kind);
                 docker::conn::init_active(profile.clone());
             } else {
+                log::info!("未找到活跃连接配置，使用默认本地连接");
                 docker::conn::init_active(settings::ConnectionProfile::default_local());
             }
 
@@ -253,8 +349,19 @@ pub fn run() {
             github_sync::sync_save_github_token,
             github_sync::sync_load_github_token,
             github_sync::sync_delete_github_token,
+            github_sync::sync_save_sync_password,
+            github_sync::sync_load_sync_password,
+            github_sync::sync_delete_sync_password,
             cleanup::disk_usage,
             cleanup::cleanup,
+            diagnostics::get_last_crash,
+            diagnostics::get_log_dir,
+            diagnostics::list_log_files,
+            diagnostics::read_app_log,
+            diagnostics::set_debug_logging,
+            diagnostics::export_diagnostics,
+            diagnostics::copy_log_file,
+            diagnostics::cleanup_app_logs,
         ])
         // 关闭拦截：自绘 X / Alt+F4 / 任务栏关闭都经过 CloseRequested。
         // minimize 仅隐藏窗口后台运行；ask 交给前端弹窗询问（apply_close_action 回传）；
@@ -277,9 +384,12 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while running tauri application")
         .run(|_app, event| {
-            // 退出时回收 SSH 隧道子进程，避免遗留孤儿 ssh
+            // 退出时回收 SSH 隧道子进程，避免遗留孤儿 ssh；
+            // 并留下"正常退出"标记（缺失即上次异常退出的判定依据）
             if let tauri::RunEvent::Exit = event {
+                diagnostics::write_shutdown_marker();
                 docker::tunnel::stop_all();
+                log::info!("DockPilot 正常退出");
             }
         });
 }

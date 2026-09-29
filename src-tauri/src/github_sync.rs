@@ -98,6 +98,7 @@ pub async fn github_device_flow_start(
     if client_id.trim().is_empty() {
         return Err("缺少 GitHub OAuth App 的 client_id（构建期 VITE_SYNC_GITHUB_CLIENT_ID）".into());
     }
+    log::info!("开始 GitHub 设备码授权");
 
     let res = send_with_retry(
         http_client()
@@ -231,6 +232,7 @@ fn token_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
 pub fn sync_save_github_token(app: tauri::AppHandle, token: String) -> Result<String, String> {
     let dir = token_dir(&app)?;
     let backend = secret_store::save_secret(&dir, TOKEN_KEY_ID, &token)?;
+    log::info!("GitHub 令牌已保存（{}）", backend.as_str());
     Ok(backend.as_str().to_string())
 }
 
@@ -247,7 +249,48 @@ pub fn sync_load_github_token(app: tauri::AppHandle, backend: String) -> Result<
 pub fn sync_delete_github_token(app: tauri::AppHandle, backend: String) -> Result<(), String> {
     let dir = token_dir(&app)?;
     let parsed = SecretBackend::parse(&backend).ok_or_else(|| format!("未知的密钥存储位置: {backend}"))?;
-    secret_store::delete_secret(&dir, TOKEN_KEY_ID, parsed)
+    secret_store::delete_secret(&dir, TOKEN_KEY_ID, parsed)?;
+    log::info!("GitHub 令牌已删除（断开云同步）");
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// 同步密码持久化（记住密码：解锁后自动保存，锁定时清除；复用 token 同款设施）
+// ---------------------------------------------------------------------------
+
+/// 同步密码在 secret_store 中的 key_id
+const SYNC_PASSWORD_KEY_ID: &str = "sync/sync_password";
+
+/// 保存同步密码：优先钥匙串，失败自动落加密文件，返回实际落点（"keyring" | "file"）
+#[tauri::command]
+pub fn sync_save_sync_password(app: tauri::AppHandle, password: String) -> Result<String, String> {
+    let dir = token_dir(&app)?;
+    let backend = secret_store::save_secret(&dir, SYNC_PASSWORD_KEY_ID, &password).map_err(|e| {
+        log::warn!("保存同步密码失败，本次解锁仅内存持有: {e}");
+        e
+    })?;
+    Ok(backend.as_str().to_string())
+}
+
+/// 读取记住的同步密码（按前端记录的落点）；不存在返回 None
+#[tauri::command]
+pub fn sync_load_sync_password(app: tauri::AppHandle, backend: String) -> Result<Option<String>, String> {
+    let dir = token_dir(&app)?;
+    let parsed = SecretBackend::parse(&backend).ok_or_else(|| format!("未知的密钥存储位置: {backend}"))?;
+    secret_store::load_secret(&dir, SYNC_PASSWORD_KEY_ID, parsed).map_err(|e| {
+        log::warn!("读取记住的同步密码失败: {e}");
+        e
+    })
+}
+
+/// 删除记住的同步密码（锁定时调用）；条目不存在视为成功
+#[tauri::command]
+pub fn sync_delete_sync_password(app: tauri::AppHandle, backend: String) -> Result<(), String> {
+    let dir = token_dir(&app)?;
+    let parsed = SecretBackend::parse(&backend).ok_or_else(|| format!("未知的密钥存储位置: {backend}"))?;
+    secret_store::delete_secret(&dir, SYNC_PASSWORD_KEY_ID, parsed)?;
+    log::info!("已清除记住的同步密码");
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------

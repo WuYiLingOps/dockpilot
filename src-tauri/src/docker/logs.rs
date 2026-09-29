@@ -76,6 +76,10 @@ pub async fn export_container_logs(
     if path.trim().is_empty() {
         return Err("导出路径不能为空".into());
     }
+    log::info!(
+        "容器 {} 导出日志（tail {tail}）→ {path}",
+        super::short_id(&id)
+    );
     let d = docker().await?;
     let opts = LogsOptions::<String> {
         follow: false,
