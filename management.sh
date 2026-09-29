@@ -52,6 +52,16 @@ check_result() {
     fi
 }
 
+# 时长格式化：秒 → "X 分 Y 秒" / "Y 秒"
+format_duration() {
+    local total="${1}"
+    if [ "${total}" -ge 60 ]; then
+        echo "$((total / 60)) 分 $((total % 60)) 秒"
+    else
+        echo "${total} 秒"
+    fi
+}
+
 APP_NAME="dock-pilot"   # deb 包名（Tauri 由 productName 生成，dpkg 查询/卸载均用它）
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SCRIPT_PATH="${PROJECT_DIR}/$(basename "$0")"
@@ -296,8 +306,11 @@ build_deb() {
     color "构建版本: ${BUILD_VERSION}" 0
 
     color "开始打包 npm run tauri build（release 构建耗时较久）..." 0
+    BUILD_START_TS=$(date +%s)
     npm run tauri build -- --config "${MERGE_FILE}"
     check_result "打包"
+
+    color "构建耗时: $(format_duration "$(( $(date +%s) - BUILD_START_TS ))")" 0
 
     DEB_FILE=$(find_deb)
     if [ -z "${DEB_FILE}" ]; then
@@ -375,7 +388,8 @@ show_help() {
     echo "用法: $0 [build [版本号] | version <版本号> | install | uninstall]"
     echo ""
     echo "命令:"
-    echo "  build [版本号]      打包 deb；传版本号时先同步更新项目版本"
+    echo "  build [版本号]      打包 deb；传版本号时先同步更新项目版本，"
+    echo "                      打包完成输出构建耗时"
     echo "  version <版本号>    同步更新版本号，不执行构建"
     echo "  install             安装最新的 deb（自动通过 sudo 提权）"
     echo "  uninstall           卸载 ${APP_NAME}（自动通过 sudo 提权）"
