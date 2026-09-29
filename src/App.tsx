@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Container, RefreshCw, Settings as SettingsIcon } from "lucide-react";
+import { Container, RefreshCw, Settings as SettingsIcon, TriangleAlert } from "lucide-react";
 import { Sidebar, type PageKey } from "./components/Sidebar";
 import { WindowControls } from "./components/TitleBar";
+import { AppLogViewer } from "./components/AppLogViewer";
 import { ClosePromptDialog } from "./components/ClosePromptDialog";
 import { Button } from "./components/ui";
 import { SyncBanners } from "./components/settings/SyncBanners";
@@ -14,11 +15,17 @@ import { Compose } from "./pages/Compose";
 import { ComposeDetail } from "./pages/ComposeDetail";
 import { Storage, type StorageTab } from "./pages/Storage";
 import { Cleanup } from "./pages/Cleanup";
-import { Settings } from "./pages/Settings";
+import { ConnectionDialog } from "./components/settings/ConnectionDialog";
+import {
+  SettingsDialog,
+  type SettingsCategory,
+} from "./components/settings/SettingsDialog";
 import { api } from "./lib/api";
+import { onOpenAppLogViewer } from "./lib/applog";
 import { useIsWindows } from "./lib/platform";
 import { activeConnection, useSettings, useSettingsThemeSync } from "./lib/settings";
 import { useCloudSync } from "./hooks/useCloudSync";
+import type { LastCrashInfo } from "./types/diagnostics";
 
 /** Docker 引擎不可达时的引导页（覆盖内容区，侧栏保持可见） */
 function DisconnectedOverlay({
@@ -67,12 +74,66 @@ function DisconnectedOverlay({
   );
 }
 
+/** 上次异常退出横幅（诊断数据由后端启动时检测，正常退出/首次运行为 null 不显示） */
+function CrashBanner({
+  info,
+  onOpenLogs,
+  onDismiss,
+}: {
+  info: LastCrashInfo;
+  onOpenLogs: () => void;
+  onDismiss: () => void;
+}) {
+  const when = info.timestamp ? new Date(info.timestamp).toLocaleString() : "";
+  const text =
+    info.kind === "panic"
+      ? `上次异常退出：${info.location ?? "未知位置"} — ${info.message ?? "未知错误"}`
+      : "上次未正常退出且未捕获到原因，如反复出现请到 设置 → 故障诊断 导出诊断包";
+  return (
+    <div
+      className="flex shrink-0 items-center gap-2 border-b border-edge bg-warn/10 px-4 py-1.5 text-[12px] text-fg2"
+      data-no-drag
+    >
+      <TriangleAlert size={14} className="shrink-0 text-warn" />
+      <span className="min-w-0 flex-1 truncate" title={text}>
+        {when && <span className="text-fg3">{when}　</span>}
+        {text}
+      </span>
+      <button
+        type="button"
+        onClick={onOpenLogs}
+        className="shrink-0 cursor-pointer rounded-btn px-1.5 py-0.5 text-[12px] text-fg2 transition-colors hover:bg-hover hover:text-fg"
+      >
+        查看日志
+      </button>
+      <button
+        type="button"
+        onClick={onDismiss}
+        className="shrink-0 cursor-pointer rounded-btn px-1.5 py-0.5 text-[12px] text-fg3 transition-colors hover:bg-hover hover:text-fg"
+      >
+        知道了
+      </button>
+    </div>
+  );
+}
+
 export default function App() {
   const [page, setPage] = useState<PageKey>("overview");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
   const [storageTab, setStorageTab] = useState<StorageTab>("volumes");
   const [search, setSearch] = useState("");
+  const [logViewerOpen, setLogViewerOpen] = useState(false);
+  const [crashDismissed, setCrashDismissed] = useState(false);
+  // 设置弹窗：可携带分类直达（同步横幅 → 同步与云）
+  const [settingsDlg, setSettingsDlg] = useState<{
+    open: boolean;
+    category?: SettingsCategory;
+  }>({ open: false });
+  const openSettings = (category?: SettingsCategory) =>
+    setSettingsDlg({ open: true, category });
+  // 连接管理弹窗：侧栏底部「管理连接…」与断连引导唤起
+  const [connDlgOpen, setConnDlgOpen] = useState(false);
   const qc = useQueryClient();
   const isWindows = useIsWindows();
 
@@ -80,6 +141,17 @@ export default function App() {
   const { data: settings } = useSettings();
   // 云同步自动化：启动远端检查、设置变更去抖上传、窗口可见时检查
   useCloudSync();
+
+  // 使用日志查看器：横幅与设置页「故障诊断」经信号打开
+  useEffect(() => onOpenAppLogViewer(() => setLogViewerOpen(true)), []);
+
+  // 上次异常退出（后端启动时检测并缓存；稳定数据，查询一次即可）
+  const lastCrash = useQuery({
+    queryKey: ["lastCrash"],
+    queryFn: api.getLastCrash,
+    staleTime: Infinity,
+    retry: false,
+  });
 
   // 带可选子 Tab 的导航：Overview 的统计卡片跳到「存储和网络」对应 Tab；
   // 跳到容器页时可携带容器 id 直达详情，未携带则落在容器列表
@@ -130,13 +202,20 @@ export default function App() {
     <div className="relative flex h-full bg-canvas text-fg">
       <WindowControls />
       <Sidebar
-        page={page}
+        // 弹窗打开期间让侧栏「设置」项保持高亮
+        page={settingsDlg.open ? "settings" : page}
         onChange={(p) => {
+          // 设置不走页面：唤起弹窗，页面上下文保持不变
+          if (p === "settings") {
+            openSettings();
+            return;
+          }
           setPage(p);
           setSelectedId(null);
           setSelectedProject(null);
           if (p === "storage") setStorageTab("volumes");
         }}
+        onOpenConnections={() => setConnDlgOpen(true)}
       />
       <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
         {selectedId && (page === "containers" || page === "compose") ? (
@@ -175,9 +254,17 @@ export default function App() {
         ) : page === "cleanup" ? (
           <Cleanup />
         ) : (
-          <Settings />
+          // page 不会为 "settings"（设置已改为弹窗），此处兜底渲染概览
+          <Overview onNavigate={navigate} />
         )}
-        {info.isError && page !== "settings" && (
+        {lastCrash.data && !crashDismissed && (
+          <CrashBanner
+            info={lastCrash.data}
+            onOpenLogs={() => setLogViewerOpen(true)}
+            onDismiss={() => setCrashDismissed(true)}
+          />
+        )}
+        {info.isError && (
           <DisconnectedOverlay
             message={String(info.error)}
             retrying={info.isFetching}
@@ -190,12 +277,19 @@ export default function App() {
                 .catch(() => {})
                 .finally(() => void info.refetch());
             }}
-            onManage={() => setPage("settings")}
+            onManage={() => setConnDlgOpen(true)}
           />
         )}
-        <SyncBanners onManage={() => setPage("settings")} />
+        <SyncBanners onManage={() => openSettings("sync")} />
+        <AppLogViewer open={logViewerOpen} onClose={() => setLogViewerOpen(false)} />
       </main>
       <ClosePromptDialog />
+      <ConnectionDialog open={connDlgOpen} onClose={() => setConnDlgOpen(false)} />
+      <SettingsDialog
+        open={settingsDlg.open}
+        initialCategory={settingsDlg.category}
+        onClose={() => setSettingsDlg({ open: false })}
+      />
     </div>
   );
 }

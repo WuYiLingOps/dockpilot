@@ -13,6 +13,7 @@ import { useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { toast } from "sonner";
 import { api } from "../../lib/api";
+import { firstLine } from "../../lib/format";
 import { useIsWindows } from "../../lib/platform";
 import { useSettings, useSwitchConnection, useUpdateSettings } from "../../lib/settings";
 import {
@@ -153,7 +154,7 @@ export function ConnectionSettings() {
         await api.switchConnection(draft.id);
         toast.success("连接配置已保存并重新连接");
       } catch (e) {
-        toast.error(`配置已保存，但按新配置连接失败，已保持原连接：${e}`);
+        toast.error(`配置已保存，但按新配置连接失败，已保持原连接：${firstLine(String(e))}`);
       }
     } else {
       toast.success("连接配置已保存");
@@ -192,11 +193,11 @@ export function ConnectionSettings() {
           ? { ...t, [p.id]: { status: "ok", ms: r.latency_ms ?? 0, version: r.version } }
           : { ...t, [p.id]: { status: "fail", error: r.error || "连接失败" } },
       );
-      if (!r.ok) toast.error(`测试「${p.name}」失败: ${r.error || "连接失败"}`);
+      if (!r.ok) toast.error(`测试「${p.name}」失败: ${firstLine(r.error || "连接失败")}`);
     } catch (e) {
       const message = errorMessage(e);
       setTesting((t) => ({ ...t, [p.id]: { status: "fail", error: message } }));
-      toast.error(`测试「${p.name}」失败: ${message}`);
+      toast.error(`测试「${p.name}」失败: ${firstLine(message)}`);
     }
   };
 

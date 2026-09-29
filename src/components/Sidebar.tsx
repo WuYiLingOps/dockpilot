@@ -61,11 +61,11 @@ function loadCollapsed(): boolean {
 
 /** 侧栏底部：当前连接状态 + 连接切换下拉 */
 function ConnectionFooter({
-  onManage,
+  onManageConnections,
   collapsed = false,
   onExpand,
 }: {
-  onManage: () => void;
+  onManageConnections: () => void;
   collapsed?: boolean;
   onExpand?: () => void;
 }) {
@@ -139,7 +139,7 @@ function ConnectionFooter({
           data-no-drag
           onClick={() => {
             setOpen(false);
-            onManage();
+            onManageConnections();
           }}
           className="flex w-full items-center gap-2 rounded-btn px-2 py-1.5 text-[12px] text-fg2 transition-colors hover:bg-hover hover:text-fg"
         >
@@ -225,9 +225,12 @@ function ConnectionFooter({
 export function Sidebar({
   page,
   onChange,
+  onOpenConnections,
 }: {
   page: PageKey;
   onChange: (p: PageKey) => void;
+  /** 侧栏底部「管理连接…」：唤起独立的连接管理弹窗（连接管理已从设置中独立） */
+  onOpenConnections: () => void;
 }) {
   const [collapsed, setCollapsed] = useState(loadCollapsed);
   const toggleCollapsed = useCallback(() => {
@@ -309,7 +312,7 @@ export function Sidebar({
       </nav>
 
       <ConnectionFooter
-        onManage={() => onChange("settings")}
+        onManageConnections={onOpenConnections}
         collapsed={collapsed}
         onExpand={toggleCollapsed}
       />
