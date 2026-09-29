@@ -126,8 +126,26 @@ fn spawn_ssh_err(e: std::io::Error) -> String {
     )
 }
 
+/// 拆分 ssh 地址的端口后缀：user@host:2222 → (user@host, Some("2222"))。
+/// 仅当冒号后为纯数字（≤5 位）且前缀不含冒号时视为端口，避免误拆 IPv6 字面量。
+/// OpenSSH 的目标地址语法不接受 host:port（端口须走 -p），docker CLI 的
+/// ssh:// URL 则恰好相反——后者拼接时保留原始 host 即可
+pub(crate) fn split_dest_port(host: &str) -> (&str, Option<&str>) {
+    match host.rsplit_once(':') {
+        Some((h, p))
+            if !p.is_empty()
+                && p.len() <= 5
+                && p.chars().all(|c| c.is_ascii_digit())
+                && !h.contains(':') =>
+        {
+            (h, Some(p))
+        }
+        _ => (host, None),
+    }
+}
+
 /// ssh 公共选项：ConnectTimeout / accept-new（自动接受新主机密钥，变更仍拒绝）/
-/// BatchMode（禁交互式密码提示，GUI 内无法输入）+ 可选私钥与跳板机。
+/// BatchMode（禁交互式密码提示，GUI 内无法输入）+ 可选私钥、目标端口与跳板机。
 /// 隧道与 compose 远程执行共用，纯函数便于单测。
 pub(crate) fn common_args(p: &ConnectionProfile) -> Vec<String> {
     let mut args: Vec<String> = vec![
@@ -142,6 +160,10 @@ pub(crate) fn common_args(p: &ConnectionProfile) -> Vec<String> {
     if !key_path.is_empty() {
         args.push("-i".into());
         args.push(key_path.into());
+    }
+    if let Some(port) = split_dest_port(&p.host).1 {
+        args.push("-p".into());
+        args.push(port.into());
     }
     let jump = p.jump_host.trim();
     if !jump.is_empty() {
@@ -190,7 +212,7 @@ async fn start(p: &ConnectionProfile) -> CmdResult<String> {
 
     let mut cmd = Command::new(ssh_program()?);
     cmd.args(build_args(p, &forward))
-        .arg(&p.host)
+        .arg(split_dest_port(&p.host).0)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::piped());
@@ -216,7 +238,13 @@ async fn start(p: &ConnectionProfile) -> CmdResult<String> {
         match child.try_wait() {
             Ok(Some(status)) => {
                 let msg = stderr_task.await.unwrap_or_default();
-                return Err(format!("SSH 连接失败（{status}）: {}", stderr_tail(&msg)));
+                let mut err = format!("SSH 连接失败（{status}）: {}", stderr_tail(&msg));
+                let hint = failure_hint(&msg, &p.host);
+                if !hint.is_empty() {
+                    err.push('\n');
+                    err.push_str(&hint);
+                }
+                return Err(err);
             }
             Ok(None) => {}
             Err(e) => return Err(format!("SSH 进程异常: {e}")),
@@ -251,6 +279,42 @@ fn stderr_tail(msg: &str) -> String {
     let lines: Vec<&str> = trimmed.lines().collect();
     let start = lines.len().saturating_sub(3);
     lines[start..].join("；")
+}
+
+/// 公钥部署指引命令（按本机平台）：Linux/macOS 的 OpenSSH 自带 ssh-copy-id；
+/// Windows 的 OpenSSH 不带，给出 PowerShell 管道写法（远程均为 Linux，追加 authorized_keys）
+#[cfg(unix)]
+fn deploy_hint(user_host: &str, port: Option<&str>) -> String {
+    match port {
+        Some(p) => format!("请在终端执行「ssh-copy-id -p {p} {user_host}」（输入一次密码）"),
+        None => format!("请在终端执行「ssh-copy-id {user_host}」（输入一次密码）"),
+    }
+}
+
+#[cfg(windows)]
+fn deploy_hint(user_host: &str, port: Option<&str>) -> String {
+    let dest = match port {
+        Some(p) => format!("-p {p} {user_host}"),
+        None => user_host.to_string(),
+    };
+    format!(
+        "请在 PowerShell 执行（无密钥先 ssh-keygen -t ed25519，一路回车；输入一次密码）：\n\
+         type $env:USERPROFILE\\.ssh\\id_ed25519.pub | ssh {dest} \"mkdir -p ~/.ssh && cat >> ~/.ssh/authorized_keys\""
+    )
+}
+
+/// 认证失败时的可操作提示：应用内（BatchMode）无法交互输密码，远端未部署公钥
+/// 是最常见原因，直接给出当前平台可复制的公钥部署命令
+fn failure_hint(msg: &str, host: &str) -> String {
+    if !msg.contains("Permission denied") {
+        return String::new();
+    }
+    let (user_host, port) = split_dest_port(host);
+    format!(
+        "远程主机拒绝了本次认证，通常是尚未部署本机公钥或密钥未被接受：{}；\
+         也可在「私钥路径」指定正确的私钥。本应用不支持输入密码",
+        deploy_hint(user_host, port)
+    )
 }
 
 /// 停止指定 profile 的隧道（幂等）
@@ -313,5 +377,53 @@ mod tests {
         let args = build_args(&profile("root@10.0.0.5", "/home/me/.ssh/id_rsa", "jump@10.0.0.1:2222"), "f");
         assert!(args.windows(2).any(|w| w[0] == "-i" && w[1] == "/home/me/.ssh/id_rsa"));
         assert!(args.windows(2).any(|w| w[0] == "-J" && w[1] == "jump@10.0.0.1:2222"), "跳板机应经 -J 传入");
+    }
+
+    #[test]
+    fn dest_port_split_and_p_flag() {
+        // 无端口：不注入 -p
+        let args = build_args(&profile("root@10.0.0.5", "", ""), "f");
+        assert!(!args.contains(&"-p".into()), "无端口地址不应带 -p");
+
+        // user@host:port：注入 -p；跳板机地址的 :2222 属于 -J 原生语法，不在此列
+        let args = build_args(&profile("root@10.0.0.5:2222", "", ""), "f");
+        assert!(args.windows(2).any(|w| w[0] == "-p" && w[1] == "2222"));
+
+        // 目标地址拆分的各形态
+        assert_eq!(
+            split_dest_port("root@10.0.0.5:2222"),
+            ("root@10.0.0.5", Some("2222"))
+        );
+        assert_eq!(split_dest_port("root@10.0.0.5"), ("root@10.0.0.5", None));
+        // IPv6 字面量（冒号后虽是数字但前缀仍含冒号）不误拆
+        assert_eq!(split_dest_port("root@2001:db8::1"), ("root@2001:db8::1", None));
+        // 非数字后缀不视为端口
+        assert_eq!(split_dest_port("user@host:abc"), ("user@host:abc", None));
+    }
+
+    #[test]
+    fn permission_denied_error_carries_copy_id_hint() {
+        let msg = "root@10.0.0.112: Permission denied (publickey,gssapi-keyex,gssapi-with-mic,password).";
+        let hint = failure_hint(msg, "root@10.0.0.112");
+        // 公钥部署指引按本机平台给出：unix 为 ssh-copy-id，windows 为 PowerShell 管道写法
+        #[cfg(unix)]
+        {
+            assert!(hint.contains("ssh-copy-id root@10.0.0.112"));
+            assert!(
+                failure_hint(msg, "root@10.0.0.112:2222").contains("ssh-copy-id -p 2222 root@10.0.0.112")
+            );
+        }
+        #[cfg(windows)]
+        {
+            assert!(hint.contains("type $env:USERPROFILE"));
+            assert!(hint.contains("ssh root@10.0.0.112 \"mkdir -p ~/.ssh"));
+            assert!(
+                failure_hint(msg, "root@10.0.0.112:2222")
+                    .contains("ssh -p 2222 root@10.0.0.112 \"mkdir -p ~/.ssh")
+            );
+        }
+        assert!(hint.contains("不支持输入密码"));
+        // 非认证失败不追加提示
+        assert!(failure_hint("Connection refused", "root@10.0.0.112").is_empty());
     }
 }

@@ -118,7 +118,7 @@ async fn ssh_probe(p: &ConnectionProfile, kind: CliKind, remote_args: &[&str]) -
 fn ssh_command(p: &ConnectionProfile, remote: &str) -> CmdResult<Command> {
     let mut cmd = Command::new(tunnel::ssh_program()?);
     cmd.args(tunnel::common_args(p))
-        .arg(&p.host)
+        .arg(tunnel::split_dest_port(&p.host).0)
         .arg(remote)
         .kill_on_drop(true);
     #[cfg(windows)]
