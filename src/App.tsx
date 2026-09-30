@@ -51,13 +51,13 @@ function DisconnectedOverlay({
       {windows ? (
         <p className="max-w-md text-[12px] text-fg3">
           Windows 版仅支持远程连接（SSH 隧道 / TLS / TCP），
-          请到「设置 → Docker 连接」添加并测试远程主机连接。
+          点击下方「连接设置」打开「Docker 连接管理」添加并测试远程主机连接。
         </p>
       ) : (
         <p className="max-w-md text-[12px] text-fg3">
           本地连接请确认 Docker 服务已启动且当前用户已加入 docker 组
           （<span className="mx-1 font-mono text-fg2">sudo usermod -aG docker $USER</span>）；
-          远程连接请在侧栏切换连接，或到「设置 → Docker 连接」测试并修改配置。
+          远程连接可在侧栏底部切换，或点击下方「连接设置」打开「Docker 连接管理」测试并修改配置。
         </p>
       )}
       <div className="mt-3 flex gap-2">
