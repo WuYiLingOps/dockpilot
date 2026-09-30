@@ -213,7 +213,7 @@ update-desktop-database ~/.local/share/applications
 
 ## 远程连接
 
-DockPilot 支持管理多个 Docker 连接并随时切换：Linux 支持 **本地 socket / SSH / TLS / 明文 TCP**，Windows 支持 **SSH / TLS / 明文 TCP**。连接在「设置 → Docker 连接」统一管理（添加 / 编辑 / 测试 / 删除），侧栏底部可快速切换当前连接；切换即时生效并自动刷新数据，无需重启应用。
+DockPilot 支持管理多个 Docker 连接并随时切换：Linux 支持 **本地 socket / SSH / TLS / 明文 TCP**，Windows 支持 **SSH / TLS / 明文 TCP**。连接在独立的「Docker 连接管理」弹窗中统一管理（添加 / 编辑 / 测试 / 删除），由侧栏底部下拉的「管理连接…」或断连引导页的「连接设置」唤起；当前连接在侧栏底部快速切换，即时生效并自动刷新数据，无需重启应用。
 
 ### 使用方法
 
@@ -230,6 +230,7 @@ DockPilot 支持管理多个 Docker 连接并随时切换：Linux 支持 **本�
 
 - 本机已安装 ssh 客户端（Windows 请启用 OpenSSH Client）
 - 远程机已运行 Docker daemon，并允许登录用户访问对应的 Docker socket
+- 远程机 sshd 需允许 TCP 转发（`AllowTcpForwarding yes`，发行版默认开启；做过安全加固的服务器可能改为 `no`，症状见下方「故障排查」）
 - 认证仅支持**密钥类方式**（显式私钥、ssh-agent、默认私钥 `~/.ssh/id_*` 或 `~/.ssh/config` 配置均可），不支持交互式密码
 
 **配置免密登录**
@@ -265,36 +266,100 @@ Windows 如需使用 ssh-agent，先启用 OpenSSH Authentication Agent 服务�
 
 适合无法用 SSH 但可配置远程 daemon 的场景（双向证书认证）：
 
-1. 按 [Docker 官方文档](https://docs.docker.com/engine/security/protect-access/) 用 openssl 生成 CA、服务端与客户端证书（客户端需 `ca.pem` / `cert.pem` / `key.pem` 三个文件）
-2. 远程机开启 TLS 监听（systemd 环境用 override，避免与 daemon.json 的 `hosts` 冲突）：
+> 按 [Docker 官方文档](https://docs.docker.com/engine/security/protect-access/) 用 openssl 生成 CA、服务端与客户端证书（客户端需 `ca.pem` / `cert.pem` / `key.pem` 三个文件）
+
+#### 证书准备
+
+> 仅供参考
 
 ```bash
-sudo systemctl edit docker
-#   [Service]
-#   ExecStart=
-#   ExecStart=/usr/bin/dockerd \
-#     -H tcp://0.0.0.0:2376 --tlsverify \
-#     --tlscacert=/etc/docker/certs/ca.pem \
-#     --tlscert=/etc/docker/certs/server-cert.pem \
-#     --tlskey=/etc/docker/certs/server-key.pem
+# 1.创建证书目录并收紧权限
+mkdir -p /data/docker/certs
+chmod 700 /data/docker/certs
+cd /data/docker/certs
+
+# 2.生成 CA 根证书（无交互，无需手动填信息）
+# CA根私钥（仅远程宿主机留存，严禁发给Dell-G15-5510）
+openssl genrsa -out ca-key.pem 4096
+
+# 一键写入完整证书信息
+openssl req -new -x509 -days 3650 -key ca-key.pem -sha256 -out ca.pem \
+-subj "/C=CN/ST=GuangXi/L=Nanning/O=HuangOps/OU=DevOps/CN=10.0.0.115/emailAddress=huangjing510@126.com"
+
+# 3.生成 Docker 服务端证书（绑定本机 IP 10.0.0.115）
+# 服务端私钥
+openssl genrsa -out server-key.pem 4096
+# 证书请求文件
+openssl req -subj "/C=CN/ST=GuangXi/L=Nanning/O=HuangOps/OU=DevOps/CN=10.0.0.115" -sha256 -new -key server-key.pem -out server.csr
+# 关键SAN配置：绑定远程宿主机IP，否则客户端握手失败
+echo subjectAltName = IP:10.0.0.115 >> extfile.cnf
+echo extendedKeyUsage = serverAuth >> extfile.cnf
+# CA签发服务端证书
+openssl x509 -req -days 3650 -sha256 -in server.csr -CA ca.pem -CAkey ca-key.pem -CAcreateserial -out server-cert.pem -extfile extfile.cnf
+
+# 4.生成客户端证书（给 Dell-G15-5510 本地主机使用）
+# 客户端私钥，后续拷贝到Dell-G15-5510
+openssl genrsa -out key.pem 4096
+# 客户端证书请求
+openssl req -subj "/C=CN/ST=GuangXi/L=Nanning/O=HuangOps/OU=DevOps/CN=client" -new -key key.pem -out client.csr
+# 客户端鉴权标记
+echo extendedKeyUsage = clientAuth > extfile-client.cnf
+# 签发客户端证书
+openssl x509 -req -days 3650 -sha256 -in client.csr -CA ca.pem -CAkey ca-key.pem -CAserial ca.srl -out cert.pem -extfile extfile-client.cnf
+# 5. 清理临时文件 + 安全权限加固（Ubuntu2404 必执行）
+rm -rf *.csr extfile*.cnf ca.srl
+# 私钥仅root可读
+chmod 600 *-key.pem key.pem
+chown root:root /data/docker/certs/*
+# 6.提取可下发给【Dell-G15-5510】的证书包
+仅复制以下 3 个文件到你本地 Dell-G15-5510，ca-key.pem 留在远程宿主机，不要传输：
+1. ca.pem 根证书
+2. cert.pem 客户端证书
+3. key.pem 客户端私钥
+```
+
+#### 配置 Docker TLS 监听
+
+远程机开启 TLS 监听（systemd 环境用 override，避免与 daemon.json 的 `hosts` 冲突）：
+
+> 注意自行开放相关防火墙
+
+```bash
+[root@docker ~]# vim /lib/systemd/system/docker.service
+# 修改以下ExecStart配置
+ExecStart=/usr/local/bin/dockerd \
+  -H unix:///var/run/docker.sock \
+  -H tcp://0.0.0.0:2376 --tlsverify \
+  --tlscacert=/data/docker/certs/ca.pem \
+  --tlscert=/data/docker/certs/server-cert.pem \
+  --tlskey=/data/docker/certs/server-key.pem
+
+sudo systemctl daemon-reload
 sudo systemctl restart docker
 ```
 
-3. 应用内：类型选 **TLS**，填 `主机:2376`，选择客户端证书目录（需含 `ca.pem`、`cert.pem`、`key.pem`）
+#### 测试连接
+
+应用内：类型选 **TLS**，填 `主机:2376`，选择客户端证书目录（需含 `ca.pem`、`cert.pem`、`key.pem`）
+
+![image-20260930151406568](https://hj-typora-images-1319512400.cos.ap-guangzhou.myqcloud.com/2026-images/20260930151406image-20260930151406568.png)
 
 ### 明文 TCP
 
 仅建议在可信内网使用（流量未加密且无认证，配置时会显示安全提示）：
 
 ```bash
-sudo systemctl edit docker
-#   [Service]
-#   ExecStart=
-#   ExecStart=/usr/bin/dockerd -H tcp://0.0.0.0:2375 -H unix:///var/run/docker.sock
+[root@docker ~]# vim /usr/lib/systemd/system/docker.service
+# 修改以下ExecStart配置
+ExecStart=/usr/bin/dockerd -H tcp://0.0.0.0:2375 -H unix:///var/run/docker.sock
+
+sudo systemctl daemon-reload
 sudo systemctl restart docker
 ```
 
 应用内：类型选 **TCP**，填 `主机:2375`。
+
+![image-20260930151658637](https://hj-typora-images-1319512400.cos.ap-guangzhou.myqcloud.com/2026-images/20260930151658image-20260930151658637.png)
 
 ### 故障排查
 
@@ -303,6 +368,7 @@ sudo systemctl restart docker
 | 测试连接超时 | 地址 / 端口 / 防火墙：`nc -zv 主机 端口` |
 | SSH 报 Permission denied | 免密未配置或私钥不对：`ssh -o BatchMode=yes user@host docker version` 验证 |
 | SSH 隧道建立超时 | 检查远程 Docker socket 路径、登录用户的 Docker 权限，以及 Windows 本机是否启用了 OpenSSH Client |
+| SSH 报 `连接不可达: Error in the hyper legacy client: client error(sendRequest)` | 远程 sshd 禁用了 TCP 转发（隧道依赖它）：编辑远程 `/etc/ssh/sshd_config` 把 `AllowTcpForwarding` 改为 `yes`，重启 sshd（`sudo systemctl restart sshd`，Debian/Ubuntu 服务名为 `ssh`）后重试 |
 | TLS 报证书文件缺失 | 证书目录下需同时有 `ca.pem`、`cert.pem`、`key.pem` |
 | 拉取 / 容器操作报权限错误 | 远程用户不在 docker 组：`sudo usermod -aG docker $USER` 后重新登录 |
 | 远程机改了配置但不生效 | `systemd override` 配置后需 `sudo systemctl daemon-reload && sudo systemctl restart docker` |
