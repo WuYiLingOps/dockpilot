@@ -19,6 +19,7 @@ use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
 use russh::client::{self, Handle};
+#[cfg(unix)]
 use russh::keys::agent::client::AgentClient;
 use russh::keys::{self, load_secret_key, HashAlg, PrivateKeyWithHashAlg, PublicKeyOrCertificate};
 use russh::{ChannelMsg, Disconnect};
@@ -355,13 +356,7 @@ async fn authenticate(
             })?;
             pubkey_auth(handle, user, key).await
         }
-        AuthMethod::Agent => {
-            // agent 已配置但不可用/无密钥时回退默认私钥，而不是直接报错
-            match try_agent_auth(handle, user).await {
-                Ok(()) => Ok(()),
-                Err(agent_err) => try_default_keys(handle, user).await.map_err(|_| agent_err),
-            }
-        }
+        AuthMethod::Agent => auth_by_agent(handle, user).await,
         AuthMethod::DefaultKeys => try_default_keys(handle, user).await,
     }
 }
@@ -387,7 +382,10 @@ async fn try_default_keys(handle: &mut Handle<ClientHandler>, user: &str) -> Res
     ))
 }
 
-/// 尝试经 ssh-agent 认证（逐个尝试 agent 中的密钥）
+/// 尝试经 ssh-agent 认证（逐个尝试 agent 中的密钥）。
+/// 仅 unix：russh 的 AgentClient::connect_env 走 SSH_AUTH_SOCK（unix 专属 API），
+/// Windows 无此端点形态（OpenSSH agent 为命名管道），按已知限制直接走默认私钥
+#[cfg(unix)]
 async fn try_agent_auth(handle: &mut Handle<ClientHandler>, user: &str) -> Result<(), SshError> {
     let mut agent = AgentClient::connect_env()
         .await
@@ -413,6 +411,21 @@ async fn try_agent_auth(handle: &mut Handle<ClientHandler>, user: &str) -> Resul
         }
     }
     Err(SshError::Auth("服务器拒绝了 agent 中的全部密钥".into()))
+}
+
+/// Agent 认证的统一入口：agent 已配置但不可用/无密钥时回退默认私钥，而不是直接报错。
+/// unix 走 ssh-agent；Windows 无 SSH_AUTH_SOCK 形态，直接走默认私钥
+#[cfg(unix)]
+async fn auth_by_agent(handle: &mut Handle<ClientHandler>, user: &str) -> Result<(), SshError> {
+    match try_agent_auth(handle, user).await {
+        Ok(()) => Ok(()),
+        Err(agent_err) => try_default_keys(handle, user).await.map_err(|_| agent_err),
+    }
+}
+
+#[cfg(not(unix))]
+async fn auth_by_agent(handle: &mut Handle<ClientHandler>, user: &str) -> Result<(), SshError> {
+    try_default_keys(handle, user).await
 }
 
 /// 公钥认证：优先 rsa-sha2-256（现代服务器），被拒回退 SHA1（老服务器兼容）
@@ -525,7 +538,7 @@ pub async fn ensure_with(
     }
     let dir = config_dir().map_err(SshError::Channel)?;
     let handle = connect_and_auth(p, secrets, dir).await?;
-    let (endpoint, listener) = bind_local(p)?;
+    let (endpoint, listener) = bind_local(p).await?;
     let remote = remote_socket(p).to_string();
     let listener_task = tokio::spawn(accept_loop(listener, handle.clone(), remote));
     log::info!("SSH 会话已建立（russh）：{} → 本地端点 {endpoint}", p.host);
@@ -664,14 +677,14 @@ pub(crate) async fn exec_write(
 
 /// 停止指定 profile 的会话（幂等）：断开 SSH 连接并中止本地监听
 pub async fn stop(profile_id: &str) {
-    if let Some(mut t) = tunnels().await.remove(profile_id) {
+    if let Some(t) = tunnels().await.remove(profile_id) {
         t.listener_task.abort();
         let _ = t
             .handle
             .disconnect(Disconnect::ByApplication, "", "en")
             .await;
         #[cfg(unix)]
-        if let Some(path) = t.socket_path.take() {
+        if let Some(path) = t.socket_path {
             let _ = std::fs::remove_file(path);
         }
         log::info!("SSH 会话已停止: {profile_id}");
@@ -709,7 +722,7 @@ fn local_socket_path(p: &ConnectionProfile) -> PathBuf {
 }
 
 #[cfg(unix)]
-fn bind_local(p: &ConnectionProfile) -> Result<(String, LocalListener), SshError> {
+async fn bind_local(p: &ConnectionProfile) -> Result<(String, LocalListener), SshError> {
     let path = local_socket_path(p);
     let _ = std::fs::remove_file(&path);
     let listener = tokio::net::UnixListener::bind(&path)
@@ -718,8 +731,10 @@ fn bind_local(p: &ConnectionProfile) -> Result<(String, LocalListener), SshError
 }
 
 #[cfg(windows)]
-fn bind_local(_p: &ConnectionProfile) -> Result<(String, LocalListener), SshError> {
+async fn bind_local(_p: &ConnectionProfile) -> Result<(String, LocalListener), SshError> {
+    // tokio 的 TcpListener::bind 为异步（与 std 不同；local_addr 是同步的）
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+        .await
         .map_err(|e| SshError::Channel(format!("绑定本地端口失败: {e}")))?;
     let port = listener
         .local_addr()
