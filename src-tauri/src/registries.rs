@@ -6,7 +6,6 @@
 
 use serde::{Deserialize, Serialize};
 use std::time::Instant;
-use tauri::Manager;
 
 use crate::docker::conn::CmdResult;
 use crate::secret_store::{self, SecretBackend};
@@ -109,7 +108,11 @@ pub async fn save_registry(app: tauri::AppHandle, spec: RegistrySpec) -> CmdResu
         .and_then(|id| s.registries.iter().find(|r| r.id == id).cloned());
     log::info!(
         "{}镜像仓库凭据：{}（{registry}）",
-        if existing.is_some() { "更新" } else { "添加" },
+        if existing.is_some() {
+            "更新"
+        } else {
+            "添加"
+        },
         spec.name.trim()
     );
 
@@ -190,7 +193,11 @@ pub async fn test_registry(
             "测试仓库「{}」成功：{} ms{}",
             profile.name,
             result.latency_ms,
-            if result.via_http { "（HTTP 回退）" } else { "" }
+            if result.via_http {
+                "（HTTP 回退）"
+            } else {
+                ""
+            }
         );
     } else {
         log::warn!(
@@ -210,7 +217,8 @@ async fn probe_registry(
     skip_tls_verify: bool,
 ) -> RegistryTestResult {
     let start = Instant::now();
-    let (result, via_http) = for_https_then_http(registry, username, password, skip_tls_verify).await;
+    let (result, via_http) =
+        for_https_then_http(registry, username, password, skip_tls_verify).await;
 
     RegistryTestResult {
         ok: result.is_ok(),
@@ -357,9 +365,7 @@ async fn verify_with_challenge(
         .map_err(|e| format!("连接仓库失败: {e}"))?;
     match resp.status() {
         reqwest::StatusCode::OK => Ok(()),
-        reqwest::StatusCode::UNAUTHORIZED => {
-            Err("认证失败：用户名或密码不正确（HTTP 401）".into())
-        }
+        reqwest::StatusCode::UNAUTHORIZED => Err("认证失败：用户名或密码不正确（HTTP 401）".into()),
         status => Err(format!("仓库响应异常: HTTP {status}")),
     }
 }
@@ -389,19 +395,37 @@ mod tests {
     #[test]
     fn challenge_param_parses_bearer_header() {
         let h = r#"Bearer realm="https://auth.example.com/token",service="registry.docker.io",scope="repository:foo/bar:pull""#;
-        assert_eq!(parse_challenge_param(h, "realm").as_deref(), Some("https://auth.example.com/token"));
-        assert_eq!(parse_challenge_param(h, "service").as_deref(), Some("registry.docker.io"));
-        assert_eq!(parse_challenge_param(h, "scope").as_deref(), Some("repository:foo/bar:pull"));
+        assert_eq!(
+            parse_challenge_param(h, "realm").as_deref(),
+            Some("https://auth.example.com/token")
+        );
+        assert_eq!(
+            parse_challenge_param(h, "service").as_deref(),
+            Some("registry.docker.io")
+        );
+        assert_eq!(
+            parse_challenge_param(h, "scope").as_deref(),
+            Some("repository:foo/bar:pull")
+        );
         assert_eq!(parse_challenge_param(h, "missing"), None);
     }
 
     #[test]
     fn challenge_param_handles_single_quotes_and_order() {
         let h = "Bearer service='harbor.local', realm='https://harbor.local/service/token'";
-        assert_eq!(parse_challenge_param(h, "realm").as_deref(), Some("https://harbor.local/service/token"));
-        assert_eq!(parse_challenge_param(h, "service").as_deref(), Some("harbor.local"));
+        assert_eq!(
+            parse_challenge_param(h, "realm").as_deref(),
+            Some("https://harbor.local/service/token")
+        );
+        assert_eq!(
+            parse_challenge_param(h, "service").as_deref(),
+            Some("harbor.local")
+        );
         // 无引号 + 逗号分隔
         let h2 = "Basic realm=restricted, charset=UTF-8";
-        assert_eq!(parse_challenge_param(h2, "realm").as_deref(), Some("restricted"));
+        assert_eq!(
+            parse_challenge_param(h2, "realm").as_deref(),
+            Some("restricted")
+        );
     }
 }

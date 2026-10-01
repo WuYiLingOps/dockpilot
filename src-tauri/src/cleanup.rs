@@ -241,7 +241,10 @@ pub async fn cleanup(kinds: Vec<String>) -> CmdResult<CleanupResultDto> {
         }
     }
 
-    log::info!("空间清理完成：共回收 {}", crate::format_bytes(total_reclaimed));
+    log::info!(
+        "空间清理完成：共回收 {}",
+        crate::format_bytes(total_reclaimed)
+    );
     Ok(CleanupResultDto {
         items,
         total_reclaimed,

@@ -305,7 +305,10 @@ pub fn read_app_log(
     let name = file.unwrap_or_else(|| format!("{LOG_BASE}.log"));
     validate_log_name(&name)?;
     let path = dir.join(&name);
-    let size = path.metadata().map_err(|e| format!("读取日志失败: {e}"))?.len();
+    let size = path
+        .metadata()
+        .map_err(|e| format!("读取日志失败: {e}"))?
+        .len();
 
     let start = match offset {
         Some(o) if o <= size => o,
@@ -489,7 +492,11 @@ pub fn export_diagnostics(path: String) -> Result<String, String> {
         "log_dir": dir.to_string_lossy(),
         "last_crash": *LAST_CRASH.lock().map_err(|_| "诊断状态读取失败".to_string())?,
     });
-    append_tar_entry(&mut builder, "info.json", serde_json::to_string_pretty(&info).unwrap().as_bytes())?;
+    append_tar_entry(
+        &mut builder,
+        "info.json",
+        serde_json::to_string_pretty(&info).unwrap().as_bytes(),
+    )?;
 
     // 最近的日志文件（当前会话 + 归档，倒序取 3 个）
     let mut files = list_log_files()?;
@@ -512,7 +519,11 @@ pub fn export_diagnostics(path: String) -> Result<String, String> {
     Ok(path)
 }
 
-fn append_tar_entry(builder: &mut tar::Builder<Vec<u8>>, name: &str, bytes: &[u8]) -> Result<(), String> {
+fn append_tar_entry(
+    builder: &mut tar::Builder<Vec<u8>>,
+    name: &str,
+    bytes: &[u8],
+) -> Result<(), String> {
     let mut header = tar::Header::new_gnu();
     header.set_size(bytes.len() as u64);
     header.set_mode(0o644);
@@ -527,8 +538,7 @@ fn append_tar_entry(builder: &mut tar::Builder<Vec<u8>>, name: &str, bytes: &[u8
 pub fn copy_log_file(file: String, dest: String) -> Result<u64, String> {
     validate_log_name(&file)?;
     let dir = LOG_DIR.get().ok_or("日志目录未初始化")?;
-    let n = std::fs::copy(dir.join(&file), &dest)
-        .map_err(|e| format!("导出日志失败: {e}"))?;
+    let n = std::fs::copy(dir.join(&file), &dest).map_err(|e| format!("导出日志失败: {e}"))?;
     log::info!("日志 {file} 已导出到 {dest}（{n} 字节）");
     Ok(n)
 }
@@ -554,14 +564,16 @@ pub fn cleanup_old_logs(keep_days: u32) -> Result<LogCleanupResult, String> {
         return Ok(result);
     }
     let dir = LOG_DIR.get().ok_or("日志目录未初始化")?;
-    let cutoff =
-        std::time::SystemTime::now() - std::time::Duration::from_secs(u64::from(keep_days) * 86_400);
+    let cutoff = std::time::SystemTime::now()
+        - std::time::Duration::from_secs(u64::from(keep_days) * 86_400);
     for (path, name) in list_log_file_paths(dir) {
         if name == format!("{LOG_BASE}.log") {
             continue; // 当前会话日志不清理
         }
         let Ok(meta) = path.metadata() else { continue };
-        let Ok(modified) = meta.modified() else { continue };
+        let Ok(modified) = meta.modified() else {
+            continue;
+        };
         if modified < cutoff && std::fs::remove_file(&path).is_ok() {
             result.removed += 1;
             result.bytes += meta.len();

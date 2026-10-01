@@ -75,7 +75,13 @@ pub async fn host_stats() -> CmdResult<HostStatsDto> {
         let d = d.clone();
         let id = c.id.clone().unwrap_or_default();
         async move {
-            let mut s = d.stats(&id, Some(StatsOptions { stream: false, one_shot: true }));
+            let mut s = d.stats(
+                &id,
+                Some(StatsOptions {
+                    stream: false,
+                    one_shot: true,
+                }),
+            );
             s.next().await
         }
     }))
@@ -135,7 +141,11 @@ pub async fn system_df() -> CmdResult<SystemDfDto> {
     for c in df.containers.iter().flatten() {
         let rw = c.size_rw.unwrap_or(0).max(0) as u64;
         // 可写层为 0 时退回整个 rootfs 大小，避免树图全部缺席
-        let size = if rw > 0 { rw } else { c.size_root_fs.unwrap_or(0).max(0) as u64 };
+        let size = if rw > 0 {
+            rw
+        } else {
+            c.size_root_fs.unwrap_or(0).max(0) as u64
+        };
         out.containers_size += rw;
         out.containers_count += 1;
         let name = c

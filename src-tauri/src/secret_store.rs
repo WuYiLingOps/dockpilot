@@ -91,7 +91,9 @@ pub fn delete_secret(dir: &Path, key_id: &str, backend: SecretBackend) -> Result
     match r {
         Ok(()) => Ok(()),
         // keyring: 平台差异的"条目不存在"；文件: 密钥文件缺失
-        Err(e) if e.contains("NoEntry") || e.contains("找不到") || e.contains("不存在") => Ok(()),
+        Err(e) if e.contains("NoEntry") || e.contains("找不到") || e.contains("不存在") => {
+            Ok(())
+        }
         Err(e) => Err(e),
     }
 }
@@ -117,7 +119,6 @@ fn load_keyring(key_id: &str) -> Result<Option<String>, String> {
         Err(e) => Err(format!("读取钥匙串失败: {e}")),
     }
 }
-
 
 fn delete_keyring(key_id: &str) -> Result<(), String> {
     keyring_entry(key_id)?
@@ -159,8 +160,7 @@ fn derive_key() -> Result<[u8; 32], String> {
 fn load_vault(dir: &Path) -> Result<VaultFile, String> {
     let path = vault_path(dir);
     match std::fs::read(&path) {
-        Ok(bytes) => serde_json::from_slice(&bytes)
-            .map_err(|e| format!("解析密钥文件失败: {e}")),
+        Ok(bytes) => serde_json::from_slice(&bytes).map_err(|e| format!("解析密钥文件失败: {e}")),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(VaultFile {
             version: 1,
             entries: HashMap::new(),
@@ -193,9 +193,13 @@ fn encrypt(secret: &str) -> Result<(String, String), String> {
 fn decrypt(nonce_b64: &str, cipher_b64: &str) -> Result<String, String> {
     let key = derive_key()?;
     let cipher = Aes256Gcm::new((&key).into());
-    let nonce_bytes = B64.decode(nonce_b64).map_err(|e| format!("解码 nonce 失败: {e}"))?;
+    let nonce_bytes = B64
+        .decode(nonce_b64)
+        .map_err(|e| format!("解码 nonce 失败: {e}"))?;
     let nonce = Nonce::from_slice(&nonce_bytes);
-    let ct = B64.decode(cipher_b64).map_err(|e| format!("解码密文失败: {e}"))?;
+    let ct = B64
+        .decode(cipher_b64)
+        .map_err(|e| format!("解码密文失败: {e}"))?;
     let pt = cipher
         .decrypt(nonce, ct.as_ref())
         .map_err(|_| "解密失败：密钥文件可能来自其他机器或系统重装，请重新录入密码".to_string())?;
@@ -205,13 +209,9 @@ fn decrypt(nonce_b64: &str, cipher_b64: &str) -> Result<String, String> {
 fn save_file(dir: &Path, key_id: &str, secret: &str) -> Result<(), String> {
     let (nonce, cipher) = encrypt(secret)?;
     let mut vault = load_vault(dir)?;
-    vault.entries.insert(
-        key_id.to_string(),
-        VaultEntry {
-            nonce,
-            cipher,
-        },
-    );
+    vault
+        .entries
+        .insert(key_id.to_string(), VaultEntry { nonce, cipher });
     save_vault(dir, &vault)
 }
 
@@ -253,7 +253,10 @@ mod tests {
         assert_eq!(loaded.as_deref(), Some("p@ss word-密码"));
         // 覆盖写
         save_file(&dir, "registry/a", "new-pass").unwrap();
-        assert_eq!(load_file(&dir, "registry/a").unwrap().as_deref(), Some("new-pass"));
+        assert_eq!(
+            load_file(&dir, "registry/a").unwrap().as_deref(),
+            Some("new-pass")
+        );
         // 不同 key 隔离
         assert!(load_file(&dir, "registry/b").unwrap().is_none());
         std::fs::remove_dir_all(&dir).ok();
@@ -288,10 +291,8 @@ mod tests {
         let dir = tempdir();
         save_file(&dir, "registry/d", "v1").unwrap();
         // 旧条目仍在，缺 version 字段回落 0 不影响读取
-        let vault: VaultFile = serde_json::from_str(
-            &std::fs::read_to_string(vault_path(&dir)).unwrap(),
-        )
-        .unwrap();
+        let vault: VaultFile =
+            serde_json::from_str(&std::fs::read_to_string(vault_path(&dir)).unwrap()).unwrap();
         assert!(vault.entries.contains_key("registry/d"));
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -301,7 +302,10 @@ mod tests {
     #[ignore]
     fn keyring_backend_roundtrip() {
         save_keyring("registry/test-rt", "v").unwrap();
-        assert_eq!(load_keyring("registry/test-rt").unwrap().as_deref(), Some("v"));
+        assert_eq!(
+            load_keyring("registry/test-rt").unwrap().as_deref(),
+            Some("v")
+        );
         delete_keyring("registry/test-rt").unwrap();
         assert!(load_keyring("registry/test-rt").unwrap().is_none());
     }
@@ -315,7 +319,9 @@ mod tests {
         let loaded = load_secret(&dir, "registry/fallback-test", backend).unwrap();
         assert_eq!(loaded.as_deref(), Some("v"));
         delete_secret(&dir, "registry/fallback-test", backend).unwrap();
-        assert!(load_secret(&dir, "registry/fallback-test", backend).unwrap().is_none());
+        assert!(load_secret(&dir, "registry/fallback-test", backend)
+            .unwrap()
+            .is_none());
         std::fs::remove_dir_all(&dir).ok();
     }
 }

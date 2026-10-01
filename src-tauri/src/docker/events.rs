@@ -73,38 +73,32 @@ async fn listener_loop(app: tauri::AppHandle, tx: broadcast::Sender<DockerEventD
         let mut stream = d.events(None::<bollard::system::EventsOptions<String>>);
         use futures::StreamExt;
 
-        loop {
-            match stream.next().await {
-                Some(Ok(ev)) => {
-                    let Some(kind) = kind_of(ev.typ) else {
-                        continue;
-                    };
-                    let (id, name, attrs) = match &ev.actor {
-                        Some(actor) => (
-                            actor.id.clone().unwrap_or_default(),
-                            actor
-                                .attributes
-                                .as_ref()
-                                .and_then(|m| m.get("name").cloned())
-                                .unwrap_or_default(),
-                            actor.attributes.clone().unwrap_or_default(),
-                        ),
-                        None => (String::new(), String::new(), Default::default()),
-                    };
-                    let action = ev.action.unwrap_or_default();
-                    let dto = DockerEventDto {
-                        kind: kind.to_string(),
-                        action: action.clone(),
-                        id,
-                        name: name.clone(),
-                    };
-                    let _ = tx.send(dto);
-                    if kind == "container" {
-                        notify_if_abnormal(&app, &action, &name, &attrs);
-                    }
-                }
-                // 流结束或出错：稍候重连
-                _ => break,
+        while let Some(Ok(ev)) = stream.next().await {
+            let Some(kind) = kind_of(ev.typ) else {
+                continue;
+            };
+            let (id, name, attrs) = match &ev.actor {
+                Some(actor) => (
+                    actor.id.clone().unwrap_or_default(),
+                    actor
+                        .attributes
+                        .as_ref()
+                        .and_then(|m| m.get("name").cloned())
+                        .unwrap_or_default(),
+                    actor.attributes.clone().unwrap_or_default(),
+                ),
+                None => (String::new(), String::new(), Default::default()),
+            };
+            let action = ev.action.unwrap_or_default();
+            let dto = DockerEventDto {
+                kind: kind.to_string(),
+                action: action.clone(),
+                id,
+                name: name.clone(),
+            };
+            let _ = tx.send(dto);
+            if kind == "container" {
+                notify_if_abnormal(&app, &action, &name, &attrs);
             }
         }
 

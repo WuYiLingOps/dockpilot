@@ -1,8 +1,7 @@
 use std::collections::HashMap;
 
 use bollard::image::{
-    CreateImageOptions, ImportImageOptions, ListImagesOptions, RemoveImageOptions,
-    TagImageOptions,
+    CreateImageOptions, ImportImageOptions, ListImagesOptions, RemoveImageOptions, TagImageOptions,
 };
 use futures::StreamExt;
 use tauri::ipc::Channel;
@@ -36,10 +35,7 @@ pub async fn list_images() -> CmdResult<Vec<ImageDto>> {
 
 #[tauri::command]
 pub async fn remove_image(id: String, force: bool) -> CmdResult<()> {
-    log::info!(
-        "删除镜像 {id}{}",
-        if force { "（force）" } else { "" }
-    );
+    log::info!("删除镜像 {id}{}", if force { "（force）" } else { "" });
     let d = docker().await?;
     d.remove_image(
         &id,
@@ -277,11 +273,8 @@ pub async fn import_image(
                 let upload = FramedRead::new(file, BytesCodec::new())
                     .take_while(|r| futures::future::ready(r.is_ok()))
                     .map(|r| r.unwrap().freeze());
-                let mut stream = d.import_image_stream(
-                    ImportImageOptions { quiet: false },
-                    upload,
-                    None,
-                );
+                let mut stream =
+                    d.import_image_stream(ImportImageOptions { quiet: false }, upload, None);
                 loop {
                     tokio::select! {
                         _ = token.cancelled() => {
@@ -325,7 +318,11 @@ pub async fn import_image(
             status: None,
             id: None,
             progress: None,
-            error: if cancelled { Some("已取消".into()) } else { error },
+            error: if cancelled {
+                Some("已取消".into())
+            } else {
+                error
+            },
             done: true,
         });
         app.state::<Streams>().remove(&sid_task);
@@ -452,9 +449,15 @@ mod tests {
     fn pull_reference_defaults_to_latest_tag() {
         // 缺 tag 补 latest
         assert_eq!(normalize_pull_reference("nginx").unwrap(), "nginx:latest");
-        assert_eq!(normalize_pull_reference("  nginx ").unwrap(), "nginx:latest");
+        assert_eq!(
+            normalize_pull_reference("  nginx ").unwrap(),
+            "nginx:latest"
+        );
         // 已带 tag 原样保留
-        assert_eq!(normalize_pull_reference("nginx:1.27").unwrap(), "nginx:1.27");
+        assert_eq!(
+            normalize_pull_reference("nginx:1.27").unwrap(),
+            "nginx:1.27"
+        );
         assert_eq!(
             normalize_pull_reference("redis:7-alpine").unwrap(),
             "redis:7-alpine"

@@ -48,7 +48,11 @@ pub(super) fn net_io(s: &ContainerStatsResponse) -> (u64, u64) {
 
 pub(super) fn block_io(s: &ContainerStatsResponse) -> (u64, u64) {
     let mut acc = (0u64, 0u64);
-    if let Some(entries) = s.blkio_stats.as_ref().and_then(|b| b.io_service_bytes_recursive.as_ref()) {
+    if let Some(entries) = s
+        .blkio_stats
+        .as_ref()
+        .and_then(|b| b.io_service_bytes_recursive.as_ref())
+    {
         for e in entries {
             match e.op.as_deref() {
                 Some("Read") => acc.0 += e.value.unwrap_or(0),
@@ -95,7 +99,13 @@ pub async fn stream_stats(
     let app = app.clone();
 
     tauri::async_runtime::spawn(async move {
-        let mut stream = d.stats(&id, Some(StatsOptions { stream: true, one_shot: false }));
+        let mut stream = d.stats(
+            &id,
+            Some(StatsOptions {
+                stream: true,
+                one_shot: false,
+            }),
+        );
 
         loop {
             tokio::select! {

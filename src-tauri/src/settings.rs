@@ -9,7 +9,7 @@ use crate::secret_store::SecretBackend;
 /// - tcp:   host（host:port，明文 HTTP）
 /// - tls:   host（host:port）+ cert_path（证书目录，含 ca.pem / cert.pem / key.pem）
 /// - ssh:   host（user@host[:port]）+ 可选 key_path + 可选 remote_socket（rootless 等非默认路径）
-///          + 可选 jump_host（跳板机 user@host[:port]，经 ProxyJump 中转）
+///   + 可选 jump_host（跳板机 user@host[:port]，经 ProxyJump 中转）
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct ConnectionProfile {
@@ -156,10 +156,7 @@ pub fn migrate(mut s: AppSettings) -> AppSettings {
         s.connections.push(ConnectionProfile::default_local());
     }
     if s.active_connection_id.is_empty()
-        || !s
-            .connections
-            .iter()
-            .any(|c| c.id == s.active_connection_id)
+        || !s.connections.iter().any(|c| c.id == s.active_connection_id)
     {
         s.active_connection_id = "local".into();
     }
@@ -344,10 +341,7 @@ pub fn save(app: &tauri::AppHandle, s: &AppSettings) -> Result<(), String> {
 // ------------------------------------------------------------------
 
 /// 按 id 查找连接配置
-pub fn find_connection<'a>(
-    s: &'a AppSettings,
-    id: &str,
-) -> Option<&'a ConnectionProfile> {
+pub fn find_connection<'a>(s: &'a AppSettings, id: &str) -> Option<&'a ConnectionProfile> {
     s.connections.iter().find(|c| c.id == id)
 }
 
@@ -442,9 +436,15 @@ mod tests {
 
     #[test]
     fn normalize_mirror_adds_scheme_and_trims_slash() {
-        assert_eq!(normalize_mirror(" docker.1ms.run "), "https://docker.1ms.run");
+        assert_eq!(
+            normalize_mirror(" docker.1ms.run "),
+            "https://docker.1ms.run"
+        );
         assert_eq!(normalize_mirror("https://a.com/"), "https://a.com");
-        assert_eq!(normalize_mirror("http://insecure.local///"), "http://insecure.local");
+        assert_eq!(
+            normalize_mirror("http://insecure.local///"),
+            "http://insecure.local"
+        );
         assert_eq!(normalize_mirror("   "), "");
     }
 
@@ -468,8 +468,10 @@ mod tests {
         assert_eq!(s.active_connection_id, "local");
 
         // active_id 指向不存在的配置 → 回落 local
-        let mut s2 = AppSettings::default();
-        s2.active_connection_id = "ghost".into();
+        let s2 = AppSettings {
+            active_connection_id: "ghost".into(),
+            ..AppSettings::default()
+        };
         let s2 = migrate(sanitize(s2));
         assert_eq!(s2.active_connection_id, "local");
     }
@@ -513,15 +515,27 @@ mod tests {
         assert_eq!(s.connections[0].name, "未命名连接");
         assert_eq!(s.connections[1].host, "10.0.0.5:2375", "tcp 缺端口应补默认");
         assert_eq!(s.connections[2].host, "10.0.0.5:2376", "tls 缺端口应补默认");
-        assert_ne!(s.connections[1].id, s.connections[2].id, "重复 id 应重新生成");
+        assert_ne!(
+            s.connections[1].id, s.connections[2].id,
+            "重复 id 应重新生成"
+        );
     }
 
     #[test]
     fn normalize_conn_host_strips_scheme_and_fills_port() {
-        assert_eq!(normalize_conn_host("tcp", " tcp://10.0.0.5 "), "10.0.0.5:2375");
-        assert_eq!(normalize_conn_host("tls", "https://10.0.0.5"), "10.0.0.5:2376");
+        assert_eq!(
+            normalize_conn_host("tcp", " tcp://10.0.0.5 "),
+            "10.0.0.5:2375"
+        );
+        assert_eq!(
+            normalize_conn_host("tls", "https://10.0.0.5"),
+            "10.0.0.5:2376"
+        );
         assert_eq!(normalize_conn_host("tcp", "10.0.0.5:2377"), "10.0.0.5:2377");
-        assert_eq!(normalize_conn_host("ssh", "ssh://root@10.0.0.5:2222"), "root@10.0.0.5:2222");
+        assert_eq!(
+            normalize_conn_host("ssh", "ssh://root@10.0.0.5:2222"),
+            "root@10.0.0.5:2222"
+        );
         assert_eq!(normalize_conn_host("ssh", "root@10.0.0.5"), "root@10.0.0.5");
     }
 
@@ -543,22 +557,44 @@ mod tests {
 
     #[test]
     fn display_url_reflects_kind() {
-        assert_eq!(ConnectionProfile::default_local().display_url(), "unix:///var/run/docker.sock");
         assert_eq!(
-            ConnectionProfile { kind: "ssh".into(), host: "root@10.0.0.5".into(), ..Default::default() }.display_url(),
+            ConnectionProfile::default_local().display_url(),
+            "unix:///var/run/docker.sock"
+        );
+        assert_eq!(
+            ConnectionProfile {
+                kind: "ssh".into(),
+                host: "root@10.0.0.5".into(),
+                ..Default::default()
+            }
+            .display_url(),
             "ssh://root@10.0.0.5"
         );
         assert_eq!(
-            ConnectionProfile { kind: "tls".into(), host: "10.0.0.5:2376".into(), ..Default::default() }.display_url(),
+            ConnectionProfile {
+                kind: "tls".into(),
+                host: "10.0.0.5:2376".into(),
+                ..Default::default()
+            }
+            .display_url(),
             "https://10.0.0.5:2376"
         );
     }
 
     #[test]
     fn normalize_registry_host_strips_scheme_and_lowercases() {
-        assert_eq!(normalize_registry_host(" registry.cn-hangzhou.aliyuncs.com "), "registry.cn-hangzhou.aliyuncs.com");
-        assert_eq!(normalize_registry_host("https://Harbor.Example.com/"), "harbor.example.com");
-        assert_eq!(normalize_registry_host("http://harbor.local:5000/"), "harbor.local:5000");
+        assert_eq!(
+            normalize_registry_host(" registry.cn-hangzhou.aliyuncs.com "),
+            "registry.cn-hangzhou.aliyuncs.com"
+        );
+        assert_eq!(
+            normalize_registry_host("https://Harbor.Example.com/"),
+            "harbor.example.com"
+        );
+        assert_eq!(
+            normalize_registry_host("http://harbor.local:5000/"),
+            "harbor.local:5000"
+        );
         assert_eq!(normalize_registry_host("   "), "");
     }
 
@@ -615,7 +651,10 @@ mod tests {
         assert_eq!(first.kind, "generic", "未知 kind 应回落 generic");
         assert_eq!(first.registry, "aliyun.com");
         assert_eq!(first.username, "user");
-        assert_eq!(first.secret_backend, "keyring", "非法 backend 应回落 keyring");
+        assert_eq!(
+            first.secret_backend, "keyring",
+            "非法 backend 应回落 keyring"
+        );
         assert!(first.created_at > 0, "空 created_at 应回落当前时间");
         assert_ne!(s.registries[1].id, s.registries[2].id, "重复 id 应重新生成");
     }
@@ -629,6 +668,9 @@ mod tests {
             r#"{"registries":[{"id":"r1","name":"aliyun","kind":"aliyun","registry":"registry.cn-hangzhou.aliyuncs.com","username":"u","secret_backend":"keyring","created_at":100}]}"#,
         );
         assert_eq!(new.registries.len(), 1);
-        assert_eq!(new.registries[0].registry, "registry.cn-hangzhou.aliyuncs.com");
+        assert_eq!(
+            new.registries[0].registry,
+            "registry.cn-hangzhou.aliyuncs.com"
+        );
     }
 }

@@ -75,13 +75,17 @@ fn apply_close_action(app: tauri::AppHandle, action: String, remember: bool) -> 
 fn apply_window_corner(window: &tauri::WebviewWindow, round: bool) {
     use windows::Win32::Foundation::HWND;
     use windows::Win32::Graphics::Dwm::{
-        DwmSetWindowAttribute, DWMWA_WINDOW_CORNER_PREFERENCE, DWM_WINDOW_CORNER_PREFERENCE,
-        DWMWCP_DONOTROUND, DWMWCP_ROUND,
+        DwmSetWindowAttribute, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DONOTROUND, DWMWCP_ROUND,
+        DWM_WINDOW_CORNER_PREFERENCE,
     };
     let Ok(hwnd) = window.hwnd() else {
         return;
     };
-    let pref = if round { DWMWCP_ROUND } else { DWMWCP_DONOTROUND };
+    let pref = if round {
+        DWMWCP_ROUND
+    } else {
+        DWMWCP_DONOTROUND
+    };
     unsafe {
         let _ = DwmSetWindowAttribute(
             HWND(hwnd.0 as *mut std::ffi::c_void),
