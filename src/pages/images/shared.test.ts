@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { defaultExportName, suggestPushTarget } from "./shared";
+import {
+  defaultExportName,
+  refRegistryDomain,
+  resolvePullCredential,
+  suggestPushTarget,
+} from "./shared";
 import type { ImageDto } from "../../types/docker";
+import type { RegistryProfile } from "../../types/settings";
 
 function img(id: string, tags: string[]): ImageDto {
   return { id, tags } as ImageDto;
@@ -61,5 +67,58 @@ describe("suggestPushTarget", () => {
       repository: "wylhub/redis",
       tag: "latest",
     });
+  });
+});
+
+const registry = (partial: Partial<RegistryProfile>): RegistryProfile =>
+  ({
+    id: "r1",
+    name: "hub",
+    kind: "generic",
+    registry: "docker.io",
+    username: "u",
+    secret_backend: "keyring",
+    skip_tls_verify: false,
+    created_at: 1,
+    ...partial,
+  }) as RegistryProfile;
+
+describe("refRegistryDomain", () => {
+  it("官方镜像（单段/官方域名前缀缺失）归到 docker.io", () => {
+    expect(refRegistryDomain("nginx")).toBe("docker.io");
+    expect(refRegistryDomain("nginx:1.27")).toBe("docker.io");
+    expect(refRegistryDomain("nginx@sha256:abcd")).toBe("docker.io");
+  });
+
+  it("首段形如域名且有多段时取该段", () => {
+    expect(refRegistryDomain("registry.cn-hangzhou.aliyuncs.com/wylhub/redis:7")).toBe(
+      "registry.cn-hangzhou.aliyuncs.com",
+    );
+    expect(refRegistryDomain("localhost:5000/app:1")).toBe("localhost:5000");
+    expect(refRegistryDomain("harbor.local:8443/proj/app@sha256:abcd")).toBe(
+      "harbor.local:8443",
+    );
+  });
+});
+
+describe("resolvePullCredential", () => {
+  const registries = [
+    registry({ id: "hub", registry: "docker.io" }),
+    registry({ id: "harbor", kind: "harbor", registry: "harbor.local:8443" }),
+  ];
+
+  it("官方镜像命中 Docker Hub 凭据", () => {
+    expect(resolvePullCredential("nginx:latest", registries)?.id).toBe("hub");
+  });
+
+  it("带端口域名精确命中对应凭据", () => {
+    expect(resolvePullCredential("harbor.local:8443/proj/app", registries)?.id).toBe(
+      "harbor",
+    );
+  });
+
+  it("无匹配凭据时返回 null（匿名拉取）", () => {
+    expect(resolvePullCredential("quay.io/foo/bar", registries)).toBeNull();
+    expect(resolvePullCredential("nginx", [])).toBeNull();
   });
 });

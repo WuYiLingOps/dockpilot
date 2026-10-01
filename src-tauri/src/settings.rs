@@ -890,7 +890,6 @@ mod tests {
         assert_eq!(s.compose_scan_dirs[0].path, "/tmp/stacks");
         assert!(!s.compose_scan_dirs[0].id.is_empty());
     }
-
     #[test]
     fn parse_keeps_compose_tracking_from_old_configs() {
         // 旧配置无编排跟踪字段 → serde default 补空列表；新配置可正常读回

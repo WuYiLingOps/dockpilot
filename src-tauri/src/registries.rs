@@ -3,6 +3,7 @@
 //!
 //! 阿里云 ACR 与 Harbor 均为 Docker Registry v2 兼容协议：
 //! 测试连接按 `/v2/` 探测 + WWW-Authenticate 分派（Bearer token 流 / Basic）。
+//! 地址填官方源别名 docker.io 时自动路由到实际 API 主机 registry-1.docker.io。
 
 use serde::{Deserialize, Serialize};
 use std::time::Instant;
@@ -10,6 +11,20 @@ use std::time::Instant;
 use crate::docker::conn::CmdResult;
 use crate::secret_store::{self, SecretBackend};
 use crate::settings::{self, AppSettings, RegistryProfile};
+
+/// 官方源的引用别名（镜像引用里无域名前缀 = docker.io）
+pub const DOCKERHUB_HOST: &str = "docker.io";
+/// 官方源实际的 Registry v2 API 主机（docker.io 本身不提供 /v2/ 端点）
+const DOCKERHUB_API_HOST: &str = "registry-1.docker.io";
+
+/// 凭据档案地址 → 实际探测/认证的 API 主机（官方源别名 docker.io 归一到 registry-1.docker.io）
+fn api_host(registry: &str) -> &str {
+    if registry == DOCKERHUB_HOST {
+        DOCKERHUB_API_HOST
+    } else {
+        registry
+    }
+}
 
 /// 发给前端的凭据档案（脱敏，不含密码）
 #[derive(Debug, Clone, Serialize)]
@@ -68,7 +83,8 @@ pub struct RegistryTestResult {
     pub via_http: bool,
 }
 
-fn secret_key(profile_id: &str) -> String {
+/// 密钥库中的条目 id（档案 id → 密钥键）
+pub fn secret_key(profile_id: &str) -> String {
     format!("registry/{profile_id}")
 }
 
@@ -88,6 +104,7 @@ pub async fn list_registries(app: tauri::AppHandle) -> CmdResult<Vec<RegistryDto
 /// 新建或编辑凭据；密码仅在非空时更新（编辑留空 = 保留原密码）
 #[tauri::command]
 pub async fn save_registry(app: tauri::AppHandle, spec: RegistrySpec) -> CmdResult<RegistryDto> {
+    let kind = spec.kind.trim().to_string();
     let registry = settings::normalize_registry_host(&spec.registry);
     if registry.is_empty() {
         return Err("请填写仓库地址".into());
@@ -99,7 +116,6 @@ pub async fn save_registry(app: tauri::AppHandle, spec: RegistrySpec) -> CmdResu
     if username.is_empty() {
         return Err("请填写用户名".into());
     }
-    let kind = spec.kind.trim().to_string();
 
     let mut s = settings::load(&app);
     let existing = spec
@@ -252,8 +268,9 @@ async fn for_https_then_http(
     skip_tls_verify: bool,
 ) -> (Result<(), String>, bool) {
     let mut last_err = String::new();
+    let host = api_host(registry);
     for (scheme, via_http) in [("https", false), ("http", true)] {
-        let base = format!("{scheme}://{registry}");
+        let base = format!("{scheme}://{host}");
         match probe_base(&base, username, password, skip_tls_verify).await {
             Ok(()) => return (Ok(()), via_http),
             Err(e) => {
@@ -427,5 +444,10 @@ mod tests {
             parse_challenge_param(h2, "realm").as_deref(),
             Some("restricted")
         );
+    }
+    #[test]
+    fn api_host_routes_dockerhub_to_registry_endpoint() {
+        assert_eq!(api_host("docker.io"), "registry-1.docker.io");
+        assert_eq!(api_host("harbor.local:8443"), "harbor.local:8443");
     }
 }

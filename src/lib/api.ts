@@ -230,6 +230,7 @@ export const api = {
   testRegistry: (id: string, skipTlsVerify?: boolean) =>
     invoke<RegistryTestResult>("test_registry", { id, skipTlsVerify }),
 
+
   streamLogs: (
     id: string,
     follow: boolean,

@@ -349,7 +349,7 @@ export function RegistrySettings() {
               {draft.kind === "harbor" &&
                 "Harbor：可用普通账号或机器人账户（robot$项目+名称），账号需对目标项目有推送权限且项目已存在；自签名证书时勾选下方跳过校验以便测试。"}
               {draft.kind === "generic" &&
-                "任何 Docker Registry v2 兼容仓库（Distribution、Nexus、Quay 等）。"}
+                "任何 Docker Registry v2 兼容仓库（Distribution、Nexus、Quay 等），也可填官方源别名 docker.io（自动走 registry-1 端点）或 ghcr.io、quay.io 等官方 v2 源。"}
             </div>
 
             <Checkbox
