@@ -16,11 +16,14 @@ use tokio::process::Command;
 
 use super::conn::{docker, CmdResult};
 use super::containers::map_container;
-use super::dto::{ComposeCliInfoDto, ComposeOutput, ComposeProjectDto, ComposeServiceDto, PortDto};
+use super::dto::{
+    ComposeCliInfoDto, ComposeOutput, ComposeProjectDto, ComposeServiceDto, PortDto,
+    ScanComposeResultDto,
+};
 use super::ssh_client;
 use super::state::Streams;
 use crate::docker::conn;
-use crate::settings::ConnectionProfile;
+use crate::settings::{self, ConnectionProfile, TrackedComposeProject};
 
 /// compose 项目名标签
 pub const LABEL_PROJECT: &str = "com.docker.compose.project";
@@ -28,6 +31,19 @@ pub const LABEL_PROJECT: &str = "com.docker.compose.project";
 pub const LABEL_SERVICE: &str = "com.docker.compose.service";
 const LABEL_WORKING_DIR: &str = "com.docker.compose.project.working_dir";
 const LABEL_CONFIG_FILES: &str = "com.docker.compose.project.config_files";
+
+/// 视为 compose 文件的文件名（目录扫描匹配用）
+const COMPOSE_FILE_NAMES: [&str; 4] = [
+    "compose.yaml",
+    "compose.yml",
+    "docker-compose.yaml",
+    "docker-compose.yml",
+];
+
+/// 当前连接的 id（跟踪记录的归属键：本地为 "local"，SSH 各自独立）
+fn active_connection_id() -> String {
+    conn::active().profile.id
+}
 
 // ---------------------------------------------------------------------------
 // CLI 探测与命令组装
@@ -315,7 +331,7 @@ pub(super) struct ContainerSnapshot {
     config_files: Option<String>,
 }
 
-fn snapshot(c: &bollard::models::ContainerSummary) -> ContainerSnapshot {
+pub(super) fn snapshot(c: &bollard::models::ContainerSummary) -> ContainerSnapshot {
     let dto = map_container(c);
     let labels = c.labels.as_ref();
     ContainerSnapshot {
@@ -381,13 +397,84 @@ pub(super) fn group_projects(list: Vec<ContainerSnapshot>) -> Vec<ComposeProject
                 services,
                 running_count,
                 total_count,
+                source: "containers".into(),
             }
         })
         .collect()
 }
 
-/// 从引擎容器标签反查项目的 working_dir 与 config_files，供 CLI 操作重建参数
-async fn project_config(project: &str) -> CmdResult<(String, Vec<String>)> {
+/// 把容器标签中看到的项目 upsert 进跟踪列表（记忆层）：
+/// 新项目按 source 追加；已有记录仅在路径不同步时更新（registered/scanned 来源不降级）。
+/// 返回列表是否发生变化（无变化时调用方可跳过写盘——列表刷新是事件驱动的高频路径）
+fn upsert_tracked(
+    tracked: &mut Vec<TrackedComposeProject>,
+    connection_id: &str,
+    name: &str,
+    working_dir: &str,
+    config_files: &[String],
+    source: &str,
+) -> bool {
+    if name.is_empty() || config_files.is_empty() {
+        return false;
+    }
+    if let Some(t) = tracked
+        .iter_mut()
+        .find(|t| t.connection_id == connection_id && t.name == name)
+    {
+        if t.working_dir == working_dir && t.config_files == config_files {
+            return false;
+        }
+        t.working_dir = working_dir.to_string();
+        t.config_files = config_files.to_vec();
+        return true;
+    }
+    tracked.push(TrackedComposeProject {
+        id: uuid::Uuid::new_v4().to_string(),
+        connection_id: connection_id.to_string(),
+        name: name.to_string(),
+        working_dir: working_dir.to_string(),
+        config_files: config_files.to_vec(),
+        source: source.to_string(),
+        added_at: settings::now_secs(),
+    });
+    true
+}
+
+/// 容器识别结果与跟踪记录合并：同名项目容器优先（路径字段有缺时以记录补全）；
+/// 仅存在于跟踪记录的项目以"未运行"形态补入（无容器、计数为 0），结果按名称稳定排序
+fn merge_projects(
+    mut containers: Vec<ComposeProjectDto>,
+    tracked: &[TrackedComposeProject],
+    connection_id: &str,
+) -> Vec<ComposeProjectDto> {
+    for t in tracked.iter().filter(|t| t.connection_id == connection_id) {
+        match containers.iter_mut().find(|p| p.name == t.name) {
+            Some(p) => {
+                if p.working_dir.is_empty() {
+                    p.working_dir = t.working_dir.clone();
+                }
+                if p.config_files.is_empty() {
+                    p.config_files = t.config_files.clone();
+                }
+            }
+            None => containers.push(ComposeProjectDto {
+                name: t.name.clone(),
+                working_dir: t.working_dir.clone(),
+                config_files: t.config_files.clone(),
+                services: Vec::new(),
+                running_count: 0,
+                total_count: 0,
+                source: t.source.clone(),
+            }),
+        }
+    }
+    containers.sort_by(|a, b| a.name.cmp(&b.name));
+    containers
+}
+
+/// 从引擎容器标签反查项目的 working_dir 与 config_files，供 CLI 操作重建参数；
+/// 查不到容器时回退本地跟踪记录（down 后/从未 up 的项目同样可操作）
+async fn project_config(app: &tauri::AppHandle, project: &str) -> CmdResult<(String, Vec<String>)> {
     let d = docker().await?;
     let list = d
         .list_containers(Some(ListContainersOptions::<String> {
@@ -413,6 +500,15 @@ async fn project_config(project: &str) -> CmdResult<(String, Vec<String>)> {
                 .unwrap_or_default();
             return Ok((working_dir, config_files));
         }
+    }
+    let conn_id = active_connection_id();
+    let s = settings::load(app);
+    if let Some(t) = s
+        .compose_projects
+        .iter()
+        .find(|t| t.connection_id == conn_id && t.name == project)
+    {
+        return Ok((t.working_dir.clone(), t.config_files.clone()));
     }
     Err(format!(
         "未找到项目 {project} 的容器，无法确定 compose 配置"
@@ -667,9 +763,10 @@ fn spawn_remote_stream(
 // Tauri commands
 // ---------------------------------------------------------------------------
 
-/// 列出所有 compose 项目（含已停止；按容器标签分组，无需 compose CLI）
+/// 列出所有 compose 项目（含已停止与本地跟踪的未运行项目；容器按标签分组，无需 compose CLI）。
+/// 容器标签中看到的项目会同步进本地跟踪记录（记忆层），down 后仍可见可重启
 #[tauri::command]
-pub async fn list_compose_projects() -> CmdResult<Vec<ComposeProjectDto>> {
+pub async fn list_compose_projects(app: tauri::AppHandle) -> CmdResult<Vec<ComposeProjectDto>> {
     let d = docker().await?;
     let list = d
         .list_containers(Some(ListContainersOptions::<String> {
@@ -678,7 +775,26 @@ pub async fn list_compose_projects() -> CmdResult<Vec<ComposeProjectDto>> {
         }))
         .await
         .map_err(|e| format!("获取容器列表失败: {e}"))?;
-    Ok(group_projects(list.iter().map(snapshot).collect()))
+    let grouped = group_projects(list.iter().map(snapshot).collect());
+
+    let conn_id = active_connection_id();
+    let mut s = settings::load(&app);
+    let mut changed = false;
+    for p in &grouped {
+        changed |= upsert_tracked(
+            &mut s.compose_projects,
+            &conn_id,
+            &p.name,
+            &p.working_dir,
+            &p.config_files,
+            "remembered",
+        );
+    }
+    if changed {
+        // 写盘失败不影响列表返回（下次刷新会再尝试）
+        settings::save(&app, &s).unwrap_or_else(|e| log::warn!("保存编排跟踪记录失败: {e}"));
+    }
+    Ok(merge_projects(grouped, &s.compose_projects, &conn_id))
 }
 
 /// 探测 compose CLI 可用性与版本
@@ -715,7 +831,7 @@ pub async fn compose_action(
     on_output: Channel<ComposeOutput>,
 ) -> CmdResult<String> {
     let cli = detect_cli().await?;
-    let (working_dir, config_files) = project_config(&project).await?;
+    let (working_dir, config_files) = project_config(&app, &project).await?;
     if config_files.is_empty() {
         return Err(format!(
             "项目 {project} 缺少 compose 配置文件标签，无法执行 CLI 操作"
@@ -741,6 +857,214 @@ pub async fn compose_action(
     }
     let cmd = build_cmd_local(&cli, &project, &working_dir, &config_files, &args)?;
     spawn_local_stream(&app, cmd, label, on_output)
+}
+
+// ---------------------------------------------------------------------------
+// 编排跟踪：手动注册与目录扫描
+// ---------------------------------------------------------------------------
+
+/// 判断文件名是否为 compose 文件（大小写不敏感）
+fn is_compose_file_name(name: &str) -> bool {
+    COMPOSE_FILE_NAMES
+        .iter()
+        .any(|f| f.eq_ignore_ascii_case(name))
+}
+
+/// 从 compose 文件内容推导项目名：顶层 `name:` 字段（compose spec）→ 文件所在目录名。
+/// 顶层字段行无缩进，因此按行首前缀匹配即可与 service 级字段区分
+fn compose_project_name(content: &str, path: &str) -> String {
+    for line in content.lines() {
+        if let Some(rest) = line.strip_prefix("name:") {
+            let v = rest.trim().trim_matches('"').trim_matches('\'');
+            if !v.is_empty() {
+                return v.to_string();
+            }
+        }
+    }
+    Path::new(path)
+        .parent()
+        .and_then(|p| p.file_name())
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default()
+}
+
+/// 手动注册编排：读取 compose 文件（ssh 连接时读远端文件），推导项目名后写入跟踪记录。
+/// 同名记录已存在时更新路径并把来源提升为 registered（用户显式确认）
+#[tauri::command]
+pub async fn add_tracked_compose_project(
+    app: tauri::AppHandle,
+    path: String,
+    name: Option<String>,
+) -> CmdResult<()> {
+    let path = path.trim().to_string();
+    if path.is_empty() {
+        return Err("请填写 compose 文件路径".into());
+    }
+    if !matches!(
+        Path::new(&path).extension().and_then(|e| e.to_str()),
+        Some("yml") | Some("yaml")
+    ) {
+        return Err("请选择 .yml / .yaml 编排文件".into());
+    }
+    let content = read_compose_file(path.clone()).await?;
+    let project = name
+        .map(|n| n.trim().to_string())
+        .filter(|n| !n.is_empty())
+        .unwrap_or_else(|| compose_project_name(&content, &path));
+    if project.is_empty() {
+        return Err("无法从文件推导项目名，请手动填写".into());
+    }
+    let working_dir = Path::new(&path)
+        .parent()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_default();
+
+    log::info!("手动注册编排项目 {project}（{path}）");
+    let conn_id = active_connection_id();
+    let mut s = settings::load(&app);
+    upsert_tracked(
+        &mut s.compose_projects,
+        &conn_id,
+        &project,
+        &working_dir,
+        &[path],
+        "registered",
+    );
+    settings::save(&app, &s)?;
+    Ok(())
+}
+
+/// 移除当前连接下指定项目名的跟踪记录（项目重新 up 后会再次自动记忆）
+#[tauri::command]
+pub async fn remove_tracked_compose_project(app: tauri::AppHandle, name: String) -> CmdResult<()> {
+    let conn_id = active_connection_id();
+    let mut s = settings::load(&app);
+    let before = s.compose_projects.len();
+    s.compose_projects
+        .retain(|t| !(t.connection_id == conn_id && t.name == name));
+    if s.compose_projects.len() == before {
+        return Err(format!("项目 {name} 没有本地跟踪记录"));
+    }
+    settings::save(&app, &s)?;
+    Ok(())
+}
+
+/// 本地递归扫描：收集层级 ≤3 的 compose 文件（与 find -maxdepth 3 对齐），
+/// 跳过隐藏目录与 node_modules，符号链接不跟随
+async fn scan_dir_local(dir: &Path, levels_left: u8, out: &mut Vec<String>) {
+    if levels_left == 0 {
+        return;
+    }
+    let Ok(mut rd) = tokio::fs::read_dir(dir).await else {
+        return;
+    };
+    while let Ok(Some(entry)) = rd.next_entry().await {
+        let Ok(ft) = entry.file_type().await else {
+            continue;
+        };
+        let name = entry.file_name().to_string_lossy().to_string();
+        if ft.is_file() {
+            if is_compose_file_name(&name) {
+                out.push(entry.path().to_string_lossy().to_string());
+            }
+        } else if ft.is_dir() && levels_left > 1 && !name.starts_with('.') && name != "node_modules"
+        {
+            Box::pin(scan_dir_local(&entry.path(), levels_left - 1, out)).await;
+        }
+    }
+}
+
+/// 远程扫描：经 ssh 在远端 find（stderr 丢弃，部分目录不存在不阻塞其余目录）
+async fn scan_dirs_remote(p: &ConnectionProfile, dirs: &[String]) -> CmdResult<Vec<String>> {
+    let dir_list = dirs
+        .iter()
+        .map(|d| sh_path(d))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let names = COMPOSE_FILE_NAMES
+        .iter()
+        .map(|n| format!("-name {n}"))
+        .collect::<Vec<_>>()
+        .join(" -o ");
+    let remote = format!("find {dir_list} -maxdepth 3 \\( {names} \\) -type f 2>/dev/null");
+    let out = ssh_output(p, &remote, 30).await?;
+    Ok(String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .map(String::from)
+        .collect())
+}
+
+/// 扫描当前连接配置的目录，把发现的 compose 文件写入跟踪记录（source=scanned，
+/// 已有记录不降级来源）。仅手动触发，结果持久化——未运行的项目由此保持可见
+#[tauri::command]
+pub async fn scan_compose_dirs(app: tauri::AppHandle) -> CmdResult<ScanComposeResultDto> {
+    let conn_id = active_connection_id();
+    let mut s = settings::load(&app);
+    let dirs: Vec<String> = s
+        .compose_scan_dirs
+        .iter()
+        .filter(|d| d.connection_id == conn_id)
+        .map(|d| d.path.clone())
+        .collect();
+    if dirs.is_empty() {
+        return Err("当前连接尚未配置扫描目录".into());
+    }
+
+    let mut files: Vec<String> = Vec::new();
+    if let Some(p) = ssh_profile() {
+        files = scan_dirs_remote(&p, &dirs).await?;
+    } else {
+        for dir in &dirs {
+            scan_dir_local(Path::new(dir), 3, &mut files).await;
+        }
+    }
+    files.sort();
+    files.dedup();
+
+    let mut tracked = std::mem::take(&mut s.compose_projects);
+    let mut discovered = 0usize;
+    for f in &files {
+        let Ok(content) = read_compose_file(f.clone()).await else {
+            continue;
+        };
+        let name = compose_project_name(&content, f);
+        if name.is_empty() {
+            continue;
+        }
+        let working_dir = Path::new(f)
+            .parent()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_default();
+        if upsert_tracked(
+            &mut tracked,
+            &conn_id,
+            &name,
+            &working_dir,
+            std::slice::from_ref(f),
+            "scanned",
+        ) {
+            discovered += 1;
+        }
+    }
+    let tracked_total = tracked
+        .iter()
+        .filter(|t| t.connection_id == conn_id)
+        .count();
+    if discovered > 0 {
+        s.compose_projects = tracked;
+        settings::save(&app, &s).map_err(|e| format!("保存扫描结果失败: {e}"))?;
+    }
+    log::info!(
+        "编排扫描完成：发现 {discovered} 个新项目（共 {} 个文件）",
+        files.len()
+    );
+    Ok(ScanComposeResultDto {
+        found: files.len(),
+        discovered,
+        tracked_total,
+    })
 }
 
 /// 只读查看 compose 文件内容（限制扩展名与大小；ssh 连接时读取远程文件）
@@ -957,6 +1281,178 @@ mod tests {
         first.working_dir = None;
         let projects = group_projects(vec![first, snap("b", Some("app"), Some("b"), "running")]);
         assert_eq!(projects[0].working_dir, "/tmp/proj");
+    }
+
+    fn proj_dto(name: &str, source: &str) -> ComposeProjectDto {
+        ComposeProjectDto {
+            name: name.into(),
+            working_dir: "/tmp/proj".into(),
+            config_files: vec!["/tmp/proj/compose.yaml".into()],
+            services: vec![],
+            running_count: 1,
+            total_count: 1,
+            source: source.into(),
+        }
+    }
+
+    fn tracked(conn: &str, name: &str, source: &str) -> TrackedComposeProject {
+        TrackedComposeProject {
+            id: format!("id-{conn}-{name}"),
+            connection_id: conn.into(),
+            name: name.into(),
+            working_dir: format!("/tracked/{name}"),
+            config_files: vec![format!("/tracked/{name}/compose.yaml")],
+            source: source.into(),
+            added_at: 0,
+        }
+    }
+
+    #[test]
+    fn upsert_tracked_appends_and_updates() {
+        let mut tracked = Vec::new();
+        assert!(upsert_tracked(
+            &mut tracked,
+            "local",
+            "app",
+            "/a",
+            &["/a/compose.yaml".into()],
+            "remembered"
+        ));
+        assert_eq!(tracked.len(), 1);
+        assert_eq!(tracked[0].source, "remembered");
+
+        // 相同路径重复记忆 → 无变化（调用方可跳过写盘）
+        assert!(!upsert_tracked(
+            &mut tracked,
+            "local",
+            "app",
+            "/a",
+            &["/a/compose.yaml".into()],
+            "remembered"
+        ));
+        assert_eq!(tracked.len(), 1);
+
+        // 路径变化 → 更新，来源不降级
+        assert!(upsert_tracked(
+            &mut tracked,
+            "local",
+            "app",
+            "/b",
+            &["/b/compose.yaml".into()],
+            "remembered"
+        ));
+        assert_eq!(tracked[0].working_dir, "/b");
+
+        // 不同连接同名 → 独立记录
+        assert!(upsert_tracked(
+            &mut tracked,
+            "ssh-1",
+            "app",
+            "/x",
+            &["/x/compose.yaml".into()],
+            "scanned"
+        ));
+        assert_eq!(tracked.len(), 2);
+        assert_eq!(tracked[1].source, "scanned");
+
+        // 缺名称或缺配置文件 → 忽略
+        assert!(!upsert_tracked(
+            &mut tracked,
+            "local",
+            "",
+            "/a",
+            &["/a/f.yaml".into()],
+            "remembered"
+        ));
+        assert!(!upsert_tracked(
+            &mut tracked,
+            "local",
+            "x",
+            "/a",
+            &[],
+            "remembered"
+        ));
+        assert_eq!(tracked.len(), 2);
+    }
+
+    #[test]
+    fn merge_projects_prefers_containers_and_fills_tracked() {
+        let containers = vec![proj_dto("app", "containers")];
+        let records = vec![
+            tracked("local", "app", "registered"),
+            tracked("local", "ghost", "remembered"),
+            // 其他连接的记录不参与合并
+            tracked("ssh-1", "remote", "remembered"),
+        ];
+        let merged = merge_projects(containers, &records, "local");
+        assert_eq!(merged.len(), 2);
+        assert_eq!(merged[0].name, "app");
+        assert_eq!(merged[0].source, "containers", "容器识别优先");
+        assert_eq!(merged[1].name, "ghost");
+        assert_eq!(merged[1].source, "remembered");
+        assert_eq!(merged[1].total_count, 0);
+        assert_eq!(merged[1].running_count, 0);
+        assert!(merged[1].services.is_empty());
+
+        // 容器项目路径字段缺失时以跟踪记录补全
+        let mut bare = proj_dto("ghost2", "containers");
+        bare.working_dir = String::new();
+        bare.config_files = Vec::new();
+        let merged = merge_projects(
+            vec![bare],
+            &[tracked("local", "ghost2", "registered")],
+            "local",
+        );
+        assert_eq!(merged[0].working_dir, "/tracked/ghost2");
+        assert_eq!(merged[0].config_files, vec!["/tracked/ghost2/compose.yaml"]);
+    }
+
+    #[test]
+    fn merge_projects_sorts_by_name() {
+        // 跟踪记录补入后整体仍按名称稳定排序
+        let merged = merge_projects(
+            vec![proj_dto("zzz", "containers")],
+            &[tracked("local", "aaa", "remembered")],
+            "local",
+        );
+        let names: Vec<_> = merged.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(names, vec!["aaa", "zzz"]);
+    }
+
+    #[test]
+    fn compose_project_name_from_field_or_dir() {
+        assert_eq!(
+            compose_project_name("name: myapp\nservices: {}", "/x/y/compose.yaml"),
+            "myapp"
+        );
+        assert_eq!(
+            compose_project_name("name: \"quoted\"\n", "/x/y/compose.yaml"),
+            "quoted"
+        );
+        // 缩进的 name: 是 service 级字段，不能当作项目名
+        assert_eq!(
+            compose_project_name(
+                "services:\n  web:\n    name: inner\n",
+                "/apps/blog/compose.yaml"
+            ),
+            "blog"
+        );
+        assert_eq!(
+            compose_project_name("services: {}\n", "/apps/blog/docker-compose.yml"),
+            "blog"
+        );
+        assert_eq!(compose_project_name("services: {}\n", "/compose.yaml"), "");
+    }
+
+    #[test]
+    fn compose_file_name_match() {
+        for f in COMPOSE_FILE_NAMES {
+            assert!(is_compose_file_name(f));
+        }
+        assert!(is_compose_file_name("Compose.YAML"));
+        assert!(!is_compose_file_name("compose.yaml.bak"));
+        // 超集文件名不匹配（override 文件需显式 -f，不在自动扫描范围）
+        assert!(!is_compose_file_name("docker-compose.override.yaml"));
     }
 
     #[test]

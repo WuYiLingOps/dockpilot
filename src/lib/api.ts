@@ -41,6 +41,7 @@ import type {
   ComposeCliInfoDto,
   ComposeOutput,
   ComposeProjectDto,
+  ScanComposeResultDto,
 } from "../types/compose";
 import type {
   AppLogCleanupResult,
@@ -403,4 +404,15 @@ export const api = {
   /** 保存 compose 文件（保存前做语法预检并自动备份原文件为 .bak） */
   writeComposeFile: (path: string, content: string) =>
     invoke<void>("write_compose_file", { path, content }),
+
+  /** 手动注册编排：读取 compose 文件推导项目名（name 缺省时）并写入本地跟踪 */
+  addTrackedComposeProject: (path: string, name?: string) =>
+    invoke<void>("add_tracked_compose_project", { path, name: name || null }),
+
+  /** 移除当前连接下指定项目的本地跟踪记录 */
+  removeTrackedComposeProject: (name: string) =>
+    invoke<void>("remove_tracked_compose_project", { name }),
+
+  /** 扫描当前连接配置的目录，发现 compose 文件并写入跟踪记录 */
+  scanComposeDirs: () => invoke<ScanComposeResultDto>("scan_compose_dirs"),
 };

@@ -56,6 +56,30 @@ export interface AppSettings {
   log_retention_days: number;
   /** 镜像仓库凭据列表（密码不在此处，由系统钥匙串/加密文件保存） */
   registries: RegistryProfile[];
+  /** 编排跟踪记录（未运行的 compose 项目仍可见，按连接绑定，不参与云同步） */
+  compose_projects: TrackedComposeProject[];
+  /** 编排扫描目录（按连接绑定） */
+  compose_scan_dirs: ComposeScanDir[];
+}
+
+/** 编排跟踪记录（与后端 TrackedComposeProject 对应） */
+export interface TrackedComposeProject {
+  id: string;
+  connection_id: string;
+  /** compose 项目名（重建 CLI 命令时的 -p 参数值） */
+  name: string;
+  working_dir: string;
+  config_files: string[];
+  /** remembered = 容器标签自动记忆；registered = 手动添加；scanned = 目录扫描发现 */
+  source: "remembered" | "registered" | "scanned";
+  added_at: number;
+}
+
+/** 编排扫描目录 */
+export interface ComposeScanDir {
+  id: string;
+  connection_id: string;
+  path: string;
 }
 
 /** 镜像仓库类型（决定域名预设与提示文案） */

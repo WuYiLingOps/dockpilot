@@ -35,6 +35,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   debug_logging: false,
   log_retention_days: 14,
   registries: [],
+  compose_projects: [],
+  compose_scan_dirs: [],
 };
 
 /** 当前活跃连接配置（列表异常时回落默认本地连接） */

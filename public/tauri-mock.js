@@ -190,13 +190,42 @@
     },
   ];
   settings.registries = registries;
+  settings.compose_projects = trackedComposeProjects;
+  settings.compose_scan_dirs = composeScanDirs;
 
   // ---- 编排（docker compose）----
   const composeProjectDir = (name) => `/home/user/${name}`;
 
-  /** 从容器数组实时聚合 compose 项目，与真实后端的标签分组口径一致 */
+  // 本地跟踪的编排（浏览器走查：一个手动添加的未运行项目）
+  const composeScanDirs = [
+    { id: "mock-scan-1", connection_id: "local", path: "/home/user/stacks" },
+  ];
+  const trackedComposeProjects = [
+    {
+      id: "mock-track-1",
+      connection_id: "local",
+      name: "monitoring-stack",
+      working_dir: "/home/user/stacks/monitoring",
+      config_files: ["/home/user/stacks/monitoring/compose.yaml"],
+      source: "registered",
+      added_at: now - 86400 * 3,
+    },
+  ];
+
+  /** 从容器数组实时聚合 compose 项目（含本地跟踪记录），与真实后端口径一致 */
   function composeProjects() {
     const byProject = new Map();
+    for (const t of trackedComposeProjects) {
+      byProject.set(t.name, {
+        name: t.name,
+        working_dir: t.working_dir,
+        config_files: [...t.config_files],
+        services: [],
+        running_count: 0,
+        total_count: 0,
+        source: t.source,
+      });
+    }
     for (const c of containers) {
       if (!c.compose_project) continue;
       if (!byProject.has(c.compose_project)) {
@@ -207,6 +236,7 @@
           services: [],
           running_count: 0,
           total_count: 0,
+          source: "containers",
         });
       }
       const p = byProject.get(c.compose_project);
@@ -221,7 +251,7 @@
       p.total_count++;
       if (c.state === "running") p.running_count++;
     }
-    return [...byProject.values()];
+    return [...byProject.values()].sort((a, b) => a.name.localeCompare(b.name));
   }
 
   const composeYamlSample = `services:
@@ -1012,6 +1042,35 @@ volumes:
           return Promise.resolve(composeYamlSample);
         case "write_compose_file":
           return new Promise((resolve) => setTimeout(resolve, 400));
+        case "add_tracked_compose_project":
+          trackedComposeProjects.push({
+            id: `mock-track-${trackedComposeProjects.length + 1}`,
+            connection_id: "local",
+            name: args.name || args.path.split("/").slice(-2)[0] || "new-stack",
+            working_dir: args.path.replace(/\/[^/]+$/, ""),
+            config_files: [args.path],
+            source: "registered",
+            added_at: now,
+          });
+          return Promise.resolve();
+        case "remove_tracked_compose_project": {
+          const i = trackedComposeProjects.findIndex((t) => t.name === args.name);
+          if (i >= 0) trackedComposeProjects.splice(i, 1);
+          return Promise.resolve();
+        }
+        case "scan_compose_dirs":
+          if (!trackedComposeProjects.some((t) => t.name === "logs-archive")) {
+            trackedComposeProjects.push({
+              id: "mock-track-scan",
+              connection_id: "local",
+              name: "logs-archive",
+              working_dir: "/home/user/stacks/logs-archive",
+              config_files: ["/home/user/stacks/logs-archive/compose.yaml"],
+              source: "scanned",
+              added_at: now,
+            });
+          }
+          return Promise.resolve({ found: 2, discovered: 1, tracked_total: trackedComposeProjects.length });
         case "plugin:dialog|open":
           return Promise.resolve("/home/user/myapp-stack/compose.yaml");
         case "plugin:dialog|save":

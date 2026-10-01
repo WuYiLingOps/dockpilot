@@ -108,6 +108,19 @@ pub struct ComposeProjectDto {
     pub services: Vec<ComposeServiceDto>,
     pub running_count: usize,
     pub total_count: usize,
+    /// "containers"（容器标签识别）| "remembered"（本地记忆）| "registered"（手动添加）| "scanned"（目录扫描）
+    pub source: String,
+}
+
+/// 目录扫描结果
+#[derive(Debug, Clone, Serialize)]
+pub struct ScanComposeResultDto {
+    /// 扫描到的 compose 文件数
+    pub found: usize,
+    /// 新增/更新的跟踪记录数
+    pub discovered: usize,
+    /// 当前连接的跟踪记录总数
+    pub tracked_total: usize,
 }
 
 #[derive(Debug, Clone, Serialize)]

@@ -88,6 +88,33 @@ pub struct RegistryProfile {
     pub created_at: i64,
 }
 
+/// 编排跟踪记录：让 down 后（容器全删）或从未 up 的 compose 项目仍可见可操作。
+/// 路径是所属连接视角的文件系统路径，因此按 connection_id 绑定连接（本地固定 "local"，
+/// SSH 各自独立），不参与云同步。
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct TrackedComposeProject {
+    pub id: String,
+    pub connection_id: String,
+    /// compose 项目名（重建 CLI 命令时的 -p 参数值）
+    pub name: String,
+    pub working_dir: String,
+    pub config_files: Vec<String>,
+    /// "remembered"（容器标签自动记忆）| "registered"（手动添加）| "scanned"（目录扫描发现）
+    pub source: String,
+    /// 创建时间（unix 秒）
+    pub added_at: i64,
+}
+
+/// 编排扫描目录：扫描其中的 compose 文件（仅手动触发），同样按连接绑定
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct ComposeScanDir {
+    pub id: String,
+    pub connection_id: String,
+    pub path: String,
+}
+
 /// 应用设置：持久化到 app_config_dir()/settings.json。
 /// 反序列化带 #[serde(default)]，旧文件缺字段自动补默认值，
 /// 文件缺失或损坏时整体回落默认值。
@@ -122,6 +149,10 @@ pub struct AppSettings {
     pub log_retention_days: u32,
     /// 镜像仓库凭据列表（密码不在此处，见 secret_store）
     pub registries: Vec<RegistryProfile>,
+    /// 编排跟踪记录（未运行的 compose 项目仍可见，按连接绑定）
+    pub compose_projects: Vec<TrackedComposeProject>,
+    /// 编排扫描目录（按连接绑定）
+    pub compose_scan_dirs: Vec<ComposeScanDir>,
 }
 
 impl Default for AppSettings {
@@ -143,8 +174,18 @@ impl Default for AppSettings {
             debug_logging: false,
             log_retention_days: 14,
             registries: Vec::new(),
+            compose_projects: Vec::new(),
+            compose_scan_dirs: Vec::new(),
         }
     }
+}
+
+/// 当前 unix 秒（时间戳字段统一取值入口）
+pub fn now_secs() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
 }
 
 /// 旧配置迁移：仅有 docker_socket 时转为"本地"连接；
@@ -285,6 +326,53 @@ pub fn sanitize(mut s: AppSettings) -> AppSettings {
     // 缺地址或用户名的凭据无法使用，直接丢弃
     s.registries
         .retain(|r| !r.registry.is_empty() && !r.username.is_empty());
+
+    // 编排跟踪记录：归一化 + 丢弃无效值（缺名称/配置文件、所属连接已删除）+ 双重去重。
+    // 记录绑定连接（路径为连接视角），随连接删除一并清理
+    let valid_conn: HashSet<String> = s.connections.iter().map(|c| c.id.clone()).collect();
+    for t in &mut s.compose_projects {
+        t.name = t.name.trim().to_string();
+        t.connection_id = t.connection_id.trim().to_string();
+        t.working_dir = t.working_dir.trim().to_string();
+        t.config_files = t
+            .config_files
+            .iter()
+            .map(|f| f.trim().to_string())
+            .filter(|f| !f.is_empty())
+            .collect();
+        if !matches!(t.source.as_str(), "remembered" | "registered" | "scanned") {
+            t.source = "remembered".into();
+        }
+        if t.added_at <= 0 {
+            t.added_at = now_secs();
+        }
+        if t.id.is_empty() {
+            t.id = uuid::Uuid::new_v4().to_string();
+        }
+    }
+    s.compose_projects.retain(|t| {
+        !t.name.is_empty() && !t.config_files.is_empty() && valid_conn.contains(&t.connection_id)
+    });
+    let mut seen_tracked = HashSet::new();
+    s.compose_projects
+        .retain(|t| seen_tracked.insert((t.connection_id.clone(), t.name.clone())));
+    let mut seen_tracked_id = HashSet::new();
+    s.compose_projects
+        .retain(|t| seen_tracked_id.insert(t.id.clone()));
+
+    // 编排扫描目录：归一化 + 丢弃空路径/孤儿 + (connection_id, path) 去重
+    for d in &mut s.compose_scan_dirs {
+        d.path = d.path.trim().trim_end_matches('/').to_string();
+        if d.id.is_empty() {
+            d.id = uuid::Uuid::new_v4().to_string();
+        }
+    }
+    let mut seen_scan = HashSet::new();
+    s.compose_scan_dirs.retain(|d| {
+        !d.path.is_empty()
+            && valid_conn.contains(&d.connection_id)
+            && seen_scan.insert((d.connection_id.clone(), d.path.clone()))
+    });
     s
 }
 
@@ -726,5 +814,93 @@ mod tests {
             new.registries[0].registry,
             "registry.cn-hangzhou.aliyuncs.com"
         );
+    }
+
+    #[test]
+    fn sanitize_compose_tracking_fields() {
+        let mk_ssh = || ConnectionProfile {
+            id: "ssh-1".into(),
+            name: "vps".into(),
+            kind: "ssh".into(),
+            host: "root@10.0.0.5".into(),
+            ..Default::default()
+        };
+        let s = sanitize(AppSettings {
+            connections: vec![ConnectionProfile::default_local(), mk_ssh()],
+            compose_projects: vec![
+                TrackedComposeProject {
+                    connection_id: "local".into(),
+                    name: "  app ".into(),
+                    working_dir: " /tmp/app ".into(),
+                    config_files: vec![" /tmp/app/compose.yaml ".into(), String::new()],
+                    source: "weird".into(),
+                    ..Default::default()
+                },
+                // 缺配置文件 → 丢弃
+                TrackedComposeProject {
+                    connection_id: "local".into(),
+                    name: "no-files".into(),
+                    ..Default::default()
+                },
+                // 所属连接已删除 → 丢弃
+                TrackedComposeProject {
+                    connection_id: "ghost".into(),
+                    name: "orphan".into(),
+                    config_files: vec!["/x/compose.yaml".into()],
+                    ..Default::default()
+                },
+                // 同连接同名重复 → 保留首个
+                TrackedComposeProject {
+                    connection_id: "local".into(),
+                    name: "app".into(),
+                    config_files: vec!["/y/compose.yaml".into()],
+                    ..Default::default()
+                },
+            ],
+            compose_scan_dirs: vec![
+                ComposeScanDir {
+                    connection_id: "local".into(),
+                    path: " /tmp/stacks/ ".into(),
+                    ..Default::default()
+                },
+                // 归一化后与上一条重复 → 丢弃
+                ComposeScanDir {
+                    connection_id: "local".into(),
+                    path: "/tmp/stacks".into(),
+                    ..Default::default()
+                },
+                // 所属连接已删除 → 丢弃
+                ComposeScanDir {
+                    connection_id: "ghost".into(),
+                    path: "/x".into(),
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        });
+        assert_eq!(s.compose_projects.len(), 1);
+        let t = &s.compose_projects[0];
+        assert_eq!(t.name, "app");
+        assert_eq!(t.working_dir, "/tmp/app");
+        assert_eq!(t.config_files, vec!["/tmp/app/compose.yaml"]);
+        assert_eq!(t.source, "remembered", "非法 source 应回落 remembered");
+        assert!(t.added_at > 0, "空 added_at 应回落当前时间");
+        assert!(!t.id.is_empty(), "空 id 应回落自动生成");
+        assert_eq!(s.compose_scan_dirs.len(), 1);
+        assert_eq!(s.compose_scan_dirs[0].path, "/tmp/stacks");
+        assert!(!s.compose_scan_dirs[0].id.is_empty());
+    }
+
+    #[test]
+    fn parse_keeps_compose_tracking_from_old_configs() {
+        // 旧配置无编排跟踪字段 → serde default 补空列表；新配置可正常读回
+        let old = parse_settings(r#"{"theme":"dark"}"#);
+        assert!(old.compose_projects.is_empty());
+        assert!(old.compose_scan_dirs.is_empty());
+        let new = parse_settings(
+            r#"{"compose_projects":[{"connection_id":"local","name":"app","config_files":["/a/compose.yaml"],"source":"registered"}]}"#,
+        );
+        assert_eq!(new.compose_projects.len(), 1);
+        assert_eq!(new.compose_projects[0].source, "registered");
     }
 }

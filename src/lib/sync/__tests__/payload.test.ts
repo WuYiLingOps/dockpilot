@@ -22,6 +22,8 @@ const localSettings = (): AppSettings => ({
   registries: [
     { id: "r1", name: "本机仓库", kind: "harbor", registry: "harbor.local", username: "u", secret_backend: "file", skip_tls_verify: false, created_at: 1 },
   ],
+  compose_projects: [],
+  compose_scan_dirs: [],
 });
 
 describe("载荷映射", () => {
@@ -29,6 +31,19 @@ describe("载荷映射", () => {
     const p = toSyncPayload(localSettings());
     expect(p.registries[0].secret_backend).toBe("");
     expect(p.connections[0].id).toBe("local");
+  });
+
+  it("编排跟踪记录与扫描目录不入云同步载荷（路径机器/连接相关）", () => {
+    const settings = {
+      ...localSettings(),
+      compose_projects: [
+        { id: "t1", connection_id: "local", name: "app", working_dir: "/a", config_files: ["/a/compose.yaml"], source: "registered" as const, added_at: 1 },
+      ],
+      compose_scan_dirs: [{ id: "d1", connection_id: "local", path: "/stacks" }],
+    };
+    const p = toSyncPayload(settings);
+    expect(p).not.toHaveProperty("compose_projects");
+    expect(p).not.toHaveProperty("compose_scan_dirs");
   });
 
   it("applySyncPayload 保留本机 active_connection_id / docker_socket / 已有 secret_backend", () => {

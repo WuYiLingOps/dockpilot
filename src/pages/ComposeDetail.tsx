@@ -128,7 +128,7 @@ export function ComposeDetail({
             </h1>
             <span className="inline-flex items-center gap-1.5 text-[12px] font-medium text-fg2">
               <StatusDot state={projectState(p)} />
-              {p.running_count}/{p.total_count} 运行
+              {p.total_count === 0 ? "未运行（本地跟踪）" : `${p.running_count}/${p.total_count} 运行`}
             </span>
             <span
               className="hidden min-w-0 max-w-[24rem] shrink-[4] truncate font-mono text-[11px] text-fg3 lg:inline"
@@ -196,7 +196,14 @@ export function ComposeDetail({
                 <div>端口</div>
                 <div />
               </div>
-              {p.services.map((s) => (
+              {p.services.length === 0 ? (
+                <div className="px-4 py-10 text-center text-[12px] leading-5 text-fg3">
+                  项目未运行，暂无容器信息。
+                  <br />
+                  点上方「启动」以 docker compose up 拉起全部服务，或点 <FileText size={12} className="inline" /> 查看 compose 配置。
+                </div>
+              ) : (
+                p.services.map((s) => (
                 <div
                   key={s.container_id}
                   onClick={() => onOpenContainer(s.container_id)}
@@ -269,7 +276,8 @@ export function ComposeDetail({
                     )}
                   </div>
                 </div>
-              ))}
+              ))
+              )}
             </div>
           </div>
 

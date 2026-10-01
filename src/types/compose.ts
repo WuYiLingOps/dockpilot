@@ -11,6 +11,9 @@ export interface ComposeServiceDto {
   ports: PortDto[];
 }
 
+/** 项目来源：containers = 运行容器标签识别；其余为本地跟踪（down 后/未 up 也可见） */
+export type ComposeSource = "containers" | "remembered" | "registered" | "scanned";
+
 export interface ComposeProjectDto {
   name: string;
   working_dir: string;
@@ -19,6 +22,7 @@ export interface ComposeProjectDto {
   services: ComposeServiceDto[];
   running_count: number;
   total_count: number;
+  source: ComposeSource;
 }
 
 export interface ComposeCliInfoDto {
@@ -34,4 +38,14 @@ export interface ComposeOutput {
   data: string;
   code: number | null;
   error: string | null;
+}
+
+/** 目录扫描结果（与后端 ScanComposeResultDto 对应） */
+export interface ScanComposeResultDto {
+  /** 扫描到的 compose 文件数 */
+  found: number;
+  /** 新增/更新的跟踪记录数 */
+  discovered: number;
+  /** 当前连接的跟踪记录总数 */
+  tracked_total: number;
 }

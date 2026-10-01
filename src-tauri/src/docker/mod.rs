@@ -117,12 +117,18 @@ mod tests {
     }
 
     /// 依赖本机 Docker daemon 的 compose 分组集成测试：
-    /// 验证 list_compose_projects 查询与分组路径可用（不要求本机存在 compose 项目）
+    /// 验证容器查询与标签分组路径可用（不要求本机存在 compose 项目）
     #[tokio::test]
     async fn compose_projects_grouped() {
-        let projects = compose::list_compose_projects()
+        let d = conn::docker().await.expect("应能连接本机 daemon");
+        let list = d
+            .list_containers(Some(bollard::container::ListContainersOptions::<String> {
+                all: true,
+                ..Default::default()
+            }))
             .await
-            .expect("list_compose_projects 应成功");
+            .expect("容器列表查询应成功");
+        let projects = compose::group_projects(list.iter().map(compose::snapshot).collect());
         for p in &projects {
             assert!(!p.name.is_empty(), "项目名不应为空");
             assert_eq!(p.services.len(), p.total_count, "服务数应与容器总数一致");
