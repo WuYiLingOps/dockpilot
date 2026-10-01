@@ -368,10 +368,50 @@ sudo systemctl restart docker
 | 测试连接超时 | 地址 / 端口 / 防火墙：`nc -zv 主机 端口` |
 | SSH 报 Permission denied | 免密未配置或私钥不对：`ssh -o BatchMode=yes user@host docker version` 验证 |
 | SSH 隧道建立超时 | 检查远程 Docker socket 路径、登录用户的 Docker 权限，以及 Windows 本机是否启用了 OpenSSH Client |
-| SSH 报 `连接不可达: Error in the hyper legacy client: client error(sendRequest)` | 远程 sshd 禁用了 TCP 转发（隧道依赖它）：编辑远程 `/etc/ssh/sshd_config` 把 `AllowTcpForwarding` 改为 `yes`，重启 sshd（`sudo systemctl restart sshd`，Debian/Ubuntu 服务名为 `ssh`）后重试 |
+| SSH 报 `连接不可达: Error in the hyper legacy client: client error (SendRequest)` | SSH 隧道正常，是请求 Docker API 时远端拒绝了 socket 转发通道，两种原因见下方「SSH 隧道报 client error (SendRequest)」：sshd 禁用了转发；或远程为 OpenSSH ≤ 7.4（如 CentOS 7）且以 root 登录 |
 | TLS 报证书文件缺失 | 证书目录下需同时有 `ca.pem`、`cert.pem`、`key.pem` |
 | 拉取 / 容器操作报权限错误 | 远程用户不在 docker 组：`sudo usermod -aG docker $USER` 后重新登录 |
 | 远程机改了配置但不生效 | `systemd override` 配置后需 `sudo systemctl daemon-reload && sudo systemctl restart docker` |
+
+#### SSH 隧道报 client error (SendRequest)
+
+`连接不可达: Error in the hyper legacy client: client error (SendRequest)` 表示 SSH 连接与隧道本身正常，失败发生在经隧道请求 Docker API 时：本地 ssh 向远端发起 `direct-streamlocal` 通道（连接 `/var/run/docker.sock`）被拒绝，连接随即关闭。两种原因：
+
+**原因一：sshd 禁用了转发（隧道依赖它）**。编辑远程 `/etc/ssh/sshd_config` 把 `AllowTcpForwarding` 改为 `yes`，重启 sshd（`sudo systemctl restart sshd`，Debian/Ubuntu 服务名为 `ssh`）后重试。
+
+**原因二：远程为 OpenSSH ≤ 7.4（典型如 CentOS 7）且以 root 登录**。7.4 及更早版本对 root 会话关闭特权分离（`privsep_postauth()` 将 `use_privsep` 置 0），而其 unix socket 转发实现要求 `use_privsep`，于是 root 的 unix socket 转发被无条件拒绝——与 sshd 任何配置无关，7.5（2017-03）起已修复（CentOS 7 官方源停留在 7.4）。任选其一绕开：
+
+- 改用**非 root 账号**连接（非 root 会话特权分离保持开启），并保证该账号能访问 docker socket——完整命令见下方
+- 让 dockerd 额外监听本机 TCP：远程 `docker.service` 的 `ExecStart` 追加 `-H tcp://127.0.0.1:2375`（写法参照上文 TLS 一节的 override），`daemon-reload` 并重启 docker 后，把连接配置的「远程 Socket 路径」填 `127.0.0.1:2375`——转发目标为 `host:port` 时走 TCP 转发通道（direct-tcpip），不受该 bug 影响。仅监听 127.0.0.1 且无 TLS，请勿改为 `0.0.0.0` 对外开放
+- 升级远程 sshd 到 7.5+（CentOS 7 已 EOL，需自行编译或第三方包，一般不建议为此折腾）
+
+改用专用账号的完整命令（以在远程机创建账号 `dockpilot`、地址 `10.0.0.117` 为例）：
+
+```bash
+# —— 远程机（10.0.0.117）上执行 ——
+# 1. 创建专用账号并设置密码（密码仅用于下一步首次部署公钥）
+sudo useradd -m dockpilot
+sudo passwd dockpilot
+
+# 2. 让 dockerd 改用 docker 组创建 socket
+#    （该机 /var/run/docker.sock 属组为 root，普通账号无权访问）
+sudo groupadd -f docker
+#    编辑 /lib/systemd/system/docker.service，在 ExecStart 行追加 -G docker，例如：
+#      ExecStart=/usr/local/bin/dockerd -H unix://var/run/docker.sock -G docker
+sudo systemctl daemon-reload && sudo systemctl restart docker
+
+# 3. 账号加入 docker 组（组成员等同 root 权限，仅添加可信账号）
+sudo usermod -aG docker dockpilot
+
+# —— 本机执行 ——
+# 4. 部署公钥（输入上一步设置的密码），并验证免密登录与 docker 权限
+ssh-copy-id dockpilot@10.0.0.117
+ssh -o BatchMode=yes dockpilot@10.0.0.117 docker version
+
+# 5. 在 DockPilot「连接管理」中把该连接的地址改为 dockpilot@10.0.0.117
+```
+
+验证方法：`ssh -v -N -L /tmp/t.sock:/var/run/docker.sock root@远程机`，另开终端执行 `curl --unix-socket /tmp/t.sock http://localhost/_ping`；若 ssh 输出 `open failed: administratively prohibited` 即命中上述两种原因之一。
 
 ### 远程连接集成测试
 
