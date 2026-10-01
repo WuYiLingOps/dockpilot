@@ -1,6 +1,6 @@
 name: CI
 
-# 提交与 PR 的质量门禁：前端类型检查 + vitest，Rust 格式/clippy/测试。
+# 提交与 PR 的质量门禁：前端类型检查 + vitest，Rust 格式/clippy/测试，Windows 编译检查。
 # 发版验证由 release.yml 承担，本流水线保证 main 分支随时可发。
 # 纯文档 / 设计资源改动不触发（代码未变时验证无意义）；手动触发不受此限
 on:
@@ -52,7 +52,8 @@ jobs:
   rust:
     name: Rust（fmt + clippy + test）
     # ubuntu-22.04 与 release.yml 的 Linux 构建矩阵一致；集成测试依赖本机
-    # Docker daemon，Windows 无本地 daemon 且用例仅 unix 编译，故不设 Windows job
+    # Docker daemon（Windows runner 没有），测试仅在本 job 跑；cfg(windows)
+    # 代码路径的编译检查由下方 windows-check job 承担
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -99,6 +100,28 @@ jobs:
       # 会产生竞态，故强制串行；全部测试仅数秒，无时长影响
       - name: 测试
         run: cargo test --manifest-path src-tauri/Cargo.toml --lib -- --test-threads=1
+
+  windows-check:
+    name: Windows（编译检查）
+    # 平台盲区防护：cfg(windows) 代码在 Linux job 不可见，ssh_client 隧道绑定
+    # 的 Windows 专属编译错误直到发版构建才暴露。仅做编译检查——测试需要本机
+    # Docker daemon（Windows runner 没有），fmt/clippy 与 Linux job 一致，
+    # 完整构建与安装包产出由 release.yml 承担
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: 缓存 Cargo 编译产物
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      # 与 release.yml 的 Windows 构建同环境（runner 自带 WebView2 与 C 工具链，
+      # 依赖无需额外安装）；lib + bins 覆盖 tauri build 的编译范围（不含测试目标）
+      - name: 编译检查
+        run: cargo check --manifest-path src-tauri/Cargo.toml
 
   ssh-smoke:
     name: SSH 冒烟（sshd 容器 × russh 密码认证）
