@@ -200,8 +200,7 @@ pub async fn read_daemon_config() -> CmdResult<DaemonConfigDto> {
 pub async fn validate_daemon_json(content: String) -> CmdResult<DaemonValidationDto> {
     unsupported_platform()?;
     let (exists, current_raw) = read_daemon_raw()?;
-    let (mut errors, warnings) =
-        validate_content(&content, exists.then(|| current_raw.as_str()));
+    let (mut errors, warnings) = validate_content(&content, exists.then_some(current_raw.as_str()));
     let mut deep_checked = false;
     if errors.is_empty() {
         let (ok, deep_errors) = deep_validate(&content).await;
@@ -258,7 +257,9 @@ pub async fn write_daemon_json(content: String) -> CmdResult<()> {
             return Err("已取消授权，未修改配置".into());
         }
         log::warn!("daemon.json 写入失败：{stderr}");
-        return Err(format!("写入 daemon.json 失败: {stderr}（可在下方改用终端命令手动执行）"));
+        return Err(format!(
+            "写入 daemon.json 失败: {stderr}（可在下方改用终端命令手动执行）"
+        ));
     }
     log::info!(
         "daemon.json 已写入（{}）",
@@ -379,8 +380,7 @@ mod tests {
 
     #[test]
     fn validate_warns_hosts_key() {
-        let (_, warnings) =
-            validate_content(r#"{"hosts":["unix:///var/run/docker.sock"]}"#, None);
+        let (_, warnings) = validate_content(r#"{"hosts":["unix:///var/run/docker.sock"]}"#, None);
         assert!(warnings.iter().any(|w| w.contains("hosts")));
         let (_, warnings) = validate_content(r#"{"debug":true}"#, None);
         assert!(warnings.is_empty());
@@ -397,8 +397,7 @@ mod tests {
         let (_, warnings) = validate_content(r#"{"data-root":"/srv/docker"}"#, Some(current));
         assert!(warnings.iter().any(|w| w.contains("data-root")));
         // 当前文件解析失败时忽略对比
-        let (_, warnings) =
-            validate_content(r#"{"storage-driver":"overlayfs"}"#, Some("broken"));
+        let (_, warnings) = validate_content(r#"{"storage-driver":"overlayfs"}"#, Some("broken"));
         assert!(warnings.is_empty());
     }
 

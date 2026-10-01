@@ -96,7 +96,9 @@ pub async fn github_device_flow_start(
     scope: Option<String>,
 ) -> Result<DeviceFlowStart, String> {
     if client_id.trim().is_empty() {
-        return Err("缺少 GitHub OAuth App 的 client_id（构建期 VITE_SYNC_GITHUB_CLIENT_ID）".into());
+        return Err(
+            "缺少 GitHub OAuth App 的 client_id（构建期 VITE_SYNC_GITHUB_CLIENT_ID）".into(),
+        );
     }
     log::info!("开始 GitHub 设备码授权");
 
@@ -129,8 +131,12 @@ pub async fn github_device_flow_start(
         expires_in: Option<u64>,
         interval: Option<u64>,
     }
-    let raw: Raw = serde_json::from_str(&text)
-        .map_err(|_| format!("GitHub device flow 响应不是合法 JSON: {}", &text[..text.len().min(200)]))?;
+    let raw: Raw = serde_json::from_str(&text).map_err(|_| {
+        format!(
+            "GitHub device flow 响应不是合法 JSON: {}",
+            &text[..text.len().min(200)]
+        )
+    })?;
 
     Ok(DeviceFlowStart {
         device_code: raw.device_code,
@@ -171,8 +177,12 @@ pub async fn github_device_flow_poll(
 
     let status = res.status();
     let text = res.text().await.map_err(|e| format!("读取响应失败: {e}"))?;
-    let value: serde_json::Value = serde_json::from_str(&text)
-        .map_err(|_| format!("GitHub token 轮询响应不是合法 JSON: {status} - {}", &text[..text.len().min(200)]))?;
+    let value: serde_json::Value = serde_json::from_str(&text).map_err(|_| {
+        format!(
+            "GitHub token 轮询响应不是合法 JSON: {status} - {}",
+            &text[..text.len().min(200)]
+        )
+    })?;
 
     // 携带 error 字段（pending/slow_down/expired/denied）或成功拿到 token 都原样返回
     if value.get("access_token").is_some() || value.get("error").is_some() {
@@ -199,7 +209,10 @@ fn normalize_gist_raw_url(raw_url: &str) -> Result<String, String> {
 }
 
 #[tauri::command]
-pub async fn github_gist_raw_content(access_token: String, raw_url: String) -> Result<String, String> {
+pub async fn github_gist_raw_content(
+    access_token: String,
+    raw_url: String,
+) -> Result<String, String> {
     let url = normalize_gist_raw_url(&raw_url)?;
     let res = send_with_retry(
         http_client()
@@ -214,7 +227,10 @@ pub async fn github_gist_raw_content(access_token: String, raw_url: String) -> R
     let status = res.status();
     let text = res.text().await.map_err(|e| format!("读取响应失败: {e}"))?;
     if !status.is_success() {
-        return Err(format!("下载 Gist 完整内容失败: {status} - {}", &text[..text.len().min(200)]));
+        return Err(format!(
+            "下载 Gist 完整内容失败: {status} - {}",
+            &text[..text.len().min(200)]
+        ));
     }
     Ok(text)
 }
@@ -224,7 +240,9 @@ pub async fn github_gist_raw_content(access_token: String, raw_url: String) -> R
 // ---------------------------------------------------------------------------
 
 fn token_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
-    app.path().app_config_dir().map_err(|e| format!("获取配置目录失败: {e}"))
+    app.path()
+        .app_config_dir()
+        .map_err(|e| format!("获取配置目录失败: {e}"))
 }
 
 /// 保存 token：优先钥匙串，失败自动落加密文件，返回实际落点（"keyring" | "file"）
@@ -238,9 +256,13 @@ pub fn sync_save_github_token(app: tauri::AppHandle, token: String) -> Result<St
 
 /// 读取 token（按前端记录的落点）；不存在返回 None
 #[tauri::command]
-pub fn sync_load_github_token(app: tauri::AppHandle, backend: String) -> Result<Option<String>, String> {
+pub fn sync_load_github_token(
+    app: tauri::AppHandle,
+    backend: String,
+) -> Result<Option<String>, String> {
     let dir = token_dir(&app)?;
-    let parsed = SecretBackend::parse(&backend).ok_or_else(|| format!("未知的密钥存储位置: {backend}"))?;
+    let parsed =
+        SecretBackend::parse(&backend).ok_or_else(|| format!("未知的密钥存储位置: {backend}"))?;
     secret_store::load_secret(&dir, TOKEN_KEY_ID, parsed)
 }
 
@@ -248,7 +270,8 @@ pub fn sync_load_github_token(app: tauri::AppHandle, backend: String) -> Result<
 #[tauri::command]
 pub fn sync_delete_github_token(app: tauri::AppHandle, backend: String) -> Result<(), String> {
     let dir = token_dir(&app)?;
-    let parsed = SecretBackend::parse(&backend).ok_or_else(|| format!("未知的密钥存储位置: {backend}"))?;
+    let parsed =
+        SecretBackend::parse(&backend).ok_or_else(|| format!("未知的密钥存储位置: {backend}"))?;
     secret_store::delete_secret(&dir, TOKEN_KEY_ID, parsed)?;
     log::info!("GitHub 令牌已删除（断开云同步）");
     Ok(())
@@ -265,18 +288,23 @@ const SYNC_PASSWORD_KEY_ID: &str = "sync/sync_password";
 #[tauri::command]
 pub fn sync_save_sync_password(app: tauri::AppHandle, password: String) -> Result<String, String> {
     let dir = token_dir(&app)?;
-    let backend = secret_store::save_secret(&dir, SYNC_PASSWORD_KEY_ID, &password).map_err(|e| {
-        log::warn!("保存同步密码失败，本次解锁仅内存持有: {e}");
-        e
-    })?;
+    let backend =
+        secret_store::save_secret(&dir, SYNC_PASSWORD_KEY_ID, &password).map_err(|e| {
+            log::warn!("保存同步密码失败，本次解锁仅内存持有: {e}");
+            e
+        })?;
     Ok(backend.as_str().to_string())
 }
 
 /// 读取记住的同步密码（按前端记录的落点）；不存在返回 None
 #[tauri::command]
-pub fn sync_load_sync_password(app: tauri::AppHandle, backend: String) -> Result<Option<String>, String> {
+pub fn sync_load_sync_password(
+    app: tauri::AppHandle,
+    backend: String,
+) -> Result<Option<String>, String> {
     let dir = token_dir(&app)?;
-    let parsed = SecretBackend::parse(&backend).ok_or_else(|| format!("未知的密钥存储位置: {backend}"))?;
+    let parsed =
+        SecretBackend::parse(&backend).ok_or_else(|| format!("未知的密钥存储位置: {backend}"))?;
     secret_store::load_secret(&dir, SYNC_PASSWORD_KEY_ID, parsed).map_err(|e| {
         log::warn!("读取记住的同步密码失败: {e}");
         e
@@ -287,7 +315,8 @@ pub fn sync_load_sync_password(app: tauri::AppHandle, backend: String) -> Result
 #[tauri::command]
 pub fn sync_delete_sync_password(app: tauri::AppHandle, backend: String) -> Result<(), String> {
     let dir = token_dir(&app)?;
-    let parsed = SecretBackend::parse(&backend).ok_or_else(|| format!("未知的密钥存储位置: {backend}"))?;
+    let parsed =
+        SecretBackend::parse(&backend).ok_or_else(|| format!("未知的密钥存储位置: {backend}"))?;
     secret_store::delete_secret(&dir, SYNC_PASSWORD_KEY_ID, parsed)?;
     log::info!("已清除记住的同步密码");
     Ok(())

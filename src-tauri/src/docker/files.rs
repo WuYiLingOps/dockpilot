@@ -1,8 +1,8 @@
 //! 容器文件管理（等同 docker cp / docker exec ls 的能力）：
 //! - 列目录 / 删除：exec 直传 argv（不经 shell，无注入面；容器需运行中）
 //! - 上传 / 下载：archive API（tar 流；对已停止容器同样可用）
-//! 下载在内存中组装（上限 512MB），上传打包为内存 tar；
-//! 传输在后台任务执行（立即返回 stream_id），进度/错误经 Channel 推送、可取消。
+//!   下载在内存中组装（上限 512MB），上传打包为内存 tar；
+//!   传输在后台任务执行（立即返回 stream_id），进度/错误经 Channel 推送、可取消。
 
 use std::io::Cursor;
 
@@ -212,7 +212,7 @@ pub async fn container_download_file<R: tauri::Runtime>(
         // 解 tar：首个条目为文件（单文件归档）直接写 dest；
         // 目录归档（首条目为目录）则解到 dest 下（docker cp 语义）
         let mut archive = tar::Archive::new(Cursor::new(&buf));
-        let mut entries = match archive.entries() {
+        let entries = match archive.entries() {
             Ok(e) => e,
             Err(e) => {
                 finish(Some(format!("解析归档失败: {e}")), false, buf.len());
@@ -250,7 +250,11 @@ pub async fn container_download_file<R: tauri::Runtime>(
             };
             if entry.header().entry_type().is_dir() {
                 if let Err(e) = std::fs::create_dir_all(&target) {
-                    finish(Some(format!("创建目录失败（{}）: {e}", target.display())), false, buf.len());
+                    finish(
+                        Some(format!("创建目录失败（{}）: {e}", target.display())),
+                        false,
+                        buf.len(),
+                    );
                     return;
                 }
             } else {
@@ -263,12 +267,20 @@ pub async fn container_download_file<R: tauri::Runtime>(
                 match std::fs::File::create(&target) {
                     Ok(mut file) => {
                         if let Err(e) = std::io::copy(&mut entry, &mut file) {
-                            finish(Some(format!("写出文件失败（{}）: {e}", target.display())), false, buf.len());
+                            finish(
+                                Some(format!("写出文件失败（{}）: {e}", target.display())),
+                                false,
+                                buf.len(),
+                            );
                             return;
                         }
                     }
                     Err(e) => {
-                        finish(Some(format!("写入文件失败（{}）: {e}", target.display())), false, buf.len());
+                        finish(
+                            Some(format!("写入文件失败（{}）: {e}", target.display())),
+                            false,
+                            buf.len(),
+                        );
                         return;
                     }
                 }
@@ -445,8 +457,14 @@ mod tests {
         assert!(validate_container_path("/var/log").is_ok());
         assert!(validate_container_path("/").is_ok());
         assert!(validate_container_path("").is_err());
-        assert!(validate_container_path("var/log").is_err(), "相对路径应拒绝");
-        assert!(validate_container_path("/a/../etc").is_err(), ".. 分量应拒绝");
+        assert!(
+            validate_container_path("var/log").is_err(),
+            "相对路径应拒绝"
+        );
+        assert!(
+            validate_container_path("/a/../etc").is_err(),
+            ".. 分量应拒绝"
+        );
         assert!(validate_container_path("/..").is_err());
     }
 

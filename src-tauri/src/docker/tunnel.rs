@@ -77,11 +77,9 @@ pub async fn ensure(p: &ConnectionProfile) -> CmdResult<String> {
     {
         let mut map = tunnels();
         if let Some(t) = map.get_mut(&p.id) {
-            match t.child.try_wait() {
-                // 仍在运行：直接复用
-                Ok(None) => return Ok(endpoint_of(t)),
-                // 已退出或状态异常：清理后重建
-                _ => {}
+            // 仍在运行：直接复用；已退出或状态异常：清理后重建
+            if let Ok(None) = t.child.try_wait() {
+                return Ok(endpoint_of(t));
             }
         }
         map.remove(&p.id);
@@ -219,7 +217,7 @@ async fn start(p: &ConnectionProfile) -> CmdResult<String> {
     #[cfg(windows)]
     cmd.creation_flags(CREATE_NO_WINDOW);
 
-    let mut child = cmd.spawn().map_err(|e| spawn_ssh_err(e))?;
+    let mut child = cmd.spawn().map_err(spawn_ssh_err)?;
 
     // 捕获 stderr，失败时把 ssh 的诊断信息带回给前端
     let stderr = child.stderr.take();
@@ -255,7 +253,10 @@ async fn start(p: &ConnectionProfile) -> CmdResult<String> {
         let ready = tcp_ready(local);
         if ready {
             #[cfg(unix)]
-            let t = Tunnel { child, socket: local };
+            let t = Tunnel {
+                child,
+                socket: local,
+            };
             #[cfg(windows)]
             let t = Tunnel { child, port: local };
             let endpoint = endpoint_of(&t);
@@ -364,19 +365,41 @@ mod tests {
 
     #[test]
     fn args_contain_forward_and_defaults() {
-        let args = build_args(&profile("root@10.0.0.5", "", ""), "/tmp/t.sock:/var/run/docker.sock");
-        assert!(args.windows(2).any(|w| w[0] == "-L" && w[1] == "/tmp/t.sock:/var/run/docker.sock"));
+        let args = build_args(
+            &profile("root@10.0.0.5", "", ""),
+            "/tmp/t.sock:/var/run/docker.sock",
+        );
+        assert!(args
+            .windows(2)
+            .any(|w| w[0] == "-L" && w[1] == "/tmp/t.sock:/var/run/docker.sock"));
         assert!(args.contains(&"-N".into()), "不执行远端命令");
-        assert!(args.windows(2).any(|w| w[0] == "-o" && w[1] == "BatchMode=yes"), "应禁交互式密码");
+        assert!(
+            args.windows(2)
+                .any(|w| w[0] == "-o" && w[1] == "BatchMode=yes"),
+            "应禁交互式密码"
+        );
         assert!(!args.contains(&"-i".into()), "未配置私钥时不应带 -i");
         assert!(!args.contains(&"-J".into()), "未配置跳板机时不应带 -J");
     }
 
     #[test]
     fn args_include_key_and_jump_host() {
-        let args = build_args(&profile("root@10.0.0.5", "/home/me/.ssh/id_rsa", "jump@10.0.0.1:2222"), "f");
-        assert!(args.windows(2).any(|w| w[0] == "-i" && w[1] == "/home/me/.ssh/id_rsa"));
-        assert!(args.windows(2).any(|w| w[0] == "-J" && w[1] == "jump@10.0.0.1:2222"), "跳板机应经 -J 传入");
+        let args = build_args(
+            &profile(
+                "root@10.0.0.5",
+                "/home/me/.ssh/id_rsa",
+                "jump@10.0.0.1:2222",
+            ),
+            "f",
+        );
+        assert!(args
+            .windows(2)
+            .any(|w| w[0] == "-i" && w[1] == "/home/me/.ssh/id_rsa"));
+        assert!(
+            args.windows(2)
+                .any(|w| w[0] == "-J" && w[1] == "jump@10.0.0.1:2222"),
+            "跳板机应经 -J 传入"
+        );
     }
 
     #[test]
@@ -396,31 +419,32 @@ mod tests {
         );
         assert_eq!(split_dest_port("root@10.0.0.5"), ("root@10.0.0.5", None));
         // IPv6 字面量（冒号后虽是数字但前缀仍含冒号）不误拆
-        assert_eq!(split_dest_port("root@2001:db8::1"), ("root@2001:db8::1", None));
+        assert_eq!(
+            split_dest_port("root@2001:db8::1"),
+            ("root@2001:db8::1", None)
+        );
         // 非数字后缀不视为端口
         assert_eq!(split_dest_port("user@host:abc"), ("user@host:abc", None));
     }
 
     #[test]
     fn permission_denied_error_carries_copy_id_hint() {
-        let msg = "root@10.0.0.112: Permission denied (publickey,gssapi-keyex,gssapi-with-mic,password).";
+        let msg =
+            "root@10.0.0.112: Permission denied (publickey,gssapi-keyex,gssapi-with-mic,password).";
         let hint = failure_hint(msg, "root@10.0.0.112");
         // 公钥部署指引按本机平台给出：unix 为 ssh-copy-id，windows 为 PowerShell 管道写法
         #[cfg(unix)]
         {
             assert!(hint.contains("ssh-copy-id root@10.0.0.112"));
-            assert!(
-                failure_hint(msg, "root@10.0.0.112:2222").contains("ssh-copy-id -p 2222 root@10.0.0.112")
-            );
+            assert!(failure_hint(msg, "root@10.0.0.112:2222")
+                .contains("ssh-copy-id -p 2222 root@10.0.0.112"));
         }
         #[cfg(windows)]
         {
             assert!(hint.contains("type $env:USERPROFILE"));
             assert!(hint.contains("ssh root@10.0.0.112 \"mkdir -p ~/.ssh"));
-            assert!(
-                failure_hint(msg, "root@10.0.0.112:2222")
-                    .contains("ssh -p 2222 root@10.0.0.112 \"mkdir -p ~/.ssh")
-            );
+            assert!(failure_hint(msg, "root@10.0.0.112:2222")
+                .contains("ssh -p 2222 root@10.0.0.112 \"mkdir -p ~/.ssh"));
         }
         assert!(hint.contains("不支持输入密码"));
         // 非认证失败不追加提示

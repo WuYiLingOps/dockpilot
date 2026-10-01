@@ -74,7 +74,11 @@ pub(super) fn sort_containers(dtos: &mut [ContainerDto]) {
         "paused" => 1,
         _ => 2,
     };
-    dtos.sort_by(|a, b| rank(&a.state).cmp(&rank(&b.state)).then(b.created.cmp(&a.created)));
+    dtos.sort_by(|a, b| {
+        rank(&a.state)
+            .cmp(&rank(&b.state))
+            .then(b.created.cmp(&a.created))
+    });
 }
 
 #[tauri::command]
@@ -116,11 +120,7 @@ pub async fn container_health(id: String) -> CmdResult<ContainerHealthDto> {
             .rev()
             .map(|r| HealthCheckLogDto {
                 exit_code: r.exit_code.unwrap_or(-1),
-                start: r
-                    .start
-                    .as_ref()
-                    .map(|t| t.to_string())
-                    .unwrap_or_default(),
+                start: r.start.as_ref().map(|t| t.to_string()).unwrap_or_default(),
                 output: r.output.clone().unwrap_or_default(),
             })
             .collect(),
@@ -165,19 +165,25 @@ pub async fn container_action(id: String, action: String, force: bool) -> CmdRes
     );
     let d = docker().await?;
     match action.as_str() {
-        "start" => d
-            .start_container(&id, None::<bollard::container::StartContainerOptions<String>>)
-            .await,
-        "stop" => d
-            .stop_container(&id, Some(StopContainerOptions { t: 10 }))
-            .await,
-        "restart" => d
-            .restart_container(&id, Some(RestartContainerOptions { t: 10 }))
-            .await,
+        "start" => {
+            d.start_container(
+                &id,
+                None::<bollard::container::StartContainerOptions<String>>,
+            )
+            .await
+        }
+        "stop" => {
+            d.stop_container(&id, Some(StopContainerOptions { t: 10 }))
+                .await
+        }
+        "restart" => {
+            d.restart_container(&id, Some(RestartContainerOptions { t: 10 }))
+                .await
+        }
         "pause" => d.pause_container(&id).await,
         "unpause" => d.unpause_container(&id).await,
-        "remove" => d
-            .remove_container(
+        "remove" => {
+            d.remove_container(
                 &id,
                 Some(RemoveContainerOptions {
                     force,
@@ -185,7 +191,8 @@ pub async fn container_action(id: String, action: String, force: bool) -> CmdRes
                     link: false,
                 }),
             )
-            .await,
+            .await
+        }
         _ => return Err(format!("未知操作: {action}")),
     }
     .map_err(|e| {
@@ -198,10 +205,7 @@ pub async fn container_action(id: String, action: String, force: bool) -> CmdRes
 /// 注意内存上限只能改大或改小、不能清除（daemon 限制）；若新内存超过
 /// 已设置的 memory-swap，daemon 会报错原文透出。
 #[tauri::command]
-pub async fn update_container_config(
-    id: String,
-    spec: ContainerUpdateSpec,
-) -> CmdResult<()> {
+pub async fn update_container_config(id: String, spec: ContainerUpdateSpec) -> CmdResult<()> {
     log::info!("容器 {} 更新配置", super::short_id(&id));
     let (memory, nano_cpus) = match (spec.memory_mb, spec.cpus) {
         (None, None) => (None, None),
@@ -270,9 +274,7 @@ fn build_binds(volumes: &[VolumeMountSpec]) -> Vec<String> {
 }
 
 /// 端口映射 → PortBindings 表（键为 "容器端口/协议"，同键可绑多个宿主端口）
-fn build_port_bindings(
-    ports: &[PortMappingSpec],
-) -> HashMap<String, Option<Vec<PortBinding>>> {
+fn build_port_bindings(ports: &[PortMappingSpec]) -> HashMap<String, Option<Vec<PortBinding>>> {
     let mut map: HashMap<String, Option<Vec<PortBinding>>> = HashMap::new();
     for p in ports {
         let proto = p.proto.as_deref().unwrap_or("tcp");
@@ -307,15 +309,18 @@ fn build_kv_pairs(items: &[KeyValueSpec]) -> (Vec<String>, HashMap<String, Strin
 /// 覆盖命令按 shell 词法拆分为 argv（支持引号，如 `sh -c "a b"`）
 fn parse_command(cmd: Option<&str>) -> Result<Option<Vec<String>>, String> {
     match cmd.map(str::trim) {
-        Some(s) if !s.is_empty() => {
-            shell_words::split(s).map(Some).map_err(|e| format!("命令解析失败: {e}"))
-        }
+        Some(s) if !s.is_empty() => shell_words::split(s)
+            .map(Some)
+            .map_err(|e| format!("命令解析失败: {e}")),
         _ => Ok(None),
     }
 }
 
 /// 资源限制换算：MB → 字节、核数 → nano_cpus（docker --cpus 的内部单位，1 核 = 1e9）
-fn build_resources(memory_mb: Option<i64>, cpus: Option<f64>) -> Result<(Option<i64>, Option<i64>), String> {
+fn build_resources(
+    memory_mb: Option<i64>,
+    cpus: Option<f64>,
+) -> Result<(Option<i64>, Option<i64>), String> {
     let memory = match memory_mb {
         None => None,
         Some(mb) if mb > 0 => Some(mb * 1024 * 1024),
@@ -464,19 +469,19 @@ fn parse_memory_mb(s: &str) -> Result<i64, String> {
     };
     if mult == 0 {
         // 字节 / KB：换算为 MB
-        let bytes: f64 = num
-            .parse()
-            .map_err(|_| format!("内存值不合法: {s}"))?;
-        let scale = if num.to_ascii_lowercase().ends_with('k') { 1024.0 } else { 1.0 };
+        let bytes: f64 = num.parse().map_err(|_| format!("内存值不合法: {s}"))?;
+        let scale = if num.to_ascii_lowercase().ends_with('k') {
+            1024.0
+        } else {
+            1.0
+        };
         let mb = (bytes * scale / (1024.0 * 1024.0)).ceil() as i64;
         if mb <= 0 {
             return Err(format!("内存值太小（至少 1MB）: {s}"));
         }
         return Ok(mb);
     }
-    let v: f64 = num
-        .parse()
-        .map_err(|_| format!("内存值不合法: {s}"))?;
+    let v: f64 = num.parse().map_err(|_| format!("内存值不合法: {s}"))?;
     let mb = (v * mult as f64).ceil() as i64;
     if mb <= 0 {
         return Err(format!("内存值必须为正: {s}"));
@@ -635,18 +640,10 @@ fn parse_docker_run_tokens(tokens: &[String]) -> Result<ContainerCreateSpec, Str
         }
 
         match name.as_str() {
-            "-p" | "--publish" => spec
-                .ports
-                .push(parse_port_spec(&take_value!(&name))?),
-            "-v" | "--volume" => spec
-                .volumes
-                .push(parse_volume_spec(&take_value!(&name))?),
-            "-e" | "--env" => spec
-                .env
-                .push(parse_kv_spec(&take_value!(&name))?),
-            "-l" | "--label" => spec
-                .labels
-                .push(parse_kv_spec(&take_value!(&name))?),
+            "-p" | "--publish" => spec.ports.push(parse_port_spec(&take_value!(&name))?),
+            "-v" | "--volume" => spec.volumes.push(parse_volume_spec(&take_value!(&name))?),
+            "-e" | "--env" => spec.env.push(parse_kv_spec(&take_value!(&name))?),
+            "-l" | "--label" => spec.labels.push(parse_kv_spec(&take_value!(&name))?),
             "--name" => spec.name = Some(take_value!(&name)),
             "--restart" => {
                 let v = take_value!(&name);
@@ -773,7 +770,7 @@ pub async fn container_spec(id: String) -> CmdResult<ContainerCreateSpec> {
     let (env, labels) = {
         let mut env = Vec::new();
         for e in config.env.unwrap_or_default() {
-            if let Some(spec) = parse_kv_spec(&e).ok() {
+            if let Ok(spec) = parse_kv_spec(&e) {
                 env.push(spec);
             }
         }
@@ -863,7 +860,16 @@ mod tests {
         ];
         sort_containers(&mut list);
         let names: Vec<&str> = list.iter().map(|c| c.name.as_str()).collect();
-        assert_eq!(names, ["running-new", "running-old", "paused", "exited-new", "exited-old"]);
+        assert_eq!(
+            names,
+            [
+                "running-new",
+                "running-old",
+                "paused",
+                "exited-new",
+                "exited-old"
+            ]
+        );
     }
 
     #[test]
@@ -905,16 +911,31 @@ mod tests {
             2,
             "同容器端口应合并为多个宿主绑定"
         );
-        assert_eq!(map["80/tcp"].as_ref().unwrap()[0].host_port, Some("8080".into()));
-        assert_eq!(map["53/udp"].as_ref().unwrap()[0].host_port, Some("5353".into()));
+        assert_eq!(
+            map["80/tcp"].as_ref().unwrap()[0].host_port,
+            Some("8080".into())
+        );
+        assert_eq!(
+            map["53/udp"].as_ref().unwrap()[0].host_port,
+            Some("5353".into())
+        );
     }
 
     #[test]
     fn kv_pairs_skip_empty_keys() {
         let (env, labels) = build_kv_pairs(&[
-            KeyValueSpec { key: "FOO".into(), value: "bar".into() },
-            KeyValueSpec { key: "  ".into(), value: "x".into() },
-            KeyValueSpec { key: " EMPTY".into(), value: "".into() },
+            KeyValueSpec {
+                key: "FOO".into(),
+                value: "bar".into(),
+            },
+            KeyValueSpec {
+                key: "  ".into(),
+                value: "x".into(),
+            },
+            KeyValueSpec {
+                key: " EMPTY".into(),
+                value: "".into(),
+            },
         ]);
         assert_eq!(env, vec!["FOO=bar", "EMPTY="]);
         assert_eq!(labels.get("FOO").map(String::as_str), Some("bar"));
@@ -945,7 +966,10 @@ mod tests {
 
     #[test]
     fn health_parsing_from_status() {
-        assert_eq!(parse_health("Up 3 minutes (healthy)").as_deref(), Some("healthy"));
+        assert_eq!(
+            parse_health("Up 3 minutes (healthy)").as_deref(),
+            Some("healthy")
+        );
         assert_eq!(
             parse_health("Up 3 minutes (health: starting)").as_deref(),
             Some("starting")
@@ -984,7 +1008,11 @@ mod tests {
         assert!(s.volumes[0].read_only);
         assert_eq!(s.env[0].key, "FOO");
         assert_eq!(s.labels[0].value, "web");
-        assert_eq!(s.restart_policy.as_deref(), Some("on-failure"), "重试次数应被剥离");
+        assert_eq!(
+            s.restart_policy.as_deref(),
+            Some("on-failure"),
+            "重试次数应被剥离"
+        );
         assert_eq!(s.memory_mb, Some(512));
         assert_eq!(s.cpus, Some(1.5));
         assert_eq!(s.workdir.as_deref(), Some("/app"));
@@ -1057,7 +1085,12 @@ mod tests {
     #[test]
     fn argv_command_roundtrip() {
         // 含空格/引号的 argv 经 argv_to_command 后可被 shell_words 还原
-        let args = vec!["sh".to_string(), "-c".to_string(), "echo \"a b\"".to_string(), "".to_string()];
+        let args = vec![
+            "sh".to_string(),
+            "-c".to_string(),
+            "echo \"a b\"".to_string(),
+            "".to_string(),
+        ];
         let joined = argv_to_command(&args);
         assert_eq!(
             shell_words::split(&joined).unwrap(),
@@ -1069,7 +1102,10 @@ mod tests {
     #[test]
     fn bind_split_and_conversions() {
         let v = split_bind("/data:/srv:ro");
-        assert_eq!((v.host.as_str(), v.container.as_str(), v.read_only), ("/data", "/srv", true));
+        assert_eq!(
+            (v.host.as_str(), v.container.as_str(), v.read_only),
+            ("/data", "/srv", true)
+        );
         let v2 = split_bind("/data:/srv");
         assert!(!v2.read_only);
         // 显式 rw / 组合模式 / 传播模式不得误判为只读（克隆数据库容器曾因此挂载变 ro）

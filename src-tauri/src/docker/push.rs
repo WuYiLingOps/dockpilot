@@ -13,11 +13,15 @@ use super::dto::PushProgress;
 use super::images::parse_image_reference;
 use super::state::Streams;
 use crate::secret_store::{self, SecretBackend};
-use crate::settings::{self, RegistryProfile};
+use crate::settings;
 
 /// 推送目标引用组装：`{registry}/{repository}:{tag}`
 /// 校验仓库名符合 docker 规范（小写、不含 tag/scheme），返回完整引用
-pub fn compose_target_ref(registry_host: &str, repository: &str, tag: &str) -> Result<String, String> {
+pub fn compose_target_ref(
+    registry_host: &str,
+    repository: &str,
+    tag: &str,
+) -> Result<String, String> {
     let repository = repository.trim().trim_matches('/');
     if repository.is_empty() {
         return Err("请填写仓库名（如 namespace/myapp）".into());
@@ -35,7 +39,8 @@ pub fn compose_target_ref(registry_host: &str, repository: &str, tag: &str) -> R
         return Err("仓库名必须为小写（Docker 规范）".into());
     }
     let tag = tag.trim();
-    if tag.is_empty() || tag.contains(char::is_whitespace) || tag.contains('/') || tag.contains(':') {
+    if tag.is_empty() || tag.contains(char::is_whitespace) || tag.contains('/') || tag.contains(':')
+    {
         return Err(format!("标签不合法: {tag}"));
     }
     if registry_host.is_empty() {
@@ -232,12 +237,30 @@ mod tests {
 
     #[test]
     fn target_ref_rejects_invalid_repository() {
-        assert!(compose_target_ref("r.local", "", "v1").is_err(), "空仓库名应拒绝");
-        assert!(compose_target_ref("r.local", "MyApp", "v1").is_err(), "大写应拒绝");
-        assert!(compose_target_ref("r.local", "ns/app:v2", "v1").is_err(), "仓库名含 tag 应拒绝");
-        assert!(compose_target_ref("r.local", "https://ns/app", "v1").is_err(), "协议前缀应拒绝");
-        assert!(compose_target_ref("r.local", "ns app", "v1").is_err(), "空白应拒绝");
-        assert!(compose_target_ref("", "ns/app", "v1").is_err(), "空 registry 应拒绝");
+        assert!(
+            compose_target_ref("r.local", "", "v1").is_err(),
+            "空仓库名应拒绝"
+        );
+        assert!(
+            compose_target_ref("r.local", "MyApp", "v1").is_err(),
+            "大写应拒绝"
+        );
+        assert!(
+            compose_target_ref("r.local", "ns/app:v2", "v1").is_err(),
+            "仓库名含 tag 应拒绝"
+        );
+        assert!(
+            compose_target_ref("r.local", "https://ns/app", "v1").is_err(),
+            "协议前缀应拒绝"
+        );
+        assert!(
+            compose_target_ref("r.local", "ns app", "v1").is_err(),
+            "空白应拒绝"
+        );
+        assert!(
+            compose_target_ref("", "ns/app", "v1").is_err(),
+            "空 registry 应拒绝"
+        );
     }
 
     #[test]
@@ -248,7 +271,10 @@ mod tests {
         assert!(push_error_hint("x509: certificate signed by unknown authority").is_some());
         assert!(push_error_hint("dial tcp: connection refused").is_some());
         assert!(push_error_hint("context deadline exceeded").is_some());
-        assert!(push_error_hint("manifest blob unknown").is_none(), "未知错误不硬造提示");
+        assert!(
+            push_error_hint("manifest blob unknown").is_none(),
+            "未知错误不硬造提示"
+        );
     }
 
     #[test]

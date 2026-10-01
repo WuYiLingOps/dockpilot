@@ -38,7 +38,11 @@ mod tests {
         let containers = containers::list_containers(true)
             .await
             .expect("list_containers 应成功");
-        assert_eq!(containers.len() as u64, info.containers, "容器数量应与 info 一致");
+        assert_eq!(
+            containers.len() as u64,
+            info.containers,
+            "容器数量应与 info 一致"
+        );
 
         let images = images::list_images().await.expect("list_images 应成功");
         assert_eq!(images.len() as u64, info.images, "镜像数量应与 info 一致");
@@ -48,9 +52,7 @@ mod tests {
     /// 验证 host_stats 的聚合口径与 info 一致（容器数、核数来自 daemon 实时数据）
     #[tokio::test]
     async fn host_stats_matches_info() {
-        let info = system::docker_info()
-            .await
-            .expect("docker_info 应成功");
+        let info = system::docker_info().await.expect("docker_info 应成功");
         let stats = system::host_stats().await.expect("host_stats 应成功");
 
         assert_eq!(
@@ -71,16 +73,32 @@ mod tests {
     /// 验证总量、明细条目数与 info 计数相互对齐（全部取自 /system/df 实时数据）
     #[tokio::test]
     async fn system_df_totals_match_details() {
-        let info = system::docker_info()
-            .await
-            .expect("docker_info 应成功");
+        let info = system::docker_info().await.expect("docker_info 应成功");
         let df = system::system_df().await.expect("system_df 应成功");
 
-        assert_eq!(df.images_count, df.images.len() as u64, "镜像计数应与明细条目数一致");
-        assert_eq!(df.containers_count, df.containers.len() as u64, "容器计数应与明细条目数一致");
-        assert_eq!(df.volumes_count, df.volumes.len() as u64, "卷计数应与明细条目数一致");
-        assert_eq!(df.images_count, info.images, "镜像计数应与 info.images 一致");
-        assert_eq!(df.containers_count, info.containers, "容器计数应与 info.containers 一致");
+        assert_eq!(
+            df.images_count,
+            df.images.len() as u64,
+            "镜像计数应与明细条目数一致"
+        );
+        assert_eq!(
+            df.containers_count,
+            df.containers.len() as u64,
+            "容器计数应与明细条目数一致"
+        );
+        assert_eq!(
+            df.volumes_count,
+            df.volumes.len() as u64,
+            "卷计数应与明细条目数一致"
+        );
+        assert_eq!(
+            df.images_count, info.images,
+            "镜像计数应与 info.images 一致"
+        );
+        assert_eq!(
+            df.containers_count, info.containers,
+            "容器计数应与 info.containers 一致"
+        );
 
         let images_sum: u64 = df.images.iter().map(|i| i.size).sum();
         assert_eq!(df.images_size, images_sum, "镜像总量应等于明细之和");
@@ -127,10 +145,20 @@ mod tests {
         let spec = ContainerCreateSpec {
             name: Some("dockpilot-it-create".into()),
             image: "busybox:stable".into(),
-            ports: vec![PortMappingSpec { host: 18791, container: 80, proto: Some("tcp".into()) }],
+            ports: vec![PortMappingSpec {
+                host: 18791,
+                container: 80,
+                proto: Some("tcp".into()),
+            }],
             volumes: vec![],
-            env: vec![KeyValueSpec { key: "FOO".into(), value: "bar".into() }],
-            labels: vec![KeyValueSpec { key: "dockpilot-test".into(), value: "1".into() }],
+            env: vec![KeyValueSpec {
+                key: "FOO".into(),
+                value: "bar".into(),
+            }],
+            labels: vec![KeyValueSpec {
+                key: "dockpilot-test".into(),
+                value: "1".into(),
+            }],
             restart_policy: None,
             command: Some("sleep 60".into()),
             workdir: None,
@@ -228,7 +256,11 @@ mod tests {
         let spec = containers::container_spec(id.clone())
             .await
             .expect("container_spec 应成功");
-        assert!(spec.image.starts_with("busybox:stable"), "镜像应保留: {}", spec.image);
+        assert!(
+            spec.image.starts_with("busybox:stable"),
+            "镜像应保留: {}",
+            spec.image
+        );
         assert_eq!(spec.command.as_deref(), Some("sleep 60"), "覆盖命令应还原");
         // 克隆规格：可写挂载必须保持可写（曾因 "rw" 含 'r' 被误判为只读，导致克隆数据库容器挂载变 ro 启动失败）
         assert_eq!(spec.volumes.len(), 1, "挂载应被反解析");
@@ -366,7 +398,9 @@ mod tests {
 
         // 等容器退出（最多 5 秒）
         for _ in 0..50 {
-            let h = containers::container_health(id.clone()).await.expect("container_health 应成功");
+            let h = containers::container_health(id.clone())
+                .await
+                .expect("container_health 应成功");
             if h.state == "exited" {
                 break;
             }
@@ -426,7 +460,9 @@ mod tests {
             );
         }
 
-        let networks = networks::list_networks().await.expect("list_networks 应成功");
+        let networks = networks::list_networks()
+            .await
+            .expect("list_networks 应成功");
         let bridge = networks
             .iter()
             .find(|n| n.name == "bridge")
@@ -494,8 +530,12 @@ mod tests {
             .iter()
             .find(|n| n.name == "dockpilot-it-net")
             .expect("新创建的网络应出现在列表中");
-        assert_eq!(net.subnet.as_deref(), Some("172.30.77.0/24"), "IPAM 子网应生效");
-        assert_eq!(net.built_in, false);
+        assert_eq!(
+            net.subnet.as_deref(),
+            Some("172.30.77.0/24"),
+            "IPAM 子网应生效"
+        );
+        assert!(!net.built_in);
         assert_eq!(net.containers.len(), 0, "新网络不应有连接的容器");
 
         volumes::remove_volume("dockpilot-it-vol".into(), false)
@@ -520,7 +560,8 @@ mod tests {
     async fn remote_ssh_tunnel_roundtrip() {
         use crate::settings::ConnectionProfile;
 
-        let host = std::env::var("DOCKERPILOT_REMOTE_SSH").unwrap_or_else(|_| "root@10.0.0.115".into());
+        let host =
+            std::env::var("DOCKERPILOT_REMOTE_SSH").unwrap_or_else(|_| "root@10.0.0.115".into());
         let profile = ConnectionProfile {
             id: "it-remote-ssh".into(),
             name: "远程集成测试".into(),
@@ -627,7 +668,10 @@ mod tests {
                 }
             }
         }
-        assert!(exec_output.contains("tunnel-exec-ok"), "exec 输出应经隧道返回");
+        assert!(
+            exec_output.contains("tunnel-exec-ok"),
+            "exec 输出应经隧道返回"
+        );
         println!("exec 输出经隧道返回正常: {}", exec_output.trim());
 
         // 日志流（sleep 容器无输出，能建立流并干净结束即算通过）
@@ -639,13 +683,19 @@ mod tests {
                 ..Default::default()
             }),
         );
-        let log_chunks = log_stream.filter(|r| future::ready(r.is_ok())).count().await;
+        let log_chunks = log_stream
+            .filter(|r| future::ready(r.is_ok()))
+            .count()
+            .await;
         println!("日志流正常结束，收到 {log_chunks} 个分块");
 
         // 统计流：取一个采样
         let mut stats = d.stats(
             &rt_id,
-            Some(bollard::container::StatsOptions { stream: true, one_shot: false }),
+            Some(bollard::container::StatsOptions {
+                stream: true,
+                one_shot: false,
+            }),
         );
         let stat = tokio::time::timeout(std::time::Duration::from_secs(5), stats.next())
             .await
@@ -681,14 +731,20 @@ mod tests {
 
         // compose CLI 环境：指向隧道本地端点并实际调用本机 docker CLI 验证连通
         let active = conn::active();
-        assert!(active.tunnel_endpoint.is_some(), "ssh 连接激活后应记录隧道端点");
+        assert!(
+            active.tunnel_endpoint.is_some(),
+            "ssh 连接激活后应记录隧道端点"
+        );
         let env = conn::cli_env(&active);
         let docker_host = env
             .iter()
             .find(|(k, _)| k == "DOCKER_HOST")
             .map(|(_, v)| v.clone())
             .expect("ssh 连接应注入 DOCKER_HOST");
-        assert!(docker_host.starts_with("unix://"), "compose 应经隧道 socket 连接");
+        assert!(
+            docker_host.starts_with("unix://"),
+            "compose 应经隧道 socket 连接"
+        );
         let out = tokio::process::Command::new("docker")
             .args(["version", "--format", "{{.Server.Version}}"])
             .env("DOCKER_HOST", &docker_host)
@@ -696,7 +752,10 @@ mod tests {
             .await
             .expect("本机 docker CLI 应可用");
         let cli_version = String::from_utf8_lossy(&out.stdout).trim().to_string();
-        assert!(out.status.success(), "compose CLI 经隧道调用远程 daemon 应成功");
+        assert!(
+            out.status.success(),
+            "compose CLI 经隧道调用远程 daemon 应成功"
+        );
         assert_eq!(cli_version, version, "CLI 看到的远程版本应与 bollard 一致");
         println!("compose CLI 经隧道连到远程 daemon: {cli_version}");
 

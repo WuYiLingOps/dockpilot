@@ -1,7 +1,7 @@
 use std::path::Path;
 use std::sync::RwLock;
 
-use bollard::{API_DEFAULT_VERSION, Docker};
+use bollard::{Docker, API_DEFAULT_VERSION};
 use serde::Serialize;
 
 use crate::docker::tunnel;
@@ -60,16 +60,25 @@ static STATE: RwLock<ConnState> = RwLock::new(ConnState {
     docker: None,
 });
 
+/// RwLock 毒锁恢复：持有方 panic 后仍可继续访问，避免单次崩溃放大为连接层全局不可用（对齐 tunnel.rs 的做法）
+fn state_read() -> std::sync::RwLockReadGuard<'static, ConnState> {
+    STATE.read().unwrap_or_else(|e| e.into_inner())
+}
+
+fn state_write() -> std::sync::RwLockWriteGuard<'static, ConnState> {
+    STATE.write().unwrap_or_else(|e| e.into_inner())
+}
+
 /// 启动时初始化活跃连接（setup 中调用，此后由 switch_connection 维护）
 pub fn init_active(profile: ConnectionProfile) {
-    let mut w = STATE.write().unwrap();
+    let mut w = state_write();
     w.current = Some((0, ActiveConn::new(profile)));
     w.docker = None;
 }
 
 /// 当前活跃连接的快照（未初始化时回落默认本地连接）
 pub fn active() -> ActiveConn {
-    let g = STATE.read().unwrap();
+    let g = state_read();
     g.current
         .as_ref()
         .map(|(_, c)| c.clone())
@@ -79,7 +88,7 @@ pub fn active() -> ActiveConn {
 /// 获取当前 Docker 连接（惰性建连并缓存；切换后自动指向新连接）
 pub async fn docker() -> CmdResult<Docker> {
     {
-        let g = STATE.read().unwrap();
+        let g = state_read();
         if let Some((gen, _)) = &g.current {
             if let Some((gen_d, d)) = &g.docker {
                 if gen_d == gen {
@@ -89,7 +98,7 @@ pub async fn docker() -> CmdResult<Docker> {
         }
     }
     let (gen, conn) = {
-        let g = STATE.read().unwrap();
+        let g = state_read();
         match &g.current {
             Some((gen, c)) => (*gen, c.clone()),
             None => (0, ActiveConn::new(ConnectionProfile::default_local())),
@@ -97,7 +106,7 @@ pub async fn docker() -> CmdResult<Docker> {
     };
     let (d, tunnel_endpoint) = build_conn(&conn, TIMEOUT).await?;
     // 仅当活跃连接未在建连期间被切换时才缓存
-    let mut w = STATE.write().unwrap();
+    let mut w = state_write();
     if let Some((cur_gen, c)) = w.current.as_mut() {
         if *cur_gen == gen {
             c.tunnel_endpoint = tunnel_endpoint;
@@ -135,8 +144,12 @@ pub async fn build_conn(conn: &ActiveConn, timeout: u64) -> CmdResult<(Docker, O
             }
         }
         "tcp" => {
-            let d = Docker::connect_with_http(&format!("tcp://{}", p.host), timeout, API_DEFAULT_VERSION)
-                .map_err(build_err)?;
+            let d = Docker::connect_with_http(
+                &format!("tcp://{}", p.host),
+                timeout,
+                API_DEFAULT_VERSION,
+            )
+            .map_err(build_err)?;
             Ok((d, None))
         }
         "tls" => {
@@ -144,7 +157,11 @@ pub async fn build_conn(conn: &ActiveConn, timeout: u64) -> CmdResult<(Docker, O
             if p.cert_path.is_empty() {
                 return Err("TLS 连接需要配置证书目录".into());
             }
-            let (key, cert, ca) = (dir.join("key.pem"), dir.join("cert.pem"), dir.join("ca.pem"));
+            let (key, cert, ca) = (
+                dir.join("key.pem"),
+                dir.join("cert.pem"),
+                dir.join("ca.pem"),
+            );
             for f in [&key, &cert, &ca] {
                 if !f.exists() {
                     return Err(format!(
@@ -192,10 +209,7 @@ pub async fn build_conn(conn: &ActiveConn, timeout: u64) -> CmdResult<(Docker, O
 async fn probe(conn: &ActiveConn) -> Result<(u128, String), String> {
     let start = std::time::Instant::now();
     let (d, _) = build_conn(conn, PROBE_TIMEOUT).await?;
-    let v = d
-        .version()
-        .await
-        .map_err(|e| format!("连接不可达: {e}"))?;
+    let v = d.version().await.map_err(|e| format!("连接不可达: {e}"))?;
     Ok((start.elapsed().as_millis(), v.version.unwrap_or_default()))
 }
 
@@ -270,7 +284,7 @@ pub async fn switch_connection(app: tauri::AppHandle, id: String) -> CmdResult<C
     app.state::<super::state::ExecSessions>().clear().await;
     tunnel::stop_others(&profile.id);
 
-    let mut w = STATE.write().unwrap();
+    let mut w = state_write();
     let gen = w.current.as_ref().map(|(g, _)| g + 1).unwrap_or(1);
     w.current = Some((
         gen,
@@ -304,7 +318,10 @@ pub async fn switch_connection(app: tauri::AppHandle, id: String) -> CmdResult<C
 pub fn cli_env(conn: &ActiveConn) -> Vec<(String, String)> {
     let p = &conn.profile;
     match p.kind.as_str() {
-        "local" => vec![("DOCKER_HOST".into(), format!("unix://{}", conn.effective_socket()))],
+        "local" => vec![(
+            "DOCKER_HOST".into(),
+            format!("unix://{}", conn.effective_socket()),
+        )],
         "tcp" => vec![("DOCKER_HOST".into(), format!("tcp://{}", p.host))],
         "tls" => vec![
             ("DOCKER_HOST".into(), format!("tcp://{}", p.host)),

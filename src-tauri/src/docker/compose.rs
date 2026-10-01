@@ -73,20 +73,44 @@ async fn detect_cli() -> CmdResult<Cli> {
     if let Some(p) = ssh_profile() {
         return detect_cli_remote(&p).await;
     }
-    if let Some(cli) = probe(CliKind::Plugin, "docker", &["compose", "version", "--short"]).await {
+    if let Some(cli) = probe(
+        CliKind::Plugin,
+        "docker",
+        &["compose", "version", "--short"],
+    )
+    .await
+    {
         return Ok(cli);
     }
-    if let Some(cli) = probe(CliKind::Standalone, "docker-compose", &["version", "--short"]).await {
+    if let Some(cli) = probe(
+        CliKind::Standalone,
+        "docker-compose",
+        &["version", "--short"],
+    )
+    .await
+    {
         return Ok(cli);
     }
     Err("未检测到 Docker Compose CLI，请先安装（Debian/Ubuntu：sudo apt install docker-compose-plugin）".into())
 }
 
 async fn detect_cli_remote(p: &ConnectionProfile) -> CmdResult<Cli> {
-    if let Some(cli) = ssh_probe(p, CliKind::Plugin, &["docker", "compose", "version", "--short"]).await {
+    if let Some(cli) = ssh_probe(
+        p,
+        CliKind::Plugin,
+        &["docker", "compose", "version", "--short"],
+    )
+    .await
+    {
         return Ok(cli);
     }
-    if let Some(cli) = ssh_probe(p, CliKind::Standalone, &["docker-compose", "version", "--short"]).await {
+    if let Some(cli) = ssh_probe(
+        p,
+        CliKind::Standalone,
+        &["docker-compose", "version", "--short"],
+    )
+    .await
+    {
         return Ok(cli);
     }
     Err("远程服务器未检测到 Docker Compose CLI，请在服务器上安装（Debian/Ubuntu：sudo apt install docker-compose-plugin）".into())
@@ -94,7 +118,10 @@ async fn detect_cli_remote(p: &ConnectionProfile) -> CmdResult<Cli> {
 
 async fn probe(kind: CliKind, program: &str, args: &[&str]) -> Option<Cli> {
     let fut = Command::new(program).args(args).output();
-    let out = tokio::time::timeout(Duration::from_secs(10), fut).await.ok()?.ok()?;
+    let out = tokio::time::timeout(Duration::from_secs(10), fut)
+        .await
+        .ok()?
+        .ok()?;
     if !out.status.success() {
         return None;
     }
@@ -105,7 +132,10 @@ async fn probe(kind: CliKind, program: &str, args: &[&str]) -> Option<Cli> {
 /// 经 ssh 在远程服务器上探测 compose CLI（version 不触达 daemon，无需 DOCKER_HOST）
 async fn ssh_probe(p: &ConnectionProfile, kind: CliKind, remote_args: &[&str]) -> Option<Cli> {
     let fut = ssh_command(p, &remote_args.join(" ")).ok()?.output();
-    let out = tokio::time::timeout(Duration::from_secs(10), fut).await.ok()?.ok()?;
+    let out = tokio::time::timeout(Duration::from_secs(10), fut)
+        .await
+        .ok()?
+        .ok()?;
     if !out.status.success() {
         return None;
     }
@@ -193,12 +223,9 @@ async fn ssh_write_remote(
         }
         buf
     };
-    let (_, status, err) = tokio::time::timeout(
-        Duration::from_secs(timeout_secs),
-        async {
-            tokio::join!(write, child.wait(), read_err)
-        },
-    )
+    let (_, status, err) = tokio::time::timeout(Duration::from_secs(timeout_secs), async {
+        tokio::join!(write, child.wait(), read_err)
+    })
     .await
     .map_err(|_| format!("写入远程文件超时（超过 {timeout_secs}s）"))?;
     let status = status.map_err(|e| format!("SSH 命令执行失败: {e}"))?;
@@ -383,7 +410,11 @@ pub(super) fn group_projects(list: Vec<ContainerSnapshot>) -> Vec<ComposeProject
     }
     acc.into_iter()
         .map(|(name, (working_dir, config_files, mut services))| {
-            services.sort_by(|a, b| a.name.cmp(&b.name).then(a.container_id.cmp(&b.container_id)));
+            services.sort_by(|a, b| {
+                a.name
+                    .cmp(&b.name)
+                    .then(a.container_id.cmp(&b.container_id))
+            });
             let total_count = services.len();
             let running_count = services.iter().filter(|s| s.state == "running").count();
             ComposeProjectDto {
@@ -409,7 +440,9 @@ async fn project_config(project: &str) -> CmdResult<(String, Vec<String>)> {
         .await
         .map_err(|e| format!("获取容器列表失败: {e}"))?;
     for c in &list {
-        let Some(labels) = c.labels.as_ref() else { continue };
+        let Some(labels) = c.labels.as_ref() else {
+            continue;
+        };
         if labels.get(LABEL_PROJECT).map(String::as_str) == Some(project) {
             let working_dir = labels.get(LABEL_WORKING_DIR).cloned().unwrap_or_default();
             let config_files = labels
@@ -424,7 +457,9 @@ async fn project_config(project: &str) -> CmdResult<(String, Vec<String>)> {
             return Ok((working_dir, config_files));
         }
     }
-    Err(format!("未找到项目 {project} 的容器，无法确定 compose 配置"))
+    Err(format!(
+        "未找到项目 {project} 的容器，无法确定 compose 配置"
+    ))
 }
 
 // ---------------------------------------------------------------------------
@@ -584,11 +619,17 @@ pub async fn compose_action(
     let cli = detect_cli().await?;
     let (working_dir, config_files) = project_config(&project).await?;
     if config_files.is_empty() {
-        return Err(format!("项目 {project} 缺少 compose 配置文件标签，无法执行 CLI 操作"));
+        return Err(format!(
+            "项目 {project} 缺少 compose 配置文件标签，无法执行 CLI 操作"
+        ));
     }
     log::info!(
         "compose 项目 {project} 执行 {action}（服务：{}）",
-        if services.is_empty() { "全部".to_string() } else { services.join(", ") }
+        if services.is_empty() {
+            "全部".to_string()
+        } else {
+            services.join(", ")
+        }
     );
     let args = build_action_args(&action, remove_volumes, remove_images, &services)?;
     let cmd = build_cmd(&cli, &project, &working_dir, &config_files, &args)?;
@@ -599,11 +640,20 @@ pub async fn compose_action(
 #[tauri::command]
 pub async fn read_compose_file(path: String) -> CmdResult<String> {
     let p = Path::new(&path);
-    if !matches!(p.extension().and_then(|e| e.to_str()), Some("yml") | Some("yaml")) {
+    if !matches!(
+        p.extension().and_then(|e| e.to_str()),
+        Some("yml") | Some("yaml")
+    ) {
         return Err("仅支持查看 .yml / .yaml 文件".into());
     }
     if let Some(prof) = ssh_profile() {
-        let out = ssh_check(&prof, &format!("cat {}", sh_path(&path)), 15, "读取文件失败").await?;
+        let out = ssh_check(
+            &prof,
+            &format!("cat {}", sh_path(&path)),
+            15,
+            "读取文件失败",
+        )
+        .await?;
         if out.stdout.len() > 2 * 1024 * 1024 {
             return Err("文件超过 2MB，不予显示".into());
         }
@@ -626,7 +676,10 @@ pub async fn read_compose_file(path: String) -> CmdResult<String> {
 #[tauri::command]
 pub async fn write_compose_file(path: String, content: String) -> CmdResult<()> {
     let p = Path::new(&path);
-    if !matches!(p.extension().and_then(|e| e.to_str()), Some("yml") | Some("yaml")) {
+    if !matches!(
+        p.extension().and_then(|e| e.to_str()),
+        Some("yml") | Some("yaml")
+    ) {
         return Err("仅支持编辑 .yml / .yaml 文件".into());
     }
     if content.trim().is_empty() {
@@ -660,7 +713,7 @@ async fn write_compose_file_remote(
             cli,
             "dockpilot-check",
             "",
-            &[tmp.clone()],
+            std::slice::from_ref(&tmp),
             &["config".into(), "--quiet".into()],
         );
         if let Err(e) = ssh_check(p, &remote, 30, "compose 文件校验未通过").await {
@@ -729,7 +782,12 @@ async fn write_compose_file_local(path: &str, content: &str) -> CmdResult<()> {
 mod tests {
     use super::*;
 
-    fn snap(name: &str, project: Option<&str>, service: Option<&str>, state: &str) -> ContainerSnapshot {
+    fn snap(
+        name: &str,
+        project: Option<&str>,
+        service: Option<&str>,
+        state: &str,
+    ) -> ContainerSnapshot {
         ContainerSnapshot {
             name: name.into(),
             id: format!("id-{name}"),
@@ -877,7 +935,8 @@ mod tests {
             eprintln!("跳过：本机未安装 compose CLI");
             return;
         }
-        let dir = std::env::temp_dir().join(format!("dockpilot-compose-write-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("dockpilot-compose-write-{}", std::process::id()));
         tokio::fs::create_dir_all(&dir).await.unwrap();
         let file = dir.join("compose.yaml");
         let original = "services:\n  a:\n    image: busybox:stable\n";
@@ -890,29 +949,42 @@ mod tests {
             .await
             .expect("合法内容应保存成功");
         assert_eq!(
-            tokio::fs::read_to_string(format!("{path}.bak")).await.unwrap(),
+            tokio::fs::read_to_string(format!("{path}.bak"))
+                .await
+                .unwrap(),
             original,
             "备份应保存写入前的内容"
         );
         assert!(
-            tokio::fs::read_to_string(&path).await.unwrap().contains("alpine"),
+            tokio::fs::read_to_string(&path)
+                .await
+                .unwrap()
+                .contains("alpine"),
             "新内容应已写入"
         );
         assert!(
-            !tokio::fs::try_exists(format!("{path}.dockpilot-tmp")).await.unwrap(),
+            !tokio::fs::try_exists(format!("{path}.dockpilot-tmp"))
+                .await
+                .unwrap(),
             "临时文件应被 rename 消费"
         );
 
         // 非法内容：预检拒绝且原文件不被破坏
-        let result = write_compose_file(path.clone(), "services:\n  a:\n    image: [unclosed\n".into()).await;
+        let result = write_compose_file(
+            path.clone(),
+            "services:\n  a:\n    image: [unclosed\n".into(),
+        )
+        .await;
         eprintln!("非法写入结果: {result:?}");
         assert!(result.is_err(), "语法非法的内容应被预检拒绝");
         assert!(
-            tokio::fs::read_to_string(&path).await.unwrap().contains("alpine"),
+            tokio::fs::read_to_string(&path)
+                .await
+                .unwrap()
+                .contains("alpine"),
             "被拒绝的保存不应破坏原文件"
         );
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
 }
-

@@ -13,15 +13,20 @@ use tokio_util::sync::CancellationToken;
 pub struct Streams(pub Mutex<HashMap<String, CancellationToken>>);
 
 impl Streams {
+    /// Mutex 毒锁恢复：持有方 panic 后仍可继续访问，避免流注册表整体不可用（对齐 tunnel.rs 的做法）
+    fn lock_map(&self) -> std::sync::MutexGuard<'_, HashMap<String, CancellationToken>> {
+        self.0.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     pub fn register(&self) -> (String, CancellationToken) {
         let id = uuid::Uuid::new_v4().to_string();
         let token = CancellationToken::new();
-        self.0.lock().unwrap().insert(id.clone(), token.clone());
+        self.lock_map().insert(id.clone(), token.clone());
         (id, token)
     }
 
     pub fn cancel(&self, id: &str) -> bool {
-        match self.0.lock().unwrap().remove(id) {
+        match self.lock_map().remove(id) {
             Some(token) => {
                 token.cancel();
                 true
@@ -31,12 +36,12 @@ impl Streams {
     }
 
     pub fn remove(&self, id: &str) {
-        self.0.lock().unwrap().remove(id);
+        self.lock_map().remove(id);
     }
 
     /// 取消全部长驻流（切换连接时调用：旧连接上的流已无意义）
     pub fn cancel_all(&self) {
-        for (_, token) in self.0.lock().unwrap().drain() {
+        for (_, token) in self.lock_map().drain() {
             token.cancel();
         }
     }
