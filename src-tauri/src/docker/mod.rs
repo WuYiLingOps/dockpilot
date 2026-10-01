@@ -9,10 +9,11 @@ pub mod images;
 pub mod logs;
 pub mod networks;
 pub mod push;
+pub mod ssh_client;
+pub mod ssh_known_hosts;
 pub mod state;
 pub mod stats;
 pub mod system;
-pub mod tunnel;
 pub mod volumes;
 
 /// 日志里用的短 ID（12 位，与 docker CLI 展示一致）
@@ -560,6 +561,13 @@ mod tests {
     async fn remote_ssh_tunnel_roundtrip() {
         use crate::settings::ConnectionProfile;
 
+        // russh 引擎需要配置目录（主机指纹/密钥读取）：测试进程无 AppHandle，
+        // 直接指向临时目录；OnceLock 进程内仅首次生效，多个 ssh 用例共享无碍
+        let cfg_dir =
+            std::env::temp_dir().join(format!("dockpilot-it-ssh-cfg-{}", std::process::id()));
+        std::fs::create_dir_all(&cfg_dir).unwrap();
+        super::ssh_client::init_config_dir_for_test(cfg_dir);
+
         let host =
             std::env::var("DOCKERPILOT_REMOTE_SSH").unwrap_or_else(|_| "root@10.0.0.115".into());
         let profile = ConnectionProfile {
@@ -783,7 +791,105 @@ mod tests {
             println!("远程 YAML 写/读往返通过");
         }
 
-        // 收尾：停隧道后旧 socket 不可连
-        tunnel::stop(&profile.id);
+        // 收尾：停会话后旧 socket 不可连
+        super::ssh_client::stop(&profile.id).await;
+    }
+
+    /// russh 引擎的认证与远程执行回归（默认忽略）。
+    /// 密钥方式：DOCKERPILOT_REMOTE_SSH=root@10.0.0.115 cargo test --lib -- --ignored remote_ssh_russh_auth
+    /// 密码方式：DOCKERPILOT_REMOTE_SSH=root@10.0.0.115 DOCKERPILOT_SSH_PASSWORD=xxx cargo test --lib -- --ignored remote_ssh_russh_auth
+    /// 覆盖：ensure 隧道（TOFU 记录）→ bollard 经隧道 version → 远程 exec →
+    /// exec_write 写读往返 → 二次 ensure 复用会话。
+    /// CI 的 ssh-smoke job 用 openssh-server 容器自动跑本用例（密码认证）。
+    #[tokio::test]
+    #[ignore]
+    async fn remote_ssh_russh_auth() {
+        use crate::settings::ConnectionProfile;
+        use std::time::Duration;
+
+        let host =
+            std::env::var("DOCKERPILOT_REMOTE_SSH").unwrap_or_else(|_| "root@10.0.0.115".into());
+        let password = std::env::var("DOCKERPILOT_SSH_PASSWORD")
+            .ok()
+            .filter(|s| !s.is_empty());
+        let profile = ConnectionProfile {
+            id: "it-remote-russh".into(),
+            name: "russh 集成测试".into(),
+            kind: "ssh".into(),
+            host,
+            auth: if password.is_some() {
+                "password".into()
+            } else {
+                "key".into()
+            },
+            ..Default::default()
+        };
+        let cfg_dir =
+            std::env::temp_dir().join(format!("dockpilot-it-ssh-cfg-{}", std::process::id()));
+        std::fs::create_dir_all(&cfg_dir).unwrap();
+        super::ssh_client::init_config_dir_for_test(cfg_dir);
+
+        let secrets = super::ssh_client::TransientSecrets {
+            password: password.clone(),
+            passphrase: None,
+        };
+        let endpoint = super::ssh_client::ensure_with(&profile, &secrets)
+            .await
+            .expect("russh 建立隧道应成功");
+        println!("隧道本地端点: {endpoint}");
+
+        let d = bollard::Docker::connect_with_socket(&endpoint, 30, bollard::API_DEFAULT_VERSION)
+            .expect("bollard 应能经隧道端点连接");
+        let v = d.version().await.expect("经 russh 隧道的 version 应成功");
+        println!("远程 daemon: {}", v.version.unwrap_or_default());
+
+        // 远程 exec（compose 远程探测/操作的同款底层）
+        let out =
+            super::ssh_client::exec(&profile, "echo dockpilot-russh-ok", Duration::from_secs(15))
+                .await
+                .expect("远程 exec 应成功");
+        assert_eq!(out.exit_code, 0, "远程 exec 退出码应为 0");
+        assert!(
+            String::from_utf8_lossy(&out.stdout).contains("dockpilot-russh-ok"),
+            "远程 exec 输出应完整回传"
+        );
+
+        // exec_write 写读往返（compose 文件保存的同款底层）
+        let path = "/tmp/dockpilot-it-russh.txt";
+        super::ssh_client::exec_write(
+            &profile,
+            &format!("cat > {path}"),
+            b"russh-write-ok".to_vec(),
+            Duration::from_secs(15),
+        )
+        .await
+        .expect("远程写入应成功");
+        let out =
+            super::ssh_client::exec(&profile, &format!("cat {path}"), Duration::from_secs(15))
+                .await
+                .expect("远程回读应成功");
+        assert!(
+            String::from_utf8_lossy(&out.stdout).contains("russh-write-ok"),
+            "远程写入的内容应可回读"
+        );
+        let _ =
+            super::ssh_client::exec(&profile, &format!("rm -f {path}"), Duration::from_secs(15))
+                .await;
+
+        // 二次 ensure：应复用现有会话（端点不变），连接仍可用
+        let endpoint2 = super::ssh_client::ensure_with(&profile, &secrets)
+            .await
+            .expect("二次 ensure 应成功");
+        assert_eq!(endpoint, endpoint2, "复用会话应返回相同端点");
+
+        super::ssh_client::stop(&profile.id).await;
+        println!(
+            "russh 认证/隧道/exec/写入 往返通过（auth={}）",
+            if password.is_some() {
+                "password"
+            } else {
+                "key"
+            }
+        );
     }
 }

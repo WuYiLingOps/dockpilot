@@ -1,6 +1,6 @@
 [package]
 name = "dockpilot"
-version = "1.0.3"
+version = "1.0.4"
 description = "轻量级 Docker 桌面管理工具"
 authors = ["hj"]
 edition = "2021"
@@ -57,6 +57,15 @@ machine-uid = "0.5"
 aes-gcm = "0.10"
 sha2 = "0.10"
 base64 = "0.22"
+# 内置 SSH 引擎（密码认证 + 端口转发 + 远程命令执行），替代对系统 ssh 二进制的依赖
+russh = { version = "0.63.3", default-features = false, features = [
+    # 加密后端选 ring（对齐 rustls 的 ring provider）：默认的 aws-lc-rs 虽已随 reqwest
+    # 在依赖图中，但 russh 自身的加解密走 ring 可少编译一份 aws-lc-rs 符号，且与
+    # conn.rs 回归测试锁定的 provider 选择策略一致
+    "ring",
+    "flate2",
+    "rsa",
+] }
 
 # Windows 原生 DWM 窗口圆角（版本与 tauri 依赖对齐，避免重复编译）
 [target.'cfg(windows)'.dependencies]

@@ -98,6 +98,57 @@ pub fn delete_secret(dir: &Path, key_id: &str, backend: SecretBackend) -> Result
     }
 }
 
+/// 按提示后端优先读取，取不到时用另一后端兜底。
+/// ssh 密码/私钥口令共用一个 secret_backend 提示字段，但分属两条不同 key_id，
+/// 落点在极端情况下可能不一致（如先后保存时钥匙串可用性变化），因此读取需容忍双后端。
+pub fn load_secret_any(
+    dir: &Path,
+    key_id: &str,
+    prefer: SecretBackend,
+) -> Result<Option<String>, String> {
+    let (first, second) = others(prefer);
+    let mut result = Ok(None);
+    for backend in [first, second] {
+        result = match load_secret(dir, key_id, backend) {
+            // 钥匙串错误多为环境性（无 Secret Service 等），软处理为未命中走兜底；
+            // 文件后端错误（密文被篡改等）如实上报
+            Err(e) if backend == SecretBackend::Keyring => {
+                log::debug!("钥匙串读取 {key_id} 失败，走兜底后端: {e}");
+                Ok(None)
+            }
+            other => other,
+        };
+        if matches!(&result, Ok(Some(_))) {
+            break;
+        }
+    }
+    result
+}
+
+/// 双后端都尽力删除（条目不存在视为成功）；任一后端报真实错误时返回最后一个错误
+pub fn delete_secret_any(dir: &Path, key_id: &str, prefer: SecretBackend) -> Result<(), String> {
+    let (first, second) = others(prefer);
+    let mut last_err = Ok(());
+    for backend in [first, second] {
+        if let Err(e) = delete_secret(dir, key_id, backend) {
+            if backend == SecretBackend::Keyring {
+                // 钥匙串环境性错误（无 Secret Service 等）保持尽力而为语义，不视为失败
+                log::debug!("钥匙串删除 {key_id} 失败（忽略）: {e}");
+            } else {
+                last_err = Err(e);
+            }
+        }
+    }
+    last_err
+}
+
+fn others(prefer: SecretBackend) -> (SecretBackend, SecretBackend) {
+    match prefer {
+        SecretBackend::Keyring => (SecretBackend::Keyring, SecretBackend::File),
+        SecretBackend::File => (SecretBackend::File, SecretBackend::Keyring),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // keyring 后端
 // ---------------------------------------------------------------------------
@@ -121,9 +172,13 @@ fn load_keyring(key_id: &str) -> Result<Option<String>, String> {
 }
 
 fn delete_keyring(key_id: &str) -> Result<(), String> {
-    keyring_entry(key_id)?
-        .delete_credential()
-        .map_err(|e| format!("删除钥匙串条目失败: {e}"))
+    match keyring_entry(key_id)?.delete_credential() {
+        Ok(()) => Ok(()),
+        // 条目不存在视为删除成功（Display 是平台相关英文文案，
+        // 必须按类型匹配，delete_secret 的字符串兜底拦不住它）
+        Err(keyring::Error::NoEntry) => Ok(()),
+        Err(e) => Err(format!("删除钥匙串条目失败: {e}")),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -206,7 +261,7 @@ fn decrypt(nonce_b64: &str, cipher_b64: &str) -> Result<String, String> {
     String::from_utf8(pt).map_err(|e| format!("解密结果异常: {e}"))
 }
 
-fn save_file(dir: &Path, key_id: &str, secret: &str) -> Result<(), String> {
+pub(crate) fn save_file(dir: &Path, key_id: &str, secret: &str) -> Result<(), String> {
     let (nonce, cipher) = encrypt(secret)?;
     let mut vault = load_vault(dir)?;
     vault
@@ -215,7 +270,7 @@ fn save_file(dir: &Path, key_id: &str, secret: &str) -> Result<(), String> {
     save_vault(dir, &vault)
 }
 
-fn load_file(dir: &Path, key_id: &str) -> Result<Option<String>, String> {
+pub(crate) fn load_file(dir: &Path, key_id: &str) -> Result<Option<String>, String> {
     let vault = load_vault(dir)?;
     match vault.entries.get(key_id) {
         Some(e) => Ok(Some(decrypt(&e.nonce, &e.cipher)?)),
@@ -223,7 +278,7 @@ fn load_file(dir: &Path, key_id: &str) -> Result<Option<String>, String> {
     }
 }
 
-fn delete_file(dir: &Path, key_id: &str) -> Result<(), String> {
+pub(crate) fn delete_file(dir: &Path, key_id: &str) -> Result<(), String> {
     let mut vault = load_vault(dir)?;
     if vault.entries.remove(key_id).is_some() {
         save_vault(dir, &vault)?;
@@ -271,6 +326,33 @@ mod tests {
         save_file(&dir, "registry/x", "v").unwrap();
         delete_file(&dir, "registry/x").unwrap();
         assert!(load_file(&dir, "registry/x").unwrap().is_none());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn any_backend_prefers_hint_then_falls_back() {
+        let dir = tempdir();
+        save_file(&dir, "ssh/a", "v1").unwrap();
+        // 提示指向文件 → 直读命中
+        assert_eq!(
+            load_secret_any(&dir, "ssh/a", SecretBackend::File)
+                .unwrap()
+                .as_deref(),
+            Some("v1")
+        );
+        // 提示指向 keyring（本环境未写该条目）→ 回退文件后端命中；
+        // 无钥匙串环境 keyring 读取报环境性错误，同样应软兜底而非失败
+        assert_eq!(
+            load_secret_any(&dir, "ssh/a", SecretBackend::Keyring)
+                .unwrap()
+                .as_deref(),
+            Some("v1")
+        );
+        // 双后端删除后读不到
+        delete_secret_any(&dir, "ssh/a", SecretBackend::Keyring).unwrap();
+        assert!(load_secret_any(&dir, "ssh/a", SecretBackend::Keyring)
+            .unwrap()
+            .is_none());
         std::fs::remove_dir_all(&dir).ok();
     }
 

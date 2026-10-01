@@ -6,6 +6,7 @@ mod github_sync;
 mod registries;
 mod secret_store;
 mod settings;
+mod ssh_secrets;
 
 /// 日志用的字节数人类可读格式（如 2.5 GB）
 pub(crate) fn format_bytes(n: u64) -> String {
@@ -281,6 +282,8 @@ pub fn run() {
             app.manage(Streams::default());
             app.manage(ExecSessions::default());
 
+            // SSH 引擎无 AppHandle 调用链，启动时缓存配置目录（密钥与主机指纹读取用）
+            docker::ssh_client::init_config_dir(app.handle());
             docker::events::start_global_listener(app.handle(), tx);
             Ok(())
         })
@@ -324,6 +327,7 @@ pub fn run() {
             docker::images::tag_image,
             docker::images::untag_image,
             docker::push::push_image,
+            docker::ssh_known_hosts::accept_host_key,
             registries::list_registries,
             registries::save_registry,
             registries::remove_registry,
@@ -341,6 +345,7 @@ pub fn run() {
             docker::conn::test_connection,
             settings::get_settings,
             settings::set_settings,
+            ssh_secrets::set_ssh_secret,
             daemon_config::read_daemon_config,
             daemon_config::validate_daemon_json,
             daemon_config::write_daemon_json,
@@ -388,11 +393,11 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while running tauri application")
         .run(|_app, event| {
-            // 退出时回收 SSH 隧道子进程，避免遗留孤儿 ssh；
+            // 退出时回收 SSH 会话与本地监听，避免遗留孤儿连接；
             // 并留下"正常退出"标记（缺失即上次异常退出的判定依据）
             if let tauri::RunEvent::Exit = event {
                 diagnostics::write_shutdown_marker();
-                docker::tunnel::stop_all();
+                tauri::async_runtime::block_on(docker::ssh_client::stop_all());
                 log::info!("DockPilot 正常退出");
             }
         });

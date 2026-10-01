@@ -4,9 +4,11 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::Arc;
 use std::time::Duration;
 
 use bollard::container::ListContainersOptions;
+use russh::client::Handle;
 use tauri::ipc::Channel;
 use tauri::Manager;
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -15,8 +17,8 @@ use tokio::process::Command;
 use super::conn::{docker, CmdResult};
 use super::containers::map_container;
 use super::dto::{ComposeCliInfoDto, ComposeOutput, ComposeProjectDto, ComposeServiceDto, PortDto};
+use super::ssh_client;
 use super::state::Streams;
-use super::tunnel;
 use crate::docker::conn;
 use crate::settings::ConnectionProfile;
 
@@ -131,42 +133,24 @@ async fn probe(kind: CliKind, program: &str, args: &[&str]) -> Option<Cli> {
 
 /// 经 ssh 在远程服务器上探测 compose CLI（version 不触达 daemon，无需 DOCKER_HOST）
 async fn ssh_probe(p: &ConnectionProfile, kind: CliKind, remote_args: &[&str]) -> Option<Cli> {
-    let fut = ssh_command(p, &remote_args.join(" ")).ok()?.output();
-    let out = tokio::time::timeout(Duration::from_secs(10), fut)
-        .await
-        .ok()?
-        .ok()?;
-    if !out.status.success() {
+    let out = ssh_output(p, &remote_args.join(" "), 10).await.ok()?;
+    if !out.success() {
         return None;
     }
     let version = String::from_utf8_lossy(&out.stdout).trim().to_string();
     Some(Cli { kind, version })
 }
 
-/// 组装经 ssh 在远程服务器执行的命令（ssh <公共选项> <host> <远程命令串>）。
-/// 只组装不启动：stdio 由调用方按需设置（spawn_stream / output() / stdin 管道）
-fn ssh_command(p: &ConnectionProfile, remote: &str) -> CmdResult<Command> {
-    let mut cmd = Command::new(tunnel::ssh_program()?);
-    cmd.args(tunnel::common_args(p))
-        .arg(tunnel::split_dest_port(&p.host).0)
-        .arg(remote)
-        .kill_on_drop(true);
-    #[cfg(windows)]
-    cmd.creation_flags(tunnel::CREATE_NO_WINDOW);
-    Ok(cmd)
-}
-
-/// 执行一次性远程命令，返回原始输出（超时与 spawn 错误已包装；退出码由调用方按语义处理）
+/// 执行一次性远程命令（经 ssh_client 内置引擎，超时与启动错误已包装；
+/// 退出码由调用方按语义处理）
 async fn ssh_output(
     p: &ConnectionProfile,
     remote: &str,
     timeout_secs: u64,
-) -> CmdResult<std::process::Output> {
-    let mut cmd = ssh_command(p, remote)?;
-    tokio::time::timeout(Duration::from_secs(timeout_secs), cmd.output())
+) -> CmdResult<ssh_client::ExecOutput> {
+    ssh_client::exec(p, remote, Duration::from_secs(timeout_secs))
         .await
-        .map_err(|_| format!("远程命令超时（超过 {timeout_secs}s）"))?
-        .map_err(|e| format!("SSH 命令执行失败: {e}"))
+        .map_err(|e| e.to_string())
 }
 
 /// ssh_output + 退出码校验，失败时报 `{ctx}: <stderr>`
@@ -175,13 +159,12 @@ async fn ssh_check(
     remote: &str,
     timeout_secs: u64,
     ctx: &str,
-) -> CmdResult<std::process::Output> {
+) -> CmdResult<ssh_client::ExecOutput> {
     let out = ssh_output(p, remote, timeout_secs).await?;
-    if !out.status.success() {
-        let detail = String::from_utf8_lossy(&out.stderr);
-        let detail = detail.trim();
+    if !out.success() {
+        let detail = out.stderr.trim();
         return Err(if detail.is_empty() {
-            format!("{ctx}（exit {}）", out.status.code().unwrap_or(-1))
+            format!("{ctx}（exit {}）", out.exit_code)
         } else {
             format!("{ctx}: {detail}")
         });
@@ -189,48 +172,23 @@ async fn ssh_check(
     Ok(out)
 }
 
-/// 经 ssh 把内存中的内容写到远程路径（stdin 管道，远端执行 cat > 路径）
+/// 把内存中的内容写到远程路径（远端执行 cat > 路径）
 async fn ssh_write_remote(
     p: &ConnectionProfile,
     remote_path: &str,
     content: &[u8],
     timeout_secs: u64,
 ) -> CmdResult<()> {
-    let mut cmd = ssh_command(p, &format!("cat > {remote_path}"))?;
-    cmd.stdin(Stdio::piped());
-    let mut child = cmd.spawn().map_err(|e| format!("启动 SSH 命令失败: {e}"))?;
-    let mut stdin = child.stdin.take().ok_or("无法打开 SSH stdin")?;
-    let mut stderr = child.stderr.take();
-
-    async fn write_all<W: tokio::io::AsyncWrite + Unpin>(
-        mut w: W,
-        content: &[u8],
-    ) -> std::io::Result<()> {
-        use tokio::io::AsyncWriteExt;
-        w.write_all(content).await?;
-        w.shutdown().await
-    }
-    let write = async move {
-        // 远端提前退出时写端会 EPIPE，写错误不视为失败，由退出码兜底判定
-        let _ = write_all(&mut stdin, content).await;
-        drop(stdin);
-    };
-    let read_err = async move {
-        use tokio::io::AsyncReadExt;
-        let mut buf = String::new();
-        if let Some(s) = &mut stderr {
-            let _ = s.read_to_string(&mut buf).await;
-        }
-        buf
-    };
-    let (_, status, err) = tokio::time::timeout(Duration::from_secs(timeout_secs), async {
-        tokio::join!(write, child.wait(), read_err)
-    })
+    let out = ssh_client::exec_write(
+        p,
+        &format!("cat > {remote_path}"),
+        content.to_vec(),
+        Duration::from_secs(timeout_secs),
+    )
     .await
-    .map_err(|_| format!("写入远程文件超时（超过 {timeout_secs}s）"))?;
-    let status = status.map_err(|e| format!("SSH 命令执行失败: {e}"))?;
-    if !status.success() {
-        let detail = err.trim();
+    .map_err(|e| e.to_string())?;
+    if !out.success() {
+        let detail = out.stderr.trim();
         return Err(if detail.is_empty() {
             "写入远程文件失败".into()
         } else {
@@ -253,7 +211,10 @@ fn build_remote_compose(
 ) -> String {
     let mut parts: Vec<String> = vec![
         "env".into(),
-        sh_quote(&format!("DOCKER_HOST=unix://{}", tunnel::remote_socket(p))),
+        sh_quote(&format!(
+            "DOCKER_HOST=unix://{}",
+            ssh_client::remote_socket(p)
+        )),
     ];
     match cli.kind {
         CliKind::Plugin => parts.extend(["docker".into(), "compose".into()]),
@@ -270,21 +231,17 @@ fn build_remote_compose(
     parts.join(" ")
 }
 
-/// 组装 compose 命令：参数数组直调（无 shell，无注入风险）。
-/// 本机执行（local/tcp/tls）：显式设置 DOCKER_HOST 与 bollard 当前连接一致
-/// （本地 socket / TCP / TLS / SSH 隧道），避免用户环境变量把 CLI 指向别的 daemon。
-/// ssh 连接：整个命令串经 ssh 在远程服务器执行（路径为远端路径）
-fn build_cmd(
+/// 组装本机 compose 命令（local/tcp/tls）：参数数组直调（无 shell，无注入风险），
+/// 显式设置 DOCKER_HOST 与 bollard 当前连接一致（本地 socket / TCP / TLS / SSH 隧道），
+/// 避免用户环境变量把 CLI 指向别的 daemon。
+/// ssh 连接不走此函数：russh 经 spawn_remote_stream、system 经 ssh_command 在远程执行
+fn build_cmd_local(
     cli: &Cli,
     project: &str,
     working_dir: &str,
     files: &[String],
     args: &[String],
 ) -> CmdResult<Command> {
-    if let Some(p) = ssh_profile() {
-        let remote = build_remote_compose(&p, cli, project, working_dir, files, args);
-        return ssh_command(&p, &remote);
-    }
     let mut cmd = match cli.kind {
         CliKind::Plugin => {
             let mut c = Command::new("docker");
@@ -490,9 +447,10 @@ fn pump(
     })
 }
 
-/// 启动子进程并推送输出；结束时发送 code（退出码），被取消时发送 error。
+/// 启动本机子进程并推送输出；结束时发送 code（退出码），被取消时发送 error。
 /// 注册到 Streams，前端通过 cancel_stream 取消（kill 子进程）。
-fn spawn_stream(
+/// 仅限本机命令（local/tcp/tls 连接）；ssh 走 spawn_remote_stream。
+fn spawn_local_stream(
     app: &tauri::AppHandle,
     mut cmd: Command,
     label: String,
@@ -547,6 +505,146 @@ fn spawn_stream(
                 }
                 for r in readers {
                     let _ = r.await;
+                }
+            }
+            Err(e) => {
+                log::warn!("compose {label} 启动失败: {e}");
+                let _ = on_output.send(ComposeOutput {
+                    stream: "exit".into(),
+                    data: String::new(),
+                    code: None,
+                    error: Some(format!("启动 compose 命令失败: {e}")),
+                });
+            }
+        }
+        app.state::<Streams>().remove(&sid_task);
+    });
+
+    Ok(sid)
+}
+
+/// 从字节缓冲中取出完整行（\n 分隔，容忍 \r\n），残留不完整行留待下次
+fn drain_lines(buf: &mut Vec<u8>) -> Vec<String> {
+    let mut lines = Vec::new();
+    while let Some(pos) = buf.iter().position(|&b| b == b'\n') {
+        let mut line: Vec<u8> = buf.drain(..=pos).collect();
+        line.pop();
+        if line.last() == Some(&b'\r') {
+            line.pop();
+        }
+        lines.push(String::from_utf8_lossy(&line).into_owned());
+    }
+    lines
+}
+
+/// 在远端启动 compose 命令并流式回传输出（SSH 连接统一路径）。
+/// 结束/取消语义与 spawn_local_stream 对齐：正常结束发 code，取消发 error。
+/// 取消 = 关闭会话通道，远端进程随会话终止。
+fn spawn_remote_stream(
+    app: &tauri::AppHandle,
+    handle: Arc<Handle<ssh_client::ClientHandler>>,
+    remote: String,
+    label: String,
+    on_output: Channel<ComposeOutput>,
+) -> CmdResult<String> {
+    let (sid, token) = app.state::<Streams>().register();
+    let sid_task = sid.clone();
+    let app = app.clone();
+
+    tauri::async_runtime::spawn(async move {
+        let opened = async {
+            let channel = handle
+                .channel_open_session()
+                .await
+                .map_err(|e| format!("打开远程会话通道失败: {e}"))?;
+            channel
+                .exec(true, remote.as_str())
+                .await
+                .map_err(|e| format!("启动远程 compose 失败: {e}"))?;
+            Ok::<_, String>(channel)
+        };
+        match opened.await {
+            Ok(mut channel) => {
+                let mut out_buf: Vec<u8> = Vec::new();
+                let mut err_buf: Vec<u8> = Vec::new();
+                let mut code: Option<i32> = None;
+                let mut cancelled = false;
+                loop {
+                    tokio::select! {
+                        msg = channel.wait() => match msg {
+                            Some(russh::ChannelMsg::Data { ref data }) => {
+                                out_buf.extend_from_slice(data);
+                                for line in drain_lines(&mut out_buf) {
+                                    let _ = on_output.send(ComposeOutput {
+                                        stream: "out".into(),
+                                        data: line,
+                                        code: None,
+                                        error: None,
+                                    });
+                                }
+                            }
+                            Some(russh::ChannelMsg::ExtendedData { ref data, .. }) => {
+                                err_buf.extend_from_slice(data);
+                                for line in drain_lines(&mut err_buf) {
+                                    let _ = on_output.send(ComposeOutput {
+                                        stream: "err".into(),
+                                        data: line,
+                                        code: None,
+                                        error: None,
+                                    });
+                                }
+                            }
+                            Some(russh::ChannelMsg::ExitStatus { exit_status }) => {
+                                code = Some(i32::try_from(exit_status).unwrap_or(-1));
+                            }
+                            Some(russh::ChannelMsg::Close) | None => break,
+                            _ => {}
+                        },
+                        _ = token.cancelled() => {
+                            cancelled = true;
+                            let _ = channel.close().await;
+                            break;
+                        }
+                    }
+                }
+                if cancelled {
+                    log::info!("compose {label} 已取消");
+                    let _ = on_output.send(ComposeOutput {
+                        stream: "exit".into(),
+                        data: String::new(),
+                        code: None,
+                        error: Some("操作已取消".into()),
+                    });
+                } else {
+                    // 刷出未换行的残余输出
+                    if !out_buf.is_empty() {
+                        let _ = on_output.send(ComposeOutput {
+                            stream: "out".into(),
+                            data: String::from_utf8_lossy(&out_buf).into_owned(),
+                            code: None,
+                            error: None,
+                        });
+                    }
+                    if !err_buf.is_empty() {
+                        let _ = on_output.send(ComposeOutput {
+                            stream: "err".into(),
+                            data: String::from_utf8_lossy(&err_buf).into_owned(),
+                            code: None,
+                            error: None,
+                        });
+                    }
+                    let code = code.unwrap_or(-1);
+                    if code == 0 {
+                        log::info!("compose {label} 完成");
+                    } else {
+                        log::warn!("compose {label} 失败（退出码 {code}）");
+                    }
+                    let _ = on_output.send(ComposeOutput {
+                        stream: "exit".into(),
+                        data: code.to_string(),
+                        code: Some(code),
+                        error: None,
+                    });
                 }
             }
             Err(e) => {
@@ -632,8 +730,17 @@ pub async fn compose_action(
         }
     );
     let args = build_action_args(&action, remove_volumes, remove_images, &services)?;
-    let cmd = build_cmd(&cli, &project, &working_dir, &config_files, &args)?;
-    spawn_stream(&app, cmd, format!("{project} {action}"), on_output)
+    let label = format!("{project} {action}");
+
+    if let Some(p) = ssh_profile() {
+        let remote = build_remote_compose(&p, &cli, &project, &working_dir, &config_files, &args);
+        let handle = ssh_client::session_handle(&p)
+            .await
+            .map_err(|e| e.to_string())?;
+        return spawn_remote_stream(&app, handle, remote, label, on_output);
+    }
+    let cmd = build_cmd_local(&cli, &project, &working_dir, &config_files, &args)?;
+    spawn_local_stream(&app, cmd, label, on_output)
 }
 
 /// 只读查看 compose 文件内容（限制扩展名与大小；ssh 连接时读取远程文件）
@@ -747,7 +854,7 @@ async fn write_compose_file_local(path: &str, content: &str) -> CmdResult<()> {
                 .parent()
                 .map(|d| d.to_string_lossy().to_string())
                 .unwrap_or_default();
-            let mut cmd = build_cmd(
+            let mut cmd = build_cmd_local(
                 &cli,
                 "dockpilot-check",
                 &dir,

@@ -15,6 +15,8 @@ const conns = (n: number): ConnectionProfile[] =>
     key_path: "",
     remote_socket: "",
     jump_host: "",
+    auth: "key",
+    secret_backend: "",
   }));
 
 const regs = (n: number): RegistryProfile[] =>

@@ -21,6 +21,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
       key_path: "",
       remote_socket: "",
       jump_host: "",
+      auth: "",
+      secret_backend: "",
     },
   ],
   active_connection_id: "local",

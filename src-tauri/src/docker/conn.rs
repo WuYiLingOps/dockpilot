@@ -4,7 +4,8 @@ use std::sync::RwLock;
 use bollard::{Docker, API_DEFAULT_VERSION};
 use serde::Serialize;
 
-use crate::docker::tunnel;
+use crate::docker::ssh_client;
+use crate::docker::ssh_client::TransientSecrets;
 use crate::settings::{self, ConnectionProfile};
 
 /// 命令层统一错误类型：字符串直接返回给前端展示
@@ -124,6 +125,15 @@ fn build_err(e: bollard::errors::Error) -> String {
 /// 按连接类型构建 bollard 连接；ssh 先建立/复用本地 SSH 隧道再连接。
 /// 返回 (连接, 隧道本地端点)。
 pub async fn build_conn(conn: &ActiveConn, timeout: u64) -> CmdResult<(Docker, Option<String>)> {
+    build_conn_with(conn, timeout, &TransientSecrets::default()).await
+}
+
+/// 同 build_conn，但允许 ssh 连接携带瞬态密码/口令（测试未保存的连接时使用）
+pub async fn build_conn_with(
+    conn: &ActiveConn,
+    timeout: u64,
+    secrets: &TransientSecrets,
+) -> CmdResult<(Docker, Option<String>)> {
     let p = &conn.profile;
     match p.kind.as_str() {
         // 本地连接依赖 unix socket，Windows 版不支持本地 Docker（含 WSL），仅提供远程连接
@@ -183,7 +193,9 @@ pub async fn build_conn(conn: &ActiveConn, timeout: u64) -> CmdResult<(Docker, O
         }
         "ssh" => {
             // 本地端点：unix 为 socket 文件路径，windows 为 127.0.0.1:port
-            let endpoint = tunnel::ensure(p).await?;
+            let endpoint = ssh_client::ensure_with(p, secrets)
+                .await
+                .map_err(|e| e.to_string())?;
             #[cfg(unix)]
             {
                 let d = Docker::connect_with_socket(&endpoint, timeout, API_DEFAULT_VERSION)
@@ -207,8 +219,15 @@ pub async fn build_conn(conn: &ActiveConn, timeout: u64) -> CmdResult<(Docker, O
 
 /// 连通性验证：实际发起 version 请求（各传输的建连都是惰性的，必须发请求才能暴露不可达）
 async fn probe(conn: &ActiveConn) -> Result<(u128, String), String> {
+    probe_with(conn, &TransientSecrets::default()).await
+}
+
+async fn probe_with(
+    conn: &ActiveConn,
+    secrets: &TransientSecrets,
+) -> Result<(u128, String), String> {
     let start = std::time::Instant::now();
-    let (d, _) = build_conn(conn, PROBE_TIMEOUT).await?;
+    let (d, _) = build_conn_with(conn, PROBE_TIMEOUT, secrets).await?;
     let v = d.version().await.map_err(|e| format!("连接不可达: {e}"))?;
     Ok((start.elapsed().as_millis(), v.version.unwrap_or_default()))
 }
@@ -222,16 +241,25 @@ pub struct ConnectionTestResult {
     pub error: String,
 }
 
-/// 测试任意连接配置（不落盘、不影响当前连接）
+/// 测试任意连接配置（不落盘、不影响当前连接）。
+/// ssh 瞬态密码/口令仅内存使用（支持测试尚未保存的连接），空值回落已存密钥。
 #[tauri::command]
-pub async fn test_connection(profile: ConnectionProfile) -> ConnectionTestResult {
+pub async fn test_connection(
+    profile: ConnectionProfile,
+    ssh_password: Option<String>,
+    key_passphrase: Option<String>,
+) -> ConnectionTestResult {
     log::info!("测试连接「{}」（{}）", profile.name, profile.kind);
+    let secrets = TransientSecrets {
+        password: ssh_password.filter(|s| !s.is_empty()),
+        passphrase: key_passphrase.filter(|s| !s.is_empty()),
+    };
     let conn = ActiveConn::new(profile);
-    match probe(&conn).await {
+    match probe_with(&conn, &secrets).await {
         Ok((ms, version)) => {
             // 测试用的 ssh 隧道即时回收（若与当前活跃连接同 id 则保留）
             if conn.profile.kind == "ssh" && active().profile.id != conn.profile.id {
-                tunnel::stop(&conn.profile.id);
+                ssh_client::stop(&conn.profile.id).await;
             }
             log::info!("测试连接成功：{ms} ms，Docker {version}");
             ConnectionTestResult {
@@ -243,7 +271,7 @@ pub async fn test_connection(profile: ConnectionProfile) -> ConnectionTestResult
         }
         Err(e) => {
             if conn.profile.kind == "ssh" && active().profile.id != conn.profile.id {
-                tunnel::stop(&conn.profile.id);
+                ssh_client::stop(&conn.profile.id).await;
             }
             log::warn!("测试连接失败: {e}");
             ConnectionTestResult {
@@ -267,14 +295,14 @@ pub async fn switch_connection(app: tauri::AppHandle, id: String) -> CmdResult<C
         .ok_or_else(|| format!("连接配置不存在: {id}"))?;
 
     let conn = ActiveConn::new(profile.clone());
-    probe(&conn).await.map_err(|e| {
+    if let Err(e) = probe(&conn).await {
         if profile.kind == "ssh" && active().profile.id != profile.id {
-            tunnel::stop(&profile.id);
+            ssh_client::stop(&profile.id).await;
         }
         let msg = format!("切换到「{}」失败: {e}", profile.name);
         log::warn!("{msg}");
-        msg
-    })?;
+        return Err(msg);
+    }
 
     // 验证通过后按日常超时重建正式连接（探测连接的超时偏短，不适合留给命令层）
     let (d, tunnel_endpoint) = build_conn(&conn, TIMEOUT).await?;
@@ -282,7 +310,7 @@ pub async fn switch_connection(app: tauri::AppHandle, id: String) -> CmdResult<C
     // 清理旧连接的资源：所有长驻流、终端会话、其他 ssh 隧道
     app.state::<super::state::Streams>().cancel_all();
     app.state::<super::state::ExecSessions>().clear().await;
-    tunnel::stop_others(&profile.id);
+    ssh_client::stop_others(&profile.id).await;
 
     let mut w = state_write();
     let gen = w.current.as_ref().map(|(g, _)| g + 1).unwrap_or(1);
@@ -329,13 +357,16 @@ pub fn cli_env(conn: &ActiveConn) -> Vec<(String, String)> {
             ("DOCKER_TLS_VERIFY".into(), "1".into()),
         ],
         "ssh" => match &conn.tunnel_endpoint {
-            // 隧道端点形态随平台不同：unix 为 socket 路径，windows 为本地 TCP 端口
+            // 隧道端点形态随平台不同：unix 为 socket 路径，windows 为本地 TCP 端口。
+            // 此分支仅服务集成测试与本机 docker CLI 直连隧道的场景；
+            // compose 等远程 CLI 操作经 ssh_client exec 在远程执行，不走本机 CLI
             #[cfg(unix)]
             Some(sock) => vec![("DOCKER_HOST".into(), format!("unix://{sock}"))],
             #[cfg(windows)]
             Some(endpoint) => vec![("DOCKER_HOST".into(), format!("tcp://{endpoint}"))],
-            // 隧道尚未建立时退回 docker CLI 原生 ssh 传输（用用户自己的 ssh 配置）
-            None => vec![("DOCKER_HOST".into(), format!("ssh://{}", p.host))],
+            // 隧道未建立时无可用 DOCKER_HOST（原 ssh:// 回退依赖 docker CLI 原生
+            // ssh 传输，与 russh 引擎的认证/指纹语义不一致，已移除）
+            None => vec![],
         },
         _ => vec![],
     }

@@ -6,6 +6,7 @@ import {
   Network,
   Pencil,
   Plus,
+  ShieldAlert,
   ShieldCheck,
   Trash2,
 } from "lucide-react";
@@ -16,9 +17,12 @@ import { api } from "../../lib/api";
 import { firstLine } from "../../lib/format";
 import { useIsWindows } from "../../lib/platform";
 import { useSettings, useSwitchConnection, useUpdateSettings } from "../../lib/settings";
+import { parseHostKeyChange, type HostKeyChange } from "../../lib/ssh";
 import {
+  CONNECTION_AUTHS,
   CONNECTION_KINDS,
   connectionKindLabel,
+  type ConnectionAuth,
   type ConnectionKind,
   type ConnectionProfile,
   type ConnectionTestResult,
@@ -76,7 +80,8 @@ function validateDraft(p: ConnectionProfile): string | null {
   }
   if (p.kind === "ssh") {
     if (!p.host.trim()) return "请填写 SSH 地址";
-    if (p.key_path.trim().toLowerCase().endsWith(".pub")) {
+    if (!p.host.includes("@")) return "SSH 地址需为 user@host 形式（密码认证同样需要用户名）";
+    if (p.auth !== "password" && p.key_path.trim().toLowerCase().endsWith(".pub")) {
       return "请选择私钥文件，不要选择 .pub 公钥文件（例如 id_rsa.pub）";
     }
   }
@@ -95,18 +100,28 @@ function emptyDraft(kind: ConnectionKind = "local"): ConnectionProfile {
     key_path: "",
     remote_socket: "",
     jump_host: "",
+    auth: "key",
+    secret_backend: "",
   };
 }
 
-/** SSH 连接要求说明，逐条列出。首次部署公钥的指引按平台给出：Windows 的 OpenSSH
- * 不带 ssh-copy-id，用 PowerShell 管道把公钥追加到远程（远程均为 Linux） */
-function sshConnectionNotes(isWindows: boolean): string[] {
+/** SSH 连接要求说明，按认证方式逐条列出。首次部署公钥的指引按平台给出：
+ * Windows 的 OpenSSH 不带 ssh-copy-id，用 PowerShell 管道把公钥追加到远程（远程均为 Linux） */
+function sshConnectionNotes(auth: ConnectionAuth | "", isWindows: boolean): string[] {
+  if (auth === "password") {
+    return [
+      "密码仅保存在本机（系统钥匙串，无钥匙串环境回退加密文件），不会上传或同步",
+      "SSH 地址需含用户名（user@host），远程用户需已加入 docker 组",
+      "服务器若禁用密码认证（PasswordAuthentication no），请改用私钥",
+      "数据经 SSH 加密隧道传输",
+    ];
+  }
   const deploy = isWindows
     ? '首次使用需先部署公钥（输入一次密码，无密钥先 ssh-keygen -t ed25519）：在 PowerShell 执行 type $env:USERPROFILE\\.ssh\\id_ed25519.pub | ssh user@ip "mkdir -p ~/.ssh && cat >> ~/.ssh/authorized_keys"'
     : "首次使用需先部署公钥（输入一次密码）：在终端执行 ssh-copy-id user@ip";
   return [
-    "本机已安装 ssh 客户端，远程用户需已加入 docker 组",
-    "仅支持密钥认证：显式私钥、ssh-agent、默认私钥（~/.ssh/id_*）或 ~/.ssh/config 均可；不支持密码，勿选 .pub 公钥文件",
+    "内置 SSH 引擎连接，无需本机安装 ssh 客户端；远程用户需已加入 docker 组",
+    "支持显式私钥（含口令）、ssh-agent（Windows 版暂不支持 agent，请指定私钥路径）或默认私钥（~/.ssh/id_*）",
     `${deploy}，否则会报 Permission denied`,
     "数据经 SSH 加密隧道传输",
   ];
@@ -126,10 +141,35 @@ export function ConnectionSettings() {
   const [saving, setSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<ConnectionProfile | null>(null);
   const [testing, setTesting] = useState<Record<string, TestState>>({});
+  /** ssh 瞬态密码/口令（仅对话框内存，保存时经 set_ssh_secret 加密落盘） */
+  const [draftPassword, setDraftPassword] = useState("");
+  const [draftPassphrase, setDraftPassphrase] = useState("");
+  /** 主机指纹变更确认（确认后自动重试触发它的动作） */
+  const [hostKey, setHostKey] = useState<{ change: HostKeyChange; retry: () => Promise<void> } | null>(
+    null,
+  );
 
   if (!settings) return null;
   const connections = settings.connections;
   const activeId = settings.active_connection_id;
+
+  const openDraft = (p: ConnectionProfile, isNewDraft: boolean) => {
+    setDraft({ ...p });
+    setIsNew(isNewDraft);
+    setDraftPassword("");
+    setDraftPassphrase("");
+  };
+
+  /** 持久化草稿的 ssh 瞬态密钥；空值跳过（保持原密钥） */
+  const persistSshSecrets = async (p: ConnectionProfile) => {
+    if (p.kind !== "ssh") return;
+    if (p.auth === "password" && draftPassword) {
+      await api.setSshSecret(p.id, "password", draftPassword);
+    }
+    if (p.auth !== "password" && draftPassphrase) {
+      await api.setSshSecret(p.id, "key_passphrase", draftPassphrase);
+    }
+  };
 
   const saveDraft = async () => {
     if (!draft) return;
@@ -146,6 +186,7 @@ export function ConnectionSettings() {
       : [...connections, draft];
     try {
       await api.setSettings({ ...settings, connections: nextConnections });
+      await persistSshSecrets(draft);
     } catch (e) {
       toast.error(`保存设置失败: ${e}`);
       setSaving(false);
@@ -159,12 +200,56 @@ export function ConnectionSettings() {
         await api.switchConnection(draft.id);
         toast.success("连接配置已保存并重新连接");
       } catch (e) {
-        toast.error(`配置已保存，但按新配置连接失败，已保持原连接：${firstLine(String(e))}`);
+        const message = String(e);
+        const change = parseHostKeyChange(message);
+        if (change) {
+          // 指纹变更：确认后重试切换
+          setHostKey({ change, retry: async () => {
+            try {
+              await api.switchConnection(draft.id);
+              toast.success("连接配置已保存并重新连接");
+              void qc.invalidateQueries();
+            } catch (err) {
+              toast.error(`配置已保存，但按新配置连接失败，已保持原连接：${firstLine(String(err))}`);
+            }
+          } });
+          return;
+        }
+        toast.error(`配置已保存，但按新配置连接失败，已保持原连接：${firstLine(message)}`);
       }
     } else {
       toast.success("连接配置已保存");
     }
     void qc.invalidateQueries();
+  };
+
+  /** 执行一次连通性测试；主机指纹变更时弹确认框并在确认后自动重试 */
+  const runTest = async (p: ConnectionProfile, transient?: { password?: string; passphrase?: string }) => {
+    setTesting((t) => ({ ...t, [p.id]: { status: "testing" } }));
+    try {
+      const r: ConnectionTestResult = await api.testConnection(
+        p,
+        transient?.password,
+        transient?.passphrase,
+      );
+      if (!r.ok && p.kind === "ssh") {
+        const change = parseHostKeyChange(r.error);
+        if (change) {
+          setHostKey({ change, retry: () => runTest(p) });
+          setTesting((t) => ({ ...t, [p.id]: { status: "fail", error: "主机指纹已变更，等待确认" } }));
+          return;
+        }
+      }
+      setTesting((t) =>
+        r.ok
+          ? { ...t, [p.id]: { status: "ok", ms: r.latency_ms ?? 0, version: r.version } }
+          : { ...t, [p.id]: { status: "fail", error: r.error || "连接失败" } },
+      );
+    } catch (e) {
+      const message = errorMessage(e);
+      setTesting((t) => ({ ...t, [p.id]: { status: "fail", error: message } }));
+      throw e instanceof Error ? e : new Error(message);
+    }
   };
 
   const testDraft = async () => {
@@ -175,34 +260,19 @@ export function ConnectionSettings() {
       toast.error(err);
       return;
     }
-    setTesting((t) => ({ ...t, [draft.id]: { status: "testing" } }));
     try {
-      const r: ConnectionTestResult = await api.testConnection(draft);
-      setTesting((t) =>
-        r.ok
-          ? { ...t, [draft.id]: { status: "ok", ms: r.latency_ms ?? 0, version: r.version } }
-          : { ...t, [draft.id]: { status: "fail", error: r.error || "连接失败" } },
-      );
-    } catch (e) {
-      setTesting((t) => ({ ...t, [draft.id]: { status: "fail", error: errorMessage(e) } }));
+      await runTest(draft, { password: draftPassword, passphrase: draftPassphrase });
+    } catch {
+      // 失败状态已写入 testing
     }
   };
 
   const testRow = async (p: ConnectionProfile) => {
     if (testing[p.id]?.status === "testing") return;
-    setTesting((t) => ({ ...t, [p.id]: { status: "testing" } }));
     try {
-      const r = await api.testConnection(p);
-      setTesting((t) =>
-        r.ok
-          ? { ...t, [p.id]: { status: "ok", ms: r.latency_ms ?? 0, version: r.version } }
-          : { ...t, [p.id]: { status: "fail", error: r.error || "连接失败" } },
-      );
-      if (!r.ok) toast.error(`测试「${p.name}」失败: ${firstLine(r.error || "连接失败")}`);
+      await runTest(p);
     } catch (e) {
-      const message = errorMessage(e);
-      setTesting((t) => ({ ...t, [p.id]: { status: "fail", error: message } }));
-      toast.error(`测试「${p.name}」失败: ${firstLine(message)}`);
+      toast.error(`测试「${p.name}」失败: ${firstLine(errorMessage(e))}`);
     }
   };
 
@@ -317,8 +387,7 @@ export function ConnectionSettings() {
                   title="编辑"
                   onClick={(e) => {
                     e.stopPropagation();
-                    setDraft({ ...c });
-                    setIsNew(false);
+                    openDraft(c, false);
                   }}
                 >
                   <Pencil size={13} />
@@ -347,8 +416,7 @@ export function ConnectionSettings() {
           variant="outline"
           className="shrink-0"
           onClick={() => {
-            setDraft(emptyDraft(isWindows ? "ssh" : "local"));
-            setIsNew(true);
+            openDraft(emptyDraft(isWindows ? "ssh" : "local"), true);
           }}
         >
           <Plus size={13} />
@@ -469,21 +537,106 @@ export function ConnectionSettings() {
 
             {draft.kind === "ssh" && (
               <>
-                <label className="block">
-                  <span className="mb-1 block text-[12px] text-fg3">私钥路径（可选）</span>
-                  <div className="flex gap-2">
-                    <Input
-                      value={draft.key_path}
-                      onChange={(e) => setDraft({ ...draft, key_path: e.target.value })}
-                      placeholder="留空则依次尝试默认私钥（~/.ssh/id_*）、ssh-agent 与 ~/.ssh/config 配置"
-                      className="flex-1 font-mono"
-                      spellCheck={false}
-                    />
-                    <Button variant="outline" onClick={() => void pickKeyFile()}>
-                      选择文件
-                    </Button>
-                  </div>
-                </label>
+                <div>
+                  <div className="mb-1.5 text-[12px] text-fg3">认证方式</div>
+                  <SegmentedControl
+                    options={CONNECTION_AUTHS}
+                    value={draft.auth || "key"}
+                    onChange={(k: ConnectionAuth) => {
+                      // 切换认证方式时清掉另一侧的瞬态输入，避免误存
+                      if (k === "password") setDraftPassphrase("");
+                      else setDraftPassword("");
+                      setDraft({ ...draft, auth: k });
+                    }}
+                  />
+                </div>
+
+                {draft.auth === "password" ? (
+                  <label className="block">
+                    <span className="mb-1 block text-[12px] text-fg3">密码</span>
+                    <div className="flex gap-2">
+                      <Input
+                        type="password"
+                        value={draftPassword}
+                        onChange={(e) => setDraftPassword(e.target.value)}
+                        placeholder={draft.secret_backend ? "已保存，留空保持不变" : "远程用户的 SSH 登录密码"}
+                        className="flex-1"
+                        autoComplete="off"
+                      />
+                      {draft.secret_backend && (
+                        <Button
+                          variant="outline"
+                          onClick={() => {
+                            void api
+                              .setSshSecret(draft.id, "password", "")
+                              .then(() => {
+                                setDraft({ ...draft, secret_backend: "" });
+                                toast.success("已清除保存的密码");
+                              })
+                              .catch((e) => toast.error(`清除密码失败: ${e}`));
+                          }}
+                        >
+                          清除已保存
+                        </Button>
+                      )}
+                    </div>
+                    <span className="mt-1 block text-[11px] text-fg3">
+                      密码保存在本机系统钥匙串（无钥匙串环境回退加密文件），不写入配置文件、不上传
+                    </span>
+                  </label>
+                ) : (
+                  <label className="block">
+                    <span className="mb-1 block text-[12px] text-fg3">私钥路径（可选）</span>
+                    <div className="flex gap-2">
+                      <Input
+                        value={draft.key_path}
+                        onChange={(e) => setDraft({ ...draft, key_path: e.target.value })}
+                        placeholder={
+                          isWindows
+                            ? "建议指定私钥路径（Windows 版暂不支持 ssh-agent），留空则尝试默认私钥"
+                            : "留空则依次尝试 ssh-agent 与默认私钥（~/.ssh/id_*）"
+                        }
+                        className="flex-1 font-mono"
+                        spellCheck={false}
+                      />
+                      <Button variant="outline" onClick={() => void pickKeyFile()}>
+                        选择文件
+                      </Button>
+                    </div>
+                    {draft.key_path.trim() && (
+                      <div className="mt-2">
+                        <span className="mb-1 block text-[12px] text-fg3">私钥口令（可选）</span>
+                        <div className="flex gap-2">
+                          <Input
+                            type="password"
+                            value={draftPassphrase}
+                            onChange={(e) => setDraftPassphrase(e.target.value)}
+                            placeholder={draft.secret_backend ? "已保存，留空保持不变" : "私钥有口令时填写"}
+                            className="flex-1"
+                            autoComplete="off"
+                          />
+                          {draft.secret_backend && (
+                            <Button
+                              variant="outline"
+                              onClick={() => {
+                                void api
+                                  .setSshSecret(draft.id, "key_passphrase", "")
+                                  .then(() => {
+                                    setDraft({ ...draft, secret_backend: "" });
+                                    toast.success("已清除保存的口令");
+                                  })
+                                  .catch((e) => toast.error(`清除口令失败: ${e}`));
+                              }}
+                            >
+                              清除已保存
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </label>
+                )}
+
                 <label className="block">
                   <span className="mb-1 block text-[12px] text-fg3">跳板机地址（可选）</span>
                   <Input
@@ -494,7 +647,7 @@ export function ConnectionSettings() {
                     spellCheck={false}
                   />
                   <span className="mt-1 block text-[11px] text-fg3">
-                    目标主机仅可经跳板机访问时填写；跳板机的认证同样走密钥（默认私钥 / ssh-agent / ~/.ssh/config）
+                    目标主机仅可经跳板机访问时填写；跳板机走密钥类认证（显式私钥 / ssh-agent / 默认私钥）
                   </span>
                 </label>
                 <label className="block">
@@ -513,7 +666,7 @@ export function ConnectionSettings() {
                 <div className="rounded-ctl border border-edge bg-panel2 p-2.5 text-[11px] leading-4 text-fg3">
                   <span className="mb-1 block font-medium text-fg2">连接要求</span>
                   <ul className="list-disc space-y-1 pl-4">
-                    {sshConnectionNotes(isWindows).map((note) => (
+                    {sshConnectionNotes(draft.auth, isWindows).map((note) => (
                       <li key={note}>{note}</li>
                     ))}
                   </ul>
@@ -550,6 +703,57 @@ export function ConnectionSettings() {
             )}
           </div>
         )}
+      </Modal>
+
+      {/* 主机指纹变更确认（TOFU） */}
+      <Modal
+        open={hostKey !== null}
+        title="主机指纹已变更"
+        onClose={() => setHostKey(null)}
+        footer={
+          <>
+            <Button variant="outline" onClick={() => setHostKey(null)}>
+              取消
+            </Button>
+            <Button
+              variant="primary"
+              onClick={() => {
+                if (!hostKey) return;
+                const { change, retry } = hostKey;
+                setHostKey(null);
+                void api
+                  .acceptHostKey(change.dest, change.new, change.algo)
+                  .then(retry)
+                  .catch((e) => toast.error(`保存主机指纹失败: ${e}`));
+              }}
+            >
+              确认变更并重连
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-2.5">
+          <p className="flex items-start gap-1.5">
+            <ShieldAlert size={15} className="mt-0.5 shrink-0 text-warn" />
+            <span>
+              主机 <span className="font-mono font-semibold">{hostKey?.change.dest}</span> 的密钥指纹
+              （{hostKey?.change.algo}）与上次记录不一致。这通常发生在系统重装或 sshd 重新生成主机密钥后，
+              但也可能是中间人攻击的信号。
+            </span>
+          </p>
+          <div className="rounded-ctl border border-edge bg-panel2 p-2.5 font-mono text-[11px] leading-4">
+            <div className="text-fg3">
+              原指纹：<span className="break-all text-fg2">{hostKey?.change.stored}</span>
+            </div>
+            <div className="text-fg3">
+              新指纹：<span className="break-all text-warn">{hostKey?.change.new}</span>
+            </div>
+          </div>
+          <p className="text-[11px] text-fg3">
+            可在服务器上执行 ssh-keygen -lf /etc/ssh/ssh_host_*.pub.pub 对照（文件名随算法不同略有差异）。
+            确认无误后接受新指纹；如无法确认来源，请取消并核查网络环境。
+          </p>
+        </div>
       </Modal>
 
       {/* 删除确认 */}

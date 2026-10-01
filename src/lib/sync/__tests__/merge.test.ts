@@ -14,6 +14,8 @@ const conn = (id: string, name: string, host = ""): ConnectionProfile => ({
   key_path: "",
   remote_socket: "",
   jump_host: "",
+  auth: "key",
+  secret_backend: "",
 });
 
 const payload = (connections: ConnectionProfile[], overrides: Partial<SyncPayload> = {}): SyncPayload => ({

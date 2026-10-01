@@ -4,6 +4,8 @@ export type ThemeMode = "system" | "light" | "dark";
 export type TerminalShell = "bash" | "sh" | "ash";
 export type ConnectionKind = "local" | "tcp" | "tls" | "ssh";
 export type CloseAction = "ask" | "minimize" | "exit";
+/** ssh 认证方式：key = 私钥/agent（默认）；password = 密码（存系统钥匙串/加密文件） */
+export type ConnectionAuth = "key" | "password";
 
 /** 与后端 ConnectionProfile 对应；kind 决定各字段语义 */
 export interface ConnectionProfile {
@@ -22,6 +24,10 @@ export interface ConnectionProfile {
   remote_socket: string;
   /** ssh: 跳板机地址（user@host[:port]，空 = 直连，经 ProxyJump 中转） */
   jump_host: string;
+  /** ssh: 认证方式（空 = key）；连接一律由内置 russh 引擎承载 */
+  auth: ConnectionAuth | "";
+  /** ssh: 密码/私钥口令实际存储位置（"keyring" | "file"，空 = 未保存过） */
+  secret_backend: string;
 }
 
 /** 后端 test_connection 返回 */
@@ -126,4 +132,14 @@ export const CONNECTION_KINDS: { key: ConnectionKind; label: string }[] = [
 
 export function connectionKindLabel(kind: ConnectionKind): string {
   return CONNECTION_KINDS.find((k) => k.key === kind)?.label ?? kind;
+}
+
+/** ssh 认证方式的中文标签 */
+export const CONNECTION_AUTHS: { key: ConnectionAuth; label: string }[] = [
+  { key: "key", label: "私钥" },
+  { key: "password", label: "密码" },
+];
+
+export function connectionAuthLabel(auth: string): string {
+  return CONNECTION_AUTHS.find((a) => a.key === auth)?.label ?? "私钥";
 }

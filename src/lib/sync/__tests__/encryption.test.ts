@@ -11,8 +11,8 @@ import {
 
 const makePayload = (): SyncPayload => ({
   connections: [
-    { id: "local", name: "本地", kind: "local", socket_path: "", host: "", cert_path: "", key_path: "", remote_socket: "", jump_host: "" },
-    { id: "srv", name: "服务器", kind: "ssh", socket_path: "", host: "root@1.2.3.4", cert_path: "", key_path: "/home/id_rsa", remote_socket: "", jump_host: "" },
+    { id: "local", name: "本地", kind: "local", socket_path: "", host: "", cert_path: "", key_path: "", remote_socket: "", jump_host: "", auth: "key", secret_backend: "" },
+    { id: "srv", name: "服务器", kind: "ssh", socket_path: "", host: "root@1.2.3.4", cert_path: "", key_path: "/home/id_rsa", remote_socket: "", jump_host: "", auth: "key", secret_backend: "" },
   ],
   registries: [{ id: "r1", name: "阿里云", kind: "aliyun", registry: "registry.cn-hangzhou.aliyuncs.com", username: "u", secret_backend: "keyring", skip_tls_verify: false, created_at: 1 }],
   settings: { theme: "dark", containers_refresh_secs: 10, logs_timestamps: true },

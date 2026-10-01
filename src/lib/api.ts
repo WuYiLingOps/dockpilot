@@ -300,9 +300,25 @@ export const api = {
   /** 切换活跃连接：后端验证可达后替换连接并重启事件监听（不可达时抛错并保持原连接） */
   switchConnection: (id: string) => invoke<ConnectionProfile>("switch_connection", { id }),
 
-  /** 测试连接配置（不落盘、不影响当前连接）；ssh 类型会临时建立隧道再回收 */
-  testConnection: (profile: ConnectionProfile) =>
-    invoke<ConnectionTestResult>("test_connection", { profile }),
+  /**
+   * 测试连接配置（不落盘、不影响当前连接）；ssh 类型会临时建立隧道再回收。
+   * sshPassword/keyPassphrase 为瞬态参数（仅内存），支持测试尚未保存的密码连接；
+   * 空值回落已保存的密钥。
+   */
+  testConnection: (profile: ConnectionProfile, sshPassword?: string, keyPassphrase?: string) =>
+    invoke<ConnectionTestResult>("test_connection", {
+      profile,
+      sshPassword: sshPassword || null,
+      keyPassphrase: keyPassphrase || null,
+    }),
+
+  /** 保存/清除 SSH 密钥（kind: "password" = 登录密码，"key_passphrase" = 私钥口令）；secret 空 = 清除 */
+  setSshSecret: (profileId: string, kind: "password" | "key_passphrase", secret: string) =>
+    invoke<void>("set_ssh_secret", { profileId, kind, secret }),
+
+  /** 用户确认后接受主机的新指纹（覆盖 TOFU 记录） */
+  acceptHostKey: (dest: string, fingerprint: string, algo: string) =>
+    invoke<void>("accept_host_key", { dest, fingerprint, algo }),
 
   readDaemonConfig: () => invoke<DaemonConfigDto>("read_daemon_config"),
 

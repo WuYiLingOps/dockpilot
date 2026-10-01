@@ -8,7 +8,8 @@ use crate::secret_store::SecretBackend;
 /// - local: socket_path（空 = 默认 /var/run/docker.sock）
 /// - tcp:   host（host:port，明文 HTTP）
 /// - tls:   host（host:port）+ cert_path（证书目录，含 ca.pem / cert.pem / key.pem）
-/// - ssh:   host（user@host[:port]）+ 可选 key_path + 可选 remote_socket（rootless 等非默认路径）
+/// - ssh:   host（user@host[:port]）+ auth（认证方式）
+///   + 可选 key_path + 可选 remote_socket（rootless 等非默认路径）
 ///   + 可选 jump_host（跳板机 user@host[:port]，经 ProxyJump 中转）
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
@@ -25,6 +26,12 @@ pub struct ConnectionProfile {
     pub remote_socket: String,
     /// ssh 类型：跳板机地址（user@host[:port]），空 = 直连
     pub jump_host: String,
+    /// ssh 类型：认证方式 "key"（私钥/agent，默认）| "password"（密码存 secret_store）。
+    /// 连接一律由内置 russh 引擎承载（历史上曾有的 system 回退已移除）
+    pub auth: String,
+    /// ssh 类型：密码/私钥口令实际存储位置（"keyring" | "file"），空 = 尚未保存过密钥。
+    /// 仅是提示性落点：读取时按此优先、另一后端兜底（见 secret_store::load_secret_any）
+    pub secret_backend: String,
 }
 
 impl ConnectionProfile {
@@ -40,6 +47,8 @@ impl ConnectionProfile {
             key_path: String::new(),
             remote_socket: String::new(),
             jump_host: String::new(),
+            auth: String::new(),
+            secret_backend: String::new(),
         }
     }
 
@@ -218,6 +227,18 @@ pub fn sanitize(mut s: AppSettings) -> AppSettings {
         c.key_path = c.key_path.trim().to_string();
         c.remote_socket = c.remote_socket.trim().to_string();
         c.jump_host = c.jump_host.trim().to_string();
+        if c.kind == "ssh" {
+            // 认证方式：空/非法值回落 key
+            if c.auth != "password" {
+                c.auth = "key".into();
+            }
+            if SecretBackend::parse(&c.secret_backend).is_none() {
+                c.secret_backend = String::new();
+            }
+        } else {
+            c.auth.clear();
+            c.secret_backend.clear();
+        }
         if c.id.is_empty() {
             c.id = uuid::Uuid::new_v4().to_string();
         }
@@ -356,6 +377,8 @@ pub async fn set_settings(app: tauri::AppHandle, settings: AppSettings) -> CmdRe
     let s = migrate(sanitize(settings));
     log_setting_changes(&old, &s);
     save(&app, &s)?;
+    // 保存成功后清理已删除 SSH 连接的孤儿密钥（失败仅记日志，不影响保存结果）
+    crate::ssh_secrets::cleanup_removed(&app, &old, &s);
     Ok(s)
 }
 
@@ -553,6 +576,58 @@ mod tests {
             ..Default::default()
         });
         assert_eq!(s.connections[0].jump_host, "jump@10.0.0.1:22");
+    }
+
+    #[test]
+    fn sanitize_ssh_auth() {
+        let mk = |id: &str, auth: &str| ConnectionProfile {
+            id: id.into(),
+            name: "ssh".into(),
+            kind: "ssh".into(),
+            host: "root@10.0.0.5".into(),
+            auth: auth.into(),
+            ..Default::default()
+        };
+        let s = sanitize(AppSettings {
+            connections: vec![
+                mk("a", ""),    // 旧配置缺字段 → key
+                mk("b", "key"), // 合法值保留
+                mk("c", "password"),
+                mk("d", "weird"), // 非法值回落 key
+            ],
+            ..Default::default()
+        });
+        assert_eq!(s.connections[0].auth, "key");
+        assert_eq!(s.connections[1].auth, "key");
+        assert_eq!(s.connections[2].auth, "password");
+        assert_eq!(s.connections[3].auth, "key");
+
+        // 非 ssh 连接的 ssh 专属字段应被清空
+        let s = sanitize(AppSettings {
+            connections: vec![ConnectionProfile {
+                id: "t".into(),
+                kind: "tcp".into(),
+                host: "10.0.0.5:2375".into(),
+                auth: "password".into(),
+                secret_backend: "keyring".into(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        });
+        assert!(s.connections[0].auth.is_empty());
+        assert!(s.connections[0].secret_backend.is_empty());
+    }
+
+    #[test]
+    fn parse_old_profile_gains_ssh_defaults() {
+        // 1.0.3 及更早的 settings.json 没有 auth 字段；曾短暂存在的 transport 字段
+        // 已随系统 ssh 回退移除，serde 忽略未知字段，不得影响解析
+        let s = parse_settings(
+            r#"{"connections":[{"id":"a","name":"vps","kind":"ssh","host":"root@10.0.0.5","transport":"system"}]}"#,
+        );
+        let s = sanitize(s);
+        assert_eq!(s.connections[0].auth, "key");
+        assert!(s.connections[0].secret_backend.is_empty());
     }
 
     #[test]
