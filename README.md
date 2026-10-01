@@ -16,7 +16,11 @@
 
 DockPilot 把这套能力装进桌面应用：Tauri 2 单窗口 + Rust 内核直连 Docker Engine API，管理本机或远程 Docker 无需部署任何服务。下载一个安装包就能用：不部署、不占端口、不登录。连接凭据与仓库密码都存在本机——SSH 只用私钥，仓库密码进系统钥匙串。
 
-[项目预览](#项目预览) · [它能做什么](#它能做什么) · [怎么工作](#怎么工作) · [技术栈](#技术栈) · [快速开始](#快速开始) · [构建与安装](#构建与安装) · [远程连接](#远程连接) · [镜像推送](#镜像推送) · [常见问题](#常见问题与已知说明) · [项目结构](#项目结构)
+[项目预览](#项目预览) · [它能做什么](#它能做什么) · [怎么工作](#怎么工作) · [技术栈](#技术栈) · [快速开始](#快速开始) · [构建与安装](#构建与安装) · [项目结构](#项目结构)
+
+**使用手册**（docs/）：[远程连接](docs/remote-connection.md) · [镜像推送](docs/push-images.md) · [云同步](docs/cloud-sync.md) · [常见问题](docs/faq.md)
+
+**参与贡献与版本记录**：[CONTRIBUTING.md](docs/CONTRIBUTING.md) · [CHANGELOG.md](CHANGELOG.md)
 
 ---
 
@@ -65,15 +69,15 @@ OrbStack 式布局：侧栏导航（顶部按钮可收起为图标栏，状态�
 - **容器** — 列表 / 搜索 / 启动 / 停止 / 重启 / 暂停 / 恢复 / 删除，Docker 事件驱动实时刷新；healthcheck 徽标（健康 / 不健康 / 检查中）；compose 容器带项目徽标，点击直达编排详情
 - **容器创建** — 镜像选择（本地不存在时自动拉取并显示进度）、容器名（可留空自动生成）、端口映射（多行、tcp/udp）、卷挂载（多行、只读）、环境变量、标签、资源限制（内存 MB/GB、CPU 核数可小数）、命令覆盖（按 shell 词法解析）、工作目录、网络选择、主机名、重启策略、自动移除 / 特权模式 / TTY / 标准输入，与 Docker Desktop 的 Run 能力对齐；支持粘贴 `docker run` 命令自动解析回填（-p/-v/-e/-l/--name/--restart/--memory/--cpus 等常用选项），以及克隆现有容器（inspect 反解析为表单，compose 标签自动剔除；原容器运行中时自动改为不重启策略并提示端口 / 卷可能冲突，避免克隆体因启动失败陷入无限重启循环）
 - **容器详情** — 概览（CPU / 内存 / 网络 / 磁盘 I/O 实时曲线，healthcheck 状态与最近一次失败输出；未运行时展示退出码 / OOM 等退出原因与排查提示，启动即失败会在操作提示中直接告知）、日志（流式、自动跟随、关键字过滤、时间戳、stderr 高亮、按当前参数导出文件）、终端（交互式 bash / sh / ash，自适应窗口尺寸）、进程（docker top 实时进程表）、文件（浏览 / 上传 / 下载 / 删除，等同 docker cp；目录列表与删除需容器运行中）、原始 Inspect JSON 查看器（关键字过滤、一键复制）；支持在线更新配置（docker update 调整重启策略与内存 / CPU 限制，无需重建容器）
-- **镜像** — 列表 / 搜索 / 来源筛选（按镜像地址前缀归组）/ 删除（可强制）/ 拉取（实时进度，缺省标签自动补 latest）；tar 归档导出（批量、共享层去重、可取消）与导入（多镜像）、标签管理与逐个移除；推送到私有仓库，支持多选批量推送（逐行自动推导目标引用、顺序推送、单镜像失败不阻塞，见「[镜像推送](#镜像推送)」）
+- **镜像** — 列表 / 搜索 / 来源筛选（按镜像地址前缀归组）/ 删除（可强制）/ 拉取（实时进度，缺省标签自动补 latest）；tar 归档导出（批量、共享层去重、可取消）与导入（多镜像）、标签管理与逐个移除；推送到私有仓库，支持多选批量推送（逐行自动推导目标引用、顺序推送、单镜像失败不阻塞，见「[镜像推送](docs/push-images.md)」）
 - **编排（docker compose）** — 基于容器标准标签自动识别 compose 项目并聚合服务；项目级启动 / 停止 / 重启 / 暂停 / 下线（可选删卷删镜像）/ 构建 / 拉取，服务级启停与重启，输出流式展示可中途取消；compose 文件在线编辑（语法预检、自动备份、重新应用）。调用系统 compose CLI（自动探测插件版与独立版，未安装时仍可查看并提示）
 - **存储和网络** — 存储卷（列表 / 详情含挂载点与使用容器 / 创建 / 删除，占用与引用计数来自 `docker system df`）、网络（详情含 IPAM 与已连接容器 / 创建 / 删除 / 连接断开容器，内置网络禁止删除）、磁盘用量（占比树图、构建缓存明细、直达空间清理），卷 / 网络数据事件驱动自动刷新
 - **系统概览** — Docker 引擎与宿主资源总览：基础信息、容器 CPU / 内存占用、网络与磁盘实时曲线、用量统计树图；「存储卷 / 网络」统计卡片可点击直达对应子页签
 - **空间清理** — 悬空镜像 / 未使用镜像 / 已停止容器 / 未使用卷 / 构建缓存的大小与数量统计，勾选一键清理并显示回收空间
-- **多连接管理** — 多个 Docker 连接的配置、连通性测试（延迟与版本）、添加 / 编辑 / 删除、一键切换即时生效；侧栏底部快速切换。SSH 由应用自动建立加密隧道（私钥、rootless socket、跳板机），见「[远程连接](#远程连接)」
-- **镜像仓库凭据** — 阿里云 ACR / Harbor 凭据管理与连通性测试，密码存入系统钥匙串，推送镜像用（见「[镜像推送](#镜像推送)」）
-- **多设备云同步** — 连接配置、镜像仓库条目与显示设置端到端加密后同步到 GitHub 私有 Gist，多台设备自动合并；云端只存密文，同步密码解锁后记住在本机密钥库、启动自动解锁（可随时锁定清除），见「[云同步](#云同步)」
-- **后台常驻** — 系统托盘常驻，首次关闭窗口弹窗询问「最小化到托盘 / 退出应用」（可勾选记住选择，设置 → 后台与关闭 可随时修改）；最小化后容器异常桌面通知持续生效，单实例运行、二次启动自动唤起已有窗口
+- **多连接管理** — 多个 Docker 连接的配置、连通性测试（延迟与版本）、添加 / 编辑 / 删除、一键切换即时生效；侧栏底部快速切换。SSH 由应用自动建立加密隧道（私钥、rootless socket、跳板机），见「[远程连接](docs/remote-connection.md)」
+- **镜像仓库凭据** — 阿里云 ACR / Harbor 凭据管理与连通性测试，密码存入系统钥匙串，推送镜像用（见「[镜像推送](docs/push-images.md)」）
+- **多设备云同步** — 连接配置、镜像仓库条目与显示设置端到端加密后同步到 GitHub 私有 Gist，多台设备自动合并；云端只存密文，同步密码解锁后记住在本机密钥库、启动自动解锁（可随时锁定清除），见「[云同步](docs/cloud-sync.md)」
+- **后台常驻** — 系统托盘常驻，首次关闭窗口弹窗询问「最小化到托盘 / 退出应用」（可勾选记住选择，设置 → 应用 → 关闭窗口时 可随时修改）；最小化后容器异常桌面通知持续生效，单实例运行、二次启动自动唤起已有窗口
 - **设置** — 主题、连接管理、镜像仓库凭据、多设备云同步、列表刷新间隔、日志与终端默认值、容器异常桌面通知、关闭窗口行为（每次询问 / 最小化到托盘 / 完全退出）、故障诊断（使用日志查看、调试日志开关、日志定时清理、导出诊断包），持久化到 `~/.config/com.dockpilot.app/settings.json`
 - **镜像加速 / daemon.json 编辑（Linux）** — Docker Desktop 式直接编辑 `/etc/docker/daemon.json` 全文（pkexec 提权写入、覆盖前自动备份），实时校验（JSON 语法 + 语义检查 + dockerd `--validate` 深度校验，旧版 Docker 自动降级）、内置国内预设源快捷开关、一键测速、pkexec 不可用时回退为可复制的终端命令
 
@@ -157,7 +161,7 @@ cargo test           # 单测 + 集成测试（需要本机 Docker daemon 运行
 npm run build        # 前端 tsc + vite 构建
 ```
 
-依赖本机 daemon 之外的远程链路回归测试默认忽略，运行方式见「[远程连接](#远程连接) → 远程连接集成测试」；Windows CI 仅运行不依赖本地 Docker daemon 的测试。
+依赖本机 daemon 之外的远程链路回归测试默认忽略，运行方式见 [docs/remote-connection.md](docs/remote-connection.md) 的「远程连接集成测试」；Windows CI 仅运行不依赖本地 Docker daemon 的测试。
 
 ## 构建与安装
 
@@ -194,13 +198,14 @@ npm run tauri build
 
 ```bash
 mkdir -p ~/.local/share/applications
-cat > ~/.local/share/applications/dockpilot-dev.desktop <<'EOF'
+REPO=$PWD   # 仓库克隆目录，按实际路径调整
+cat > ~/.local/share/applications/dockpilot-dev.desktop <<EOF
 [Desktop Entry]
 Categories=Development;Utility;
 Comment=DockPilot 开发模式（调试二进制）
-Exec=/home/hj/ProjectData/docker-desktop/src-tauri/target/debug/dockpilot
+Exec=$REPO/src-tauri/target/debug/dockpilot
 StartupWMClass=dockpilot
-Icon=/home/hj/ProjectData/docker-desktop/design/app-icon.png
+Icon=$REPO/design/app-icon.png
 Name=DockPilot (Dev)
 Terminal=false
 Type=Application
@@ -213,311 +218,19 @@ update-desktop-database ~/.local/share/applications
 
 ## 远程连接
 
-DockPilot 支持管理多个 Docker 连接并随时切换：Linux 支持 **本地 socket / SSH / TLS / 明文 TCP**，Windows 支持 **SSH / TLS / 明文 TCP**。连接在独立的「Docker 连接管理」弹窗中统一管理（添加 / 编辑 / 测试 / 删除），由侧栏底部下拉的「管理连接…」或断连引导页的「连接设置」唤起；当前连接在侧栏底部快速切换，即时生效并自动刷新数据，无需重启应用。
-
-### 使用方法
-
-1. 进入「设置 → Docker 连接」→「添加连接」
-2. 选择连接类型并填写地址，可先「测试连接」验证可达性（返回延迟与远程版本）
-3. 保存后点击连接行，或用侧栏底部下拉切换
-4. 切换后容器 / 镜像 / 存储等全部数据指向新连接；compose 编排操作也经同一连接执行（SSH 连接时直接在远程服务器上执行）
-
-### SSH 连接（推荐）
-
-无需在远程机开放任何 Docker TCP 端口，数据全程加密：
-
-**前置条件**
-
-- 本机已安装 ssh 客户端（Windows 请启用 OpenSSH Client）
-- 远程机已运行 Docker daemon，并允许登录用户访问对应的 Docker socket
-- 远程机 sshd 需允许 TCP 转发（`AllowTcpForwarding yes`，发行版默认开启；做过安全加固的服务器可能改为 `no`，症状见下方「故障排查」）
-- 认证仅支持**密钥类方式**（显式私钥、ssh-agent、默认私钥 `~/.ssh/id_*` 或 `~/.ssh/config` 配置均可），不支持交互式密码
-
-**配置免密登录**
-
-Linux / macOS：
-
-```bash
-ssh-copy-id user@10.0.0.115                            # 输入一次密码，装本机公钥
-ssh -o BatchMode=yes user@10.0.0.115 'docker version'  # 验证免密 + docker 权限
-```
-
-Windows（OpenSSH 不带 ssh-copy-id，无密钥先在 PowerShell 执行 `ssh-keygen -t ed25519`，一路回车）：
-
-```powershell
-type $env:USERPROFILE\.ssh\id_ed25519.pub | ssh user@10.0.0.115 "mkdir -p ~/.ssh && cat >> ~/.ssh/authorized_keys"
-ssh -o BatchMode=yes user@10.0.0.115 "docker version"
-```
-
-Windows 如需使用 ssh-agent，先启用 OpenSSH Authentication Agent 服务（管理员 PowerShell：`Set-Service ssh-agent -StartupType Automatic; Start-Service ssh-agent`）。
-
-**应用内配置**
-
-| 字段 | 说明 |
-|---|---|
-| 地址 | `user@主机` 或 `user@主机:端口`（端口默认 22） |
-| 私钥路径 | 可选；留空依次尝试默认私钥（`~/.ssh/id_*`）、ssh-agent 或 `~/.ssh/config` 配置 |
-| 跳板机地址 | 可选；目标主机仅可经跳板机访问时填 `user@跳板机[:端口]`（经 ProxyJump 中转，跳板机认证同样走密钥类方式） |
-| 远程 Socket 路径 | 可选；rootless Docker 填 `/run/user/<uid>/docker.sock`，默认 `/var/run/docker.sock` |
-
-**实现方式**：Linux 上应用在本地建立 `ssh -N -L` 加密隧道，把远程 Docker socket 转发为本机 Unix socket；Windows 上使用 OpenSSH 将远程 Docker socket 转发到本机 TCP 端口。bollard 经对应端点通信；SSH 连接的 compose 编排操作则经 SSH 直接在远程服务器上执行。隧道随连接切换、应用退出自动回收，进程意外退出会在下次使用时自动重建。
-
-### TLS 连接
-
-适合无法用 SSH 但可配置远程 daemon 的场景（双向证书认证）：
-
-> 按 [Docker 官方文档](https://docs.docker.com/engine/security/protect-access/) 用 openssl 生成 CA、服务端与客户端证书（客户端需 `ca.pem` / `cert.pem` / `key.pem` 三个文件）
-
-#### 证书准备
-
-> 仅供参考
-
-```bash
-# 1.创建证书目录并收紧权限
-mkdir -p /data/docker/certs
-chmod 700 /data/docker/certs
-cd /data/docker/certs
-
-# 2.生成 CA 根证书（无交互，无需手动填信息）
-# CA根私钥（仅远程宿主机留存，严禁发给Dell-G15-5510）
-openssl genrsa -out ca-key.pem 4096
-
-# 一键写入完整证书信息
-openssl req -new -x509 -days 3650 -key ca-key.pem -sha256 -out ca.pem \
--subj "/C=CN/ST=GuangXi/L=Nanning/O=HuangOps/OU=DevOps/CN=10.0.0.115/emailAddress=huangjing510@126.com"
-
-# 3.生成 Docker 服务端证书（绑定本机 IP 10.0.0.115）
-# 服务端私钥
-openssl genrsa -out server-key.pem 4096
-# 证书请求文件
-openssl req -subj "/C=CN/ST=GuangXi/L=Nanning/O=HuangOps/OU=DevOps/CN=10.0.0.115" -sha256 -new -key server-key.pem -out server.csr
-# 关键SAN配置：绑定远程宿主机IP，否则客户端握手失败
-echo subjectAltName = IP:10.0.0.115 >> extfile.cnf
-echo extendedKeyUsage = serverAuth >> extfile.cnf
-# CA签发服务端证书
-openssl x509 -req -days 3650 -sha256 -in server.csr -CA ca.pem -CAkey ca-key.pem -CAcreateserial -out server-cert.pem -extfile extfile.cnf
-
-# 4.生成客户端证书（给 Dell-G15-5510 本地主机使用）
-# 客户端私钥，后续拷贝到Dell-G15-5510
-openssl genrsa -out key.pem 4096
-# 客户端证书请求
-openssl req -subj "/C=CN/ST=GuangXi/L=Nanning/O=HuangOps/OU=DevOps/CN=client" -new -key key.pem -out client.csr
-# 客户端鉴权标记
-echo extendedKeyUsage = clientAuth > extfile-client.cnf
-# 签发客户端证书
-openssl x509 -req -days 3650 -sha256 -in client.csr -CA ca.pem -CAkey ca-key.pem -CAserial ca.srl -out cert.pem -extfile extfile-client.cnf
-# 5. 清理临时文件 + 安全权限加固（Ubuntu2404 必执行）
-rm -rf *.csr extfile*.cnf ca.srl
-# 私钥仅root可读
-chmod 600 *-key.pem key.pem
-chown root:root /data/docker/certs/*
-# 6.提取可下发给【Dell-G15-5510】的证书包
-仅复制以下 3 个文件到你本地 Dell-G15-5510，ca-key.pem 留在远程宿主机，不要传输：
-1. ca.pem 根证书
-2. cert.pem 客户端证书
-3. key.pem 客户端私钥
-```
-
-#### 配置 Docker TLS 监听
-
-远程机开启 TLS 监听（systemd 环境用 override，避免与 daemon.json 的 `hosts` 冲突）：
-
-> 注意自行开放相关防火墙
-
-```bash
-[root@docker ~]# vim /lib/systemd/system/docker.service
-# 修改以下ExecStart配置
-ExecStart=/usr/local/bin/dockerd \
-  -H unix:///var/run/docker.sock \
-  -H tcp://0.0.0.0:2376 --tlsverify \
-  --tlscacert=/data/docker/certs/ca.pem \
-  --tlscert=/data/docker/certs/server-cert.pem \
-  --tlskey=/data/docker/certs/server-key.pem
-
-sudo systemctl daemon-reload
-sudo systemctl restart docker
-```
-
-#### 测试连接
-
-应用内：类型选 **TLS**，填 `主机:2376`，选择客户端证书目录（需含 `ca.pem`、`cert.pem`、`key.pem`）
-
-![image-20260930151406568](https://hj-typora-images-1319512400.cos.ap-guangzhou.myqcloud.com/2026-images/20260930151406image-20260930151406568.png)
-
-### 明文 TCP
-
-仅建议在可信内网使用（流量未加密且无认证，配置时会显示安全提示）：
-
-```bash
-[root@docker ~]# vim /usr/lib/systemd/system/docker.service
-# 修改以下ExecStart配置
-ExecStart=/usr/bin/dockerd -H tcp://0.0.0.0:2375 -H unix:///var/run/docker.sock
-
-sudo systemctl daemon-reload
-sudo systemctl restart docker
-```
-
-应用内：类型选 **TCP**，填 `主机:2375`。
-
-![image-20260930151658637](https://hj-typora-images-1319512400.cos.ap-guangzhou.myqcloud.com/2026-images/20260930151658image-20260930151658637.png)
-
-### 故障排查
-
-| 现象 | 排查方向 |
-|---|---|
-| 测试连接超时 | 地址 / 端口 / 防火墙：`nc -zv 主机 端口` |
-| SSH 报 Permission denied | 免密未配置或私钥不对：`ssh -o BatchMode=yes user@host docker version` 验证 |
-| SSH 隧道建立超时 | 检查远程 Docker socket 路径、登录用户的 Docker 权限，以及 Windows 本机是否启用了 OpenSSH Client |
-| SSH 报 `连接不可达: Error in the hyper legacy client: client error (SendRequest)` | SSH 隧道正常，是请求 Docker API 时远端拒绝了 socket 转发通道，两种原因见下方「SSH 隧道报 client error (SendRequest)」：sshd 禁用了转发；或远程为 OpenSSH ≤ 7.4（如 CentOS 7）且以 root 登录 |
-| TLS 报证书文件缺失 | 证书目录下需同时有 `ca.pem`、`cert.pem`、`key.pem` |
-| 拉取 / 容器操作报权限错误 | 远程用户不在 docker 组：`sudo usermod -aG docker $USER` 后重新登录 |
-| 远程机改了配置但不生效 | `systemd override` 配置后需 `sudo systemctl daemon-reload && sudo systemctl restart docker` |
-
-#### SSH 隧道报 client error (SendRequest)
-
-`连接不可达: Error in the hyper legacy client: client error (SendRequest)` 表示 SSH 连接与隧道本身正常，失败发生在经隧道请求 Docker API 时：本地 ssh 向远端发起 `direct-streamlocal` 通道（连接 `/var/run/docker.sock`）被拒绝，连接随即关闭。两种原因：
-
-**原因一：sshd 禁用了转发（隧道依赖它）**。编辑远程 `/etc/ssh/sshd_config` 把 `AllowTcpForwarding` 改为 `yes`，重启 sshd（`sudo systemctl restart sshd`，Debian/Ubuntu 服务名为 `ssh`）后重试。
-
-**原因二：远程为 OpenSSH ≤ 7.4（典型如 CentOS 7）且以 root 登录**。7.4 及更早版本对 root 会话关闭特权分离（`privsep_postauth()` 将 `use_privsep` 置 0），而其 unix socket 转发实现要求 `use_privsep`，于是 root 的 unix socket 转发被无条件拒绝——与 sshd 任何配置无关，7.5（2017-03）起已修复（CentOS 7 官方源停留在 7.4）。任选其一绕开：
-
-- 改用**非 root 账号**连接（非 root 会话特权分离保持开启），并保证该账号能访问 docker socket——完整命令见下方
-- 让 dockerd 额外监听本机 TCP：远程 `docker.service` 的 `ExecStart` 追加 `-H tcp://127.0.0.1:2375`（写法参照上文 TLS 一节的 override），`daemon-reload` 并重启 docker 后，把连接配置的「远程 Socket 路径」填 `127.0.0.1:2375`——转发目标为 `host:port` 时走 TCP 转发通道（direct-tcpip），不受该 bug 影响。仅监听 127.0.0.1 且无 TLS，请勿改为 `0.0.0.0` 对外开放
-- 升级远程 sshd 到 7.5+（CentOS 7 已 EOL，需自行编译或第三方包，一般不建议为此折腾）
-
-改用专用账号的完整命令（以在远程机创建账号 `dockpilot`、地址 `10.0.0.117` 为例）：
-
-```bash
-# —— 远程机（10.0.0.117）上执行 ——
-# 1. 创建专用账号并设置密码（密码仅用于下一步首次部署公钥）
-sudo useradd -m dockpilot
-sudo passwd dockpilot
-
-# 2. 让 dockerd 改用 docker 组创建 socket
-#    （该机 /var/run/docker.sock 属组为 root，普通账号无权访问）
-sudo groupadd -f docker
-#    编辑 /lib/systemd/system/docker.service，在 ExecStart 行追加 -G docker，例如：
-#      ExecStart=/usr/local/bin/dockerd -H unix://var/run/docker.sock -G docker
-sudo systemctl daemon-reload && sudo systemctl restart docker
-
-# 3. 账号加入 docker 组（组成员等同 root 权限，仅添加可信账号）
-sudo usermod -aG docker dockpilot
-
-# —— 本机执行 ——
-# 4. 部署公钥（输入上一步设置的密码），并验证免密登录与 docker 权限
-ssh-copy-id dockpilot@10.0.0.117
-ssh -o BatchMode=yes dockpilot@10.0.0.117 docker version
-
-# 5. 在 DockPilot「连接管理」中把该连接的地址改为 dockpilot@10.0.0.117
-```
-
-验证方法：`ssh -v -N -L /tmp/t.sock:/var/run/docker.sock root@远程机`，另开终端执行 `curl --unix-socket /tmp/t.sock http://localhost/_ping`；若 ssh 输出 `open failed: administratively prohibited` 即命中上述两种原因之一。
-
-### 远程连接集成测试
-
-真实远程链路的回归测试（镜像拉取 → 容器创建 → exec / 日志 / 统计 → 删除，自清理），默认忽略、显式运行：
-
-```bash
-cd src-tauri
-DOCKERPILOT_REMOTE_SSH=root@10.0.0.115 cargo test --lib -- --ignored remote_ssh --nocapture
-```
+支持管理多个 Docker 连接并随时切换：Linux 支持**本地 socket / SSH / TLS / 明文 TCP**，Windows 支持 **SSH / TLS / 明文 TCP**；SSH 由应用自动建立加密隧道（私钥、rootless socket、跳板机），远端零部署。配置步骤、TLS 证书生成实操与故障排查详见 **[docs/remote-connection.md](docs/remote-connection.md)**。
 
 ## 镜像推送
 
-支持把本地镜像推送到 Docker Registry v2 兼容仓库，优先适配**阿里云容器镜像服务（ACR）**与**自建 Harbor**，也支持 Nexus、Quay、Distribution 等通用仓库。凭据在「设置 → 镜像仓库」统一管理（添加 / 编辑 / 测试连接 / 删除），镜像页行内「推送」入口也可就地快捷新建凭据。
-
-### 使用方法
-
-1. 「设置 → 镜像仓库」→「添加仓库」，选择类型（阿里云 ACR / Harbor / 通用）并填写地址、用户名与密码；「测试连接」验证连通性与凭据
-2. 镜像页点击镜像行的「推送」按钮，选择仓库凭据、填写目标仓库名与标签（默认值从镜像引用推导）；勾选多个镜像后可「推送所选」批量推送——统一选凭据、逐行自动推导目标引用（可编辑）、按顺序推送，单镜像失败不阻塞后续，可随时取消
-3. 目标引用与本地引用不同时自动打标签（指向同一镜像，无额外存储），推送进度按层实时显示，可中途取消
-
-阿里云 ACR（个人版免费）：用户名即阿里云登录账号，密码建议在镜像服务控制台「访问凭证管理」中设置固定密码；命名空间需提前创建，内置常用地域地址预设。Harbor：支持普通账号与机器人账户（`robot$项目+名称`），项目需提前存在且账号有推送权限；自签名证书可勾选「测试连接时跳过 TLS 证书校验」。
-
-### 安全说明
-
-- 密码保存在本机：优先写入**系统钥匙串**（Linux Secret Service / macOS 钥匙串 / Windows 凭据管理器）；无钥匙串的环境（无桌面的 Linux）自动回退为**机器绑定加密文件**（`~/.config/com.dockpilot.app/secrets.bin`，AES-256-GCM，密钥由 machine-id 派生）——该回退属混淆级防护，换机或重装系统后需重新录入密码
-- 推送时密码经 Docker Engine API 的请求头传给 daemon 执行推送，不写入 `~/.docker/config.json`，不落远端磁盘
-- 推送由**当前连接的 Docker daemon** 执行：SSH 远程连接时在远端主机推送，需远端可访问仓库地址
-
-### 推送报错对照
-
-| 推送报错 | 原因与处理 |
-|---|---|
-| authentication required / unauthorized | 凭据无效：检查用户名密码；Harbor 机器人账户需已启用且未过期；阿里云需使用登录账号或固定密码 |
-| denied: requested access … | 无推送权限：Harbor 项目需已存在且账号有写权限；阿里云命名空间需已创建 |
-| server gave HTTP response to HTTPS client | 仓库为 HTTP 服务：需在该 daemon 的 `daemon.json` 中将仓库地址加入 `insecure-registries` 后重启 Docker |
-| x509: certificate signed by unknown authority | 自签名证书：同样加入 `insecure-registries`，或向系统导入 CA 证书 |
-| connection refused / timeout | 网络不通：远程连接时需远端 Docker 宿主机可访问该仓库地址 |
+把本地镜像推送到 Docker Registry v2 兼容仓库，优先适配阿里云 ACR 与自建 Harbor；凭据存系统钥匙串，支持多选批量推送与推送报错对照。使用方法与安全说明详见 **[docs/push-images.md](docs/push-images.md)**。
 
 ## 云同步
 
-多台设备间的配置同步：把 **Docker 连接配置、镜像仓库条目、显示类设置** 端到端加密后存到你自己的 **GitHub 私有 Gist**，其他设备登录同一 GitHub 账号即可自动拉取合并。云端自始至终只有密文（AES-256-GCM，密钥由同步密码经 PBKDF2 600,000 次派生），GitHub 侧无法看到任何配置内容。
-
-### 使用方法
-
-1. 注册一个 GitHub OAuth App（无需 client secret）：在 [github.com/settings/developers](https://github.com/settings/developers) 新建并勾选 **Enable Device Flow**，拿到 Client ID
-2. 「设置 → 云同步」→「连接 GitHub」，在浏览器输入应用显示的设备码完成授权（登录令牌存入系统钥匙串，不落明文文件）
-3. 首次使用设置一个**同步密码**——它用于加密云端数据；解锁后自动记住在本机密钥库、启动时自动解锁，不想记住可随时「锁定」清除；**多台设备必须使用相同密码**
-4. 之后配置变更 3 秒后自动上传，启动与窗口切回时自动检查云端更新；也可随时点「立即同步」
-
-### 同步范围
-
-| 内容 | 说明 |
-|---|---|
-| Docker 连接配置 | 全量同步：SSH / TLS / TCP 的地址、端口、证书与私钥**路径**、远程 socket、跳板机等 |
-| 镜像仓库条目 | 仅元数据（名称 / 地址 / 用户名 / 类型）；**密码不同步**，新设备需逐条重新录入一次 |
-| 显示类设置 | 主题、列表刷新间隔、日志回看行数与时间戳、终端默认 shell、容器异常通知开关 |
-
-**不同步的内容**：各设备当前激活的连接、仓库密码与 SSH 私钥文件本身（只同步路径字符串）、GitHub 登录令牌、同步密码——这些始终只留在设备本地。
-
-### 安全说明
-
-- 云端 Gist 中只有 `meta（明文参数）+ payload（密文）`：解密钥匙由同步密码派生，密码只保存在本机密钥库（钥匙串优先，回退机器绑定加密文件），可随时在同步卡片「锁定」清除，**遗忘同步密码后云端数据无法解密**（只能删除同步 Gist 重来）
-- 新设备首次同步按**合并**而非覆盖：连接与仓库条目按 id 三方合并（增删改双方自动合并，同时修改以本机优先并计冲突）；标量设置双改本地优先
-- 内置护栏：本机数据异常减少时暂停推送（可选恢复云端或强制推送）、本机为空而云端有数据时弹窗确认，避免误覆盖云端
-- GitHub OAuth token 优先存系统钥匙串，无钥匙串环境回退机器绑定加密文件
-- 官方安装包已内置 Client ID；**自行构建**需复制 `.env.example` 为 `.env` 并填入自己 OAuth App 的 Client ID（构建期经 Vite 注入）
+多台设备间的配置同步：连接配置、镜像仓库条目与显示类设置端到端加密后存到你自己的 GitHub 私有 Gist，云端只有密文。使用方法、同步范围与安全护栏详见 **[docs/cloud-sync.md](docs/cloud-sync.md)**。
 
 ## 常见问题与已知说明
 
-**应用闪退 / 异常退出后如何排查？**
-DockPilot 自带崩溃诊断：异常退出后的下次启动会显示顶部横幅（能归因时给出 panic 位置与原因，强制结束 / 断电等仅提示"未正常退出"），原因详情保留到下一次正常退出。使用日志可在「设置 → 故障诊断 → 查看日志」中浏览（级别过滤 / 关键字搜索 / 导出），日志文件位置：
-
-- Linux：`~/.local/share/com.dockpilot.app/logs/`
-- Windows：`%LOCALAPPDATA%\com.dockpilot.app\logs\`
-
-日志按会话分文件（`dockpilot.log` 为当前会话，`dockpilot_时间.log` 为历史会话归档，最多保留 14 个），排查闪退优先看最近归档的尾部。也可以直接在「故障诊断 → 导出诊断包」打包最近日志与崩溃详情随 Issue 反馈（不含任何密码 / 私钥 / 令牌）。排查疑难问题时可临时开启「调试日志」（Debug 级别，立即生效）。
-
-**Linux 上画面黑屏或花屏？**
-WebKitGTK 在部分 NVIDIA 驱动上 DMABUF 渲染可能黑屏。应用启动时检测到 NVIDIA 环境会自动设置 `WEBKIT_DISABLE_DMABUF_RENDERER=1` 兜底（Windows 走 WebView2，不执行该 workaround）；如仍遇异常，可手动设置该变量后启动。
-
-**托盘图标不见了 / 最小化到托盘后找不到窗口？**
-GNOME 桌面默认不显示托盘区，需安装 AppIndicator 扩展（Ubuntu 24.04 已内置 `gnome-shell-extension-appindicator`；KDE 及多数桌面原生支持）；Windows 在任务栏右下角托盘区（可能折叠于「^」中）。托盘菜单提供「显示 DockPilot / 退出」；关闭窗口行为可在「设置 → 后台与关闭」中修改。
-
-**Alpine 容器打开终端没反应？**
-默认 shell 为 bash，Alpine 系镜像请在终端页切换为 `sh` 或 `ash`（可在设置中改默认值）。
-
-**容器详情的「文件」页签有什么限制？**
-列表与删除通过在容器内执行 `ls` / `rm` 实现（不经 shell、命令参数直接传入），需要容器处于运行中；上传 / 下载走 Engine 的 archive API（等同 `docker cp`），单次传输上限 512MB（超大文件建议在终端中操作）。删除目录不可恢复，请谨慎操作。
-
-**Windows 版能管本机 Docker Desktop / WSL 吗？**
-不能。Windows 上安装 Docker Desktop 后通常由 WSL2 提供本地 daemon，本项目不会连接或管理该本地 daemon；请在「设置 → Docker 连接」中配置远程主机。
-
-**镜像加速 / daemon.json 编辑需要什么权限？**
-应用通过 `pkexec` 提权整体写 `/etc/docker/daemon.json`（覆盖前自动备份为 `daemon.json.dockpilot.bak`）并可一键重启 Docker；应用前会先经 JSON 语法校验与 dockerd `--validate` 深度校验（Docker Engine 23.0+ 支持，旧版自动跳过）。无 polkit 的环境（如纯 SSH 会话）会自动回退为生成可复制的终端命令（命令内置同样的校验门禁）。重启 Docker 会中断运行中的容器（开启 live-restore 则不受影响），应用会在确认弹窗中提示。
-
-**编排操作报找不到 compose 命令？**
-Linux 上项目识别与查看仅依赖 Engine API；启动 / 停止等编排操作需要系统已安装 `docker compose` 插件（`docker-compose-plugin`）或 `docker-compose` 独立命令（SSH 连接时在远程服务器上执行，本机无需安装）。
-
-**仓库密码存在哪里？换机会丢吗？**
-优先系统钥匙串，无钥匙串时（无桌面的 Linux）存机器绑定加密文件，属混淆级防护；换机或重装系统后原密钥文件不可解密，需重新录入密码（应用会在测试连接时报错提示）。
-
-**忘记同步密码怎么办？**
-本机记住的同步密码可在同步卡片「锁定」清除；若密码本身遗忘，云端密文无法解密。处理：到 GitHub 删除同步 Gist（描述为 "DockPilot Encrypted Vault" 的私有 Gist），各设备在「设置 → 云同步」断开重连、设置新密码后重新上传。
-
-**云同步提示解密失败（同步密码可能不同）？**
-两台设备设置过不同的同步密码。在冲突提示中选「使用云端」并输入云端数据的密码（本机同步密码将被重置为云端密码），或选「使用本地覆盖云端」以本机为准。
+崩溃排查与日志位置、Linux 黑屏、托盘图标、Alpine 终端、文件页签限制、Windows 本机 Docker、daemon.json 权限、仓库密码存储与同步密码找回等常见问题，见 **[docs/faq.md](docs/faq.md)**。
 
 ## 项目结构
 
