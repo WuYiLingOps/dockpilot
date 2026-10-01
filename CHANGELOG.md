@@ -16,6 +16,9 @@
 - 主机指纹 TOFU 安全机制：首次连接自动记录（OpenSSH SHA256 格式），指纹变更时拒绝连接并弹窗确认新旧指纹
 - 密钥认证增强：支持加密私钥口令（加密存储）、rsa-sha2-256 优先并回退 SHA-1 兼容老服务器、ssh-agent 不可用时自动回退默认私钥
 - CI 新增 SSH 冒烟 job：openssh-server 容器自动验证 russh 密码认证全链路
+- **编排独立管理**：未运行的 compose 项目不再"消失"——曾运行过的项目自动记忆保留（`down` 后仍可见、可一键重启），支持手动注册 compose 文件（本地文件选择器或 SSH 输入远端路径）与扫描目录自动发现（深度 3 层，本地与远端一致），来源徽标区分「已记录 / 手动添加 / 扫描」
+- **拉取自动匹配仓库凭据**：按镜像引用的 registry 域名自动匹配已保存凭据（阿里云 ACR / Harbor 等私有仓库镜像不再依赖 daemon 自身的 `docker login`；通用仓库地址可填 `docker.io`、`ghcr.io`、`quay.io` 等官方 v2 源，别名 `docker.io` 自动路由到 registry-1 端点）
+- 拉取失败提示增强：额度用尽（toomanyrequests）、需要认证等场景给出可操作建议
 
 ### 变更
 
@@ -33,6 +36,7 @@
 - 连接地址按字面解析，不读取 `~/.ssh/config`：Host 别名、每主机 User/Port/IdentityFile 等配置不生效（请把完整地址与私钥路径直接填入连接配置）
 - 内置引擎默认算法集覆盖 OpenSSH ≥ 7.4（2016-12）；更老版本 sshd（OpenSSH ≤ 6.x）未经验证
 - Windows 版暂不支持 ssh-agent，请指定私钥路径
+- 编排跟踪记录与扫描目录按连接绑定存储（路径为该连接视角），不参与云同步；目录扫描仅手动触发、深度 3 层，扫描发现的编排以主 compose 文件注册，不自动叠加 override 文件
 
 ### 文档
 
@@ -101,7 +105,9 @@
 - 镜像拉取 / 推送 / 批量导出导入，Compose 项目识别与操作，磁盘用量与空间清理
 - 镜像仓库凭据管理（系统钥匙串存储），GitHub Gist 端到端加密云同步
 
-[Unreleased]: https://github.com/WuYiLingOps/dockpilot/compare/v1.0.2...HEAD
+[Unreleased]: https://github.com/WuYiLingOps/dockpilot/compare/v1.0.4...HEAD
+[1.0.4]: https://github.com/WuYiLingOps/dockpilot/compare/v1.0.3...v1.0.4
+[1.0.3]: https://github.com/WuYiLingOps/dockpilot/compare/v1.0.2...v1.0.3
 [1.0.2]: https://github.com/WuYiLingOps/dockpilot/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/WuYiLingOps/dockpilot/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/WuYiLingOps/dockpilot/releases/tag/v1.0.0
