@@ -13,16 +13,25 @@ DockPilot 支持管理多个 Docker 连接并随时切换：Linux 支持 **本�
 
 ## SSH 连接（推荐）
 
-无需在远程机开放任何 Docker TCP 端口，数据全程加密：
+无需在远程机开放任何 Docker TCP 端口，数据全程加密。连接由**内置 SSH 引擎（russh，纯 Rust）**建立，默认无需本机安装任何 ssh 客户端，**支持密码认证与密钥认证**。
 
 **前置条件**
 
-- 本机已安装 ssh 客户端（Windows 请启用 OpenSSH Client）
 - 远程机已运行 Docker daemon，并允许登录用户访问对应的 Docker socket
-- 远程机 sshd 需允许 TCP 转发（`AllowTcpForwarding yes`，发行版默认开启；做过安全加固的服务器可能改为 `no`，症状见下方「故障排查」）
-- 认证仅支持**密钥类方式**（显式私钥、ssh-agent、默认私钥 `~/.ssh/id_*` 或 `~/.ssh/config` 配置均可），不支持交互式密码
+- 远程机 sshd 需允许转发（`AllowTcpForwarding yes`，发行版默认开启；做过安全加固的服务器可能改为 `no`，症状见下方「故障排查」）
+- 认证方式二选一：
+  - **密码**：直接填远程用户的 SSH 登录密码（保存在本机系统钥匙串，无钥匙串环境回退机器绑定加密文件；不上传、不进配置文件）
+  - **密钥**：显式私钥（可含口令）、ssh-agent（Linux/macOS；Windows 版暂不支持 agent，请指定私钥路径）或默认私钥 `~/.ssh/id_*`
 
-**配置免密登录**
+**使用密码认证**
+
+直接在连接配置中选择「密码」认证并填写密码即可，无需任何预配置。注意：
+
+- 地址需含用户名（`user@host`）
+- 服务器若禁用密码登录（sshd `PasswordAuthentication no`），请改用密钥
+- 密码经密钥库加密存储；「清除已保存」按钮可删除
+
+**配置免密登录（密钥认证，可选）**
 
 Linux / macOS：
 
@@ -38,18 +47,23 @@ type $env:USERPROFILE\.ssh\id_ed25519.pub | ssh user@10.0.0.115 "mkdir -p ~/.ssh
 ssh -o BatchMode=yes user@10.0.0.115 "docker version"
 ```
 
-Windows 如需使用 ssh-agent，先启用 OpenSSH Authentication Agent 服务（管理员 PowerShell：`Set-Service ssh-agent -StartupType Automatic; Start-Service ssh-agent`）。
-
 **应用内配置**
 
 | 字段 | 说明 |
 |---|---|
-| 地址 | `user@主机` 或 `user@主机:端口`（端口默认 22） |
-| 私钥路径 | 可选；留空依次尝试默认私钥（`~/.ssh/id_*`）、ssh-agent 或 `~/.ssh/config` 配置 |
-| 跳板机地址 | 可选；目标主机仅可经跳板机访问时填 `user@跳板机[:端口]`（经 ProxyJump 中转，跳板机认证同样走密钥类方式） |
+| 地址 | `user@主机` 或 `user@主机:端口`（端口默认 22；密码认证同样需要用户名） |
+| 认证方式 | 私钥（默认）或密码 |
+| 密码 / 私钥口令 | 按认证方式填写；加密存储于本机，编辑时留空保持不变 |
+| 私钥路径 | 密钥认证可选；留空依次尝试 ssh-agent 与默认私钥（`~/.ssh/id_*`） |
+| 私钥口令 | 私钥有口令时可选填写，同样加密存储 |
+| 跳板机地址 | 可选；目标主机仅可经跳板机访问时填 `user@跳板机[:端口]`（跳板机走密钥类认证） |
 | 远程 Socket 路径 | 可选；rootless Docker 填 `/run/user/<uid>/docker.sock`，默认 `/var/run/docker.sock` |
 
-**实现方式**：Linux 上应用在本地建立 `ssh -N -L` 加密隧道，把远程 Docker socket 转发为本机 Unix socket；Windows 上使用 OpenSSH 将远程 Docker socket 转发到本机 TCP 端口。bollard 经对应端点通信；SSH 连接的 compose 编排操作则经 SSH 直接在远程服务器上执行。隧道随连接切换、应用退出自动回收，进程意外退出会在下次使用时自动重建。
+**主机指纹安全**：首次连接自动记录主机指纹（OpenSSH SHA256 格式，可与 `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` 对照）；指纹变化时连接会被拒绝并弹窗展示新旧指纹，确认是服务器重装等正常原因后可接受新指纹，无法确认来源时应取消并核查网络环境。
+
+**实现方式**：内置引擎在本地建立加密隧道，把远程 Docker socket 经 `direct-streamlocal` 通道转发为本机 Unix socket（Windows 为本机 TCP 端口）。bollard 经对应端点通信；SSH 连接的 compose 编排操作则经 SSH 会话直接在远程服务器上执行。隧道随连接切换、应用退出自动回收；连接断开后下次使用自动重建（内置 30s keepalive 探活）。
+
+**兼容性说明**：连接地址按字面解析（`user@host[:端口]`），不会读取 `~/.ssh/config`——Host 别名、每主机 User/Port/IdentityFile 等配置不生效，请把完整地址与私钥路径直接填进连接配置。内置引擎的默认算法集覆盖 OpenSSH ≥ 7.4（2016-12 发布，支持 curve25519 与 rsa-sha2）；公钥认证对 RSA 密钥自动先试 rsa-sha2-256、被拒回退 SHA-1，更老的 sshd（OpenSSH ≤ 6.x）未经验证。
 
 ## TLS 连接
 
@@ -156,7 +170,7 @@ sudo systemctl restart docker
 |---|---|
 | 测试连接超时 | 地址 / 端口 / 防火墙：`nc -zv 主机 端口` |
 | SSH 报 Permission denied | 免密未配置或私钥不对：`ssh -o BatchMode=yes user@host docker version` 验证 |
-| SSH 隧道建立超时 | 检查远程 Docker socket 路径、登录用户的 Docker 权限，以及 Windows 本机是否启用了 OpenSSH Client |
+| SSH 隧道建立超时 | 检查远程 Docker socket 路径与登录用户的 Docker 权限 |
 | SSH 报 `连接不可达: Error in the hyper legacy client: client error (SendRequest)` | SSH 隧道正常，是请求 Docker API 时远端拒绝了 socket 转发通道，两种原因见下方「SSH 隧道报 client error (SendRequest)」：sshd 禁用了转发；或远程为 OpenSSH ≤ 7.4（如 CentOS 7）且以 root 登录 |
 | TLS 报证书文件缺失 | 证书目录下需同时有 `ca.pem`、`cert.pem`、`key.pem` |
 | 拉取 / 容器操作报权限错误 | 远程用户不在 docker 组：`sudo usermod -aG docker $USER` 后重新登录 |
