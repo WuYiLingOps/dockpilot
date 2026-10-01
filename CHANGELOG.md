@@ -7,6 +7,38 @@
 
 ## [Unreleased]
 
+## [1.0.4] - 2026-10-01
+
+### 新增
+
+- SSH 连接支持**密码认证**：密码经系统钥匙串加密存储（无钥匙串环境回退机器绑定加密文件），并支持 keyboard-interactive（PAM）回退
+- SSH 层改用内置 **russh 引擎**（纯 Rust），**全面替代系统 ssh 命令**：密码认证 + 端口转发 + 远程命令执行（compose 探测/操作、compose 文件读写）不再依赖系统 ssh 客户端，Windows 免装 OpenSSH
+- 主机指纹 TOFU 安全机制：首次连接自动记录（OpenSSH SHA256 格式），指纹变更时拒绝连接并弹窗确认新旧指纹
+- 密钥认证增强：支持加密私钥口令（加密存储）、rsa-sha2-256 优先并回退 SHA-1 兼容老服务器、ssh-agent 不可用时自动回退默认私钥
+- CI 新增 SSH 冒烟 job：openssh-server 容器自动验证 russh 密码认证全链路
+
+### 变更
+
+- SSH 隧道本地端点 Windows 侧改为内核分配随机端口，消除探测-释放竞态；会话增加 keepalive 探活，断线自动重建
+- 连接错误按原因分类（认证失败 / 网络不可达 / 转发被拒 / 指纹变更），提示直达原因
+- SSH 连接的 compose 操作输出流改为经内置引擎会话通道回传，与本机执行共用同一取消语义
+
+### 修复
+
+- Windows 未安装 OpenSSH 客户端时无法使用 SSH 连接的问题
+
+### 已知限制
+
+- 连接地址按字面解析，不读取 `~/.ssh/config`：Host 别名、每主机 User/Port/IdentityFile 等配置不生效（请把完整地址与私钥路径直接填入连接配置）
+- 内置引擎默认算法集覆盖 OpenSSH ≥ 7.4（2016-12）；更老版本 sshd（OpenSSH ≤ 6.x）未经验证
+- Windows 版暂不支持 ssh-agent，请指定私钥路径
+
+### 文档
+
+- `docs/remote-connection.md` 重写 SSH 章节：密码认证、主机指纹安全与兼容性说明
+
+## [1.0.3] - 2026-10-01
+
 ### 新增
 
 - CI 质量门禁（`.github/workflows/ci.yml`）：前端类型检查 + vitest，Rust 格式 / clippy / 单测与集成测试，随提交与 PR 自动运行
