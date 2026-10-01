@@ -13,7 +13,6 @@ const conn = (id: string, name: string, host = ""): ConnectionProfile => ({
   cert_path: "",
   key_path: "",
   remote_socket: "",
-  jump_host: "",
   auth: "key",
   secret_backend: "",
 });

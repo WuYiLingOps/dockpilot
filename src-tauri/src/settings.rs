@@ -10,7 +10,6 @@ use crate::secret_store::SecretBackend;
 /// - tls:   host（host:port）+ cert_path（证书目录，含 ca.pem / cert.pem / key.pem）
 /// - ssh:   host（user@host[:port]）+ auth（认证方式）
 ///   + 可选 key_path + 可选 remote_socket（rootless 等非默认路径）
-///   + 可选 jump_host（跳板机 user@host[:port]，经 ProxyJump 中转）
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct ConnectionProfile {
@@ -24,8 +23,6 @@ pub struct ConnectionProfile {
     pub key_path: String,
     /// ssh 类型：远程 docker socket 路径，空 = /var/run/docker.sock
     pub remote_socket: String,
-    /// ssh 类型：跳板机地址（user@host[:port]），空 = 直连
-    pub jump_host: String,
     /// ssh 类型：认证方式 "key"（私钥/agent，默认）| "password"（密码存 secret_store）。
     /// 连接一律由内置 russh 引擎承载（历史上曾有的 system 回退已移除）
     pub auth: String,
@@ -46,7 +43,6 @@ impl ConnectionProfile {
             cert_path: String::new(),
             key_path: String::new(),
             remote_socket: String::new(),
-            jump_host: String::new(),
             auth: String::new(),
             secret_backend: String::new(),
         }
@@ -226,7 +222,6 @@ pub fn sanitize(mut s: AppSettings) -> AppSettings {
         c.cert_path = c.cert_path.trim().to_string();
         c.key_path = c.key_path.trim().to_string();
         c.remote_socket = c.remote_socket.trim().to_string();
-        c.jump_host = c.jump_host.trim().to_string();
         if c.kind == "ssh" {
             // 认证方式：空/非法值回落 key
             if c.auth != "password" {
@@ -563,22 +558,6 @@ mod tests {
     }
 
     #[test]
-    fn sanitize_trims_jump_host() {
-        let s = sanitize(AppSettings {
-            connections: vec![ConnectionProfile {
-                id: "j1".into(),
-                name: "经跳板机".into(),
-                kind: "ssh".into(),
-                host: "root@10.0.0.9".into(),
-                jump_host: "  jump@10.0.0.1:22 ".into(),
-                ..Default::default()
-            }],
-            ..Default::default()
-        });
-        assert_eq!(s.connections[0].jump_host, "jump@10.0.0.1:22");
-    }
-
-    #[test]
     fn sanitize_ssh_auth() {
         let mk = |id: &str, auth: &str| ConnectionProfile {
             id: id.into(),
@@ -620,10 +599,10 @@ mod tests {
 
     #[test]
     fn parse_old_profile_gains_ssh_defaults() {
-        // 1.0.3 及更早的 settings.json 没有 auth 字段；曾短暂存在的 transport 字段
-        // 已随系统 ssh 回退移除，serde 忽略未知字段，不得影响解析
+        // 旧版本 settings.json 没有 auth 字段：serde default 补空串后 sanitize
+        // 归一为 key；连接对象中的未知/废弃字段被 serde 忽略，不得影响解析
         let s = parse_settings(
-            r#"{"connections":[{"id":"a","name":"vps","kind":"ssh","host":"root@10.0.0.5","transport":"system"}]}"#,
+            r#"{"connections":[{"id":"a","name":"vps","kind":"ssh","host":"root@10.0.0.5","legacy_a":1,"legacy_b":"x"}]}"#,
         );
         let s = sanitize(s);
         assert_eq!(s.connections[0].auth, "key");

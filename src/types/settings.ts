@@ -22,8 +22,6 @@ export interface ConnectionProfile {
   key_path: string;
   /** ssh: 远程 docker socket 路径（空 = /var/run/docker.sock） */
   remote_socket: string;
-  /** ssh: 跳板机地址（user@host[:port]，空 = 直连，经 ProxyJump 中转） */
-  jump_host: string;
   /** ssh: 认证方式（空 = key）；连接一律由内置 russh 引擎承载 */
   auth: ConnectionAuth | "";
   /** ssh: 密码/私钥口令实际存储位置（"keyring" | "file"，空 = 未保存过） */

@@ -56,7 +56,6 @@ ssh -o BatchMode=yes user@10.0.0.115 "docker version"
 | 密码 / 私钥口令 | 按认证方式填写；加密存储于本机，编辑时留空保持不变 |
 | 私钥路径 | 密钥认证可选；留空依次尝试 ssh-agent 与默认私钥（`~/.ssh/id_*`） |
 | 私钥口令 | 私钥有口令时可选填写，同样加密存储 |
-| 跳板机地址 | 可选；目标主机仅可经跳板机访问时填 `user@跳板机[:端口]`（跳板机走密钥类认证） |
 | 远程 Socket 路径 | 可选；rootless Docker 填 `/run/user/<uid>/docker.sock`，默认 `/var/run/docker.sock` |
 
 **主机指纹安全**：首次连接自动记录主机指纹（OpenSSH SHA256 格式，可与 `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` 对照）；指纹变化时连接会被拒绝并弹窗展示新旧指纹，确认是服务器重装等正常原因后可接受新指纹，无法确认来源时应取消并核查网络环境。

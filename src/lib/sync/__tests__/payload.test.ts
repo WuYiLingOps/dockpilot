@@ -7,7 +7,7 @@ const localSettings = (): AppSettings => ({
   theme: "dark",
   docker_socket: "/legacy/sock",
   connections: [
-    { id: "local", name: "本地", kind: "local", socket_path: "", host: "", cert_path: "", key_path: "", remote_socket: "", jump_host: "", auth: "key", secret_backend: "" },
+    { id: "local", name: "本地", kind: "local", socket_path: "", host: "", cert_path: "", key_path: "", remote_socket: "", auth: "key", secret_backend: "" },
   ],
   active_connection_id: "local",
   containers_refresh_secs: 10,
@@ -36,7 +36,7 @@ describe("载荷映射", () => {
     const incoming = toSyncPayload(settings);
     incoming.connections = [
       ...incoming.connections,
-      { id: "srv", name: "服务器", kind: "ssh", socket_path: "", host: "root@1.2.3.4", cert_path: "", key_path: "", remote_socket: "", jump_host: "", auth: "key", secret_backend: "" },
+      { id: "srv", name: "服务器", kind: "ssh", socket_path: "", host: "root@1.2.3.4", cert_path: "", key_path: "", remote_socket: "", auth: "key", secret_backend: "" },
     ];
     incoming.registries = [
       ...incoming.registries,

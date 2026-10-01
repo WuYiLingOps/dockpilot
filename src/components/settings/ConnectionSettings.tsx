@@ -62,9 +62,7 @@ function displayUrl(p: ConnectionProfile): string {
     case "tls":
       return `https://${p.host}`;
     case "ssh":
-      return p.jump_host.trim()
-        ? `ssh://${p.host}（经跳板机 ${p.jump_host.trim()}）`
-        : `ssh://${p.host}`;
+      return `ssh://${p.host}`;
     default:
       return p.host;
   }
@@ -99,7 +97,6 @@ function emptyDraft(kind: ConnectionKind = "local"): ConnectionProfile {
     cert_path: "",
     key_path: "",
     remote_socket: "",
-    jump_host: "",
     auth: "key",
     secret_backend: "",
   };
@@ -637,19 +634,6 @@ export function ConnectionSettings() {
                   </label>
                 )}
 
-                <label className="block">
-                  <span className="mb-1 block text-[12px] text-fg3">跳板机地址（可选）</span>
-                  <Input
-                    value={draft.jump_host}
-                    onChange={(e) => setDraft({ ...draft, jump_host: e.target.value })}
-                    placeholder="user@jump.example.com:22"
-                    className="font-mono"
-                    spellCheck={false}
-                  />
-                  <span className="mt-1 block text-[11px] text-fg3">
-                    目标主机仅可经跳板机访问时填写；跳板机走密钥类认证（显式私钥 / ssh-agent / 默认私钥）
-                  </span>
-                </label>
                 <label className="block">
                   <span className="mb-1 block text-[12px] text-fg3">远程 Socket 路径（可选）</span>
                   <Input

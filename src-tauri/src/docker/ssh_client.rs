@@ -9,7 +9,6 @@
 //! ssh-agent、默认私钥。密码/口令经 secret_store 存取（见 ssh_secrets）。
 //!
 //! 主机密钥：TOFU（首次自动记录，变更拒绝并由前端确认），见 ssh_known_hosts。
-//! 跳板机：先连跳板（密钥类认证），经 direct-tcpip 通道建立到目标的第二段连接。
 //!
 //! 依赖注意：russh 必须启用 ring 特性（而非默认的 aws-lc-rs），与本项目的
 //! rustls ring provider 保持一致——两者共存曾导致建连时 provider 二义性 panic。
@@ -239,15 +238,6 @@ fn default_user() -> String {
         .unwrap_or_default()
 }
 
-/// 跳板机地址 → (user, host, port)
-fn parse_jump(p: &ConnectionProfile) -> Option<Result<(String, String, u16), String>> {
-    let jump = p.jump_host.trim();
-    if jump.is_empty() {
-        return None;
-    }
-    Some(parse_dest(jump))
-}
-
 enum AuthMethod {
     Password(String),
     Key {
@@ -300,26 +290,6 @@ fn resolve_auth(
     Ok(AuthMethod::DefaultKeys)
 }
 
-/// 跳板机的认证策略：密钥类（显式私钥 → agent → 默认私钥）。
-/// 密码认证仅作用于目标主机——跳板机密码是另一份凭据，暂不支持（UI 已说明）。
-fn resolve_jump_auth(p: &ConnectionProfile) -> Result<AuthMethod, SshError> {
-    let key_path = p.key_path.trim();
-    if !key_path.is_empty() && !key_path.to_ascii_lowercase().ends_with(".pub") {
-        return Ok(AuthMethod::Key {
-            path: PathBuf::from(key_path),
-            // 跳板机暂不附带口令解密：加密私钥请经 agent 加载
-            passphrase: None,
-        });
-    }
-    if std::env::var_os("SSH_AUTH_SOCK")
-        .map(|v| !v.is_empty())
-        .unwrap_or(false)
-    {
-        return Ok(AuthMethod::Agent);
-    }
-    Ok(AuthMethod::DefaultKeys)
-}
-
 fn default_key_paths() -> Vec<PathBuf> {
     let home = std::env::var_os("HOME")
         .or_else(|| std::env::var_os("USERPROFILE"))
@@ -334,7 +304,7 @@ fn default_key_paths() -> Vec<PathBuf> {
         .collect()
 }
 
-/// 建立连接并完成认证（含跳板机两段式）。跳板机侧的指纹同样走 TOFU。
+/// 建立连接并完成认证
 async fn connect_and_auth(
     p: &ConnectionProfile,
     secrets: &TransientSecrets,
@@ -342,58 +312,17 @@ async fn connect_and_auth(
 ) -> Result<Arc<Handle<ClientHandler>>, SshError> {
     let config = Arc::new(client_config());
     let (user, host, port) = parse_dest(&p.host).map_err(SshError::Connect)?;
-    let target_dest = dest_key(&host, port);
-    let dir = dir.to_path_buf();
-
-    let handle = match parse_jump(p) {
-        Some(jump) => {
-            let (ju, jh, jp) = jump.map_err(SshError::Connect)?;
-            let jhandler = ClientHandler {
-                dest: dest_key(&jh, jp),
-                dir: dir.clone(),
-            };
-            let mut jhandle = tokio::time::timeout(
-                CONNECT_TIMEOUT,
-                client::connect(config.clone(), (jh.as_str(), jp), jhandler),
-            )
-            .await
-            .map_err(|_| SshError::Connect("连接跳板机超时".into()))??;
-            authenticate(&mut jhandle, &ju, resolve_jump_auth(p)?).await?;
-
-            let channel = jhandle
-                .channel_open_direct_tcpip(host.clone(), port as u32, "127.0.0.1", 0)
-                .await?;
-            let stream = channel.into_stream();
-            let handler = ClientHandler {
-                dest: target_dest,
-                dir: dir.clone(),
-            };
-            let mut handle = tokio::time::timeout(
-                CONNECT_TIMEOUT,
-                client::connect_stream(config, stream, handler),
-            )
-            .await
-            .map_err(|_| SshError::Connect("经跳板机连接目标超时".into()))??;
-            authenticate(&mut handle, &user, resolve_auth(p, secrets, &dir)?).await?;
-            handle
-        }
-        None => {
-            let handler = ClientHandler {
-                dest: target_dest,
-                dir: dir.clone(),
-            };
-            let mut handle = tokio::time::timeout(
-                CONNECT_TIMEOUT,
-                client::connect(config, (host.as_str(), port), handler),
-            )
-            .await
-            .map_err(|_| {
-                SshError::Connect(format!("连接 {host}:{port} 超时（10s 内未完成握手）"))
-            })??;
-            authenticate(&mut handle, &user, resolve_auth(p, secrets, &dir)?).await?;
-            handle
-        }
+    let handler = ClientHandler {
+        dest: dest_key(&host, port),
+        dir: dir.to_path_buf(),
     };
+    let mut handle = tokio::time::timeout(
+        CONNECT_TIMEOUT,
+        client::connect(config, (host.as_str(), port), handler),
+    )
+    .await
+    .map_err(|_| SshError::Connect(format!("连接 {host}:{port} 超时（10s 内未完成握手）")))??;
+    authenticate(&mut handle, &user, resolve_auth(p, secrets, dir)?).await?;
     Ok(Arc::new(handle))
 }
 

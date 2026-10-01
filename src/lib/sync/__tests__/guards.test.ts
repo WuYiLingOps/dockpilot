@@ -14,7 +14,6 @@ const conns = (n: number): ConnectionProfile[] =>
     cert_path: "",
     key_path: "",
     remote_socket: "",
-    jump_host: "",
     auth: "key",
     secret_backend: "",
   }));
