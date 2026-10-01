@@ -170,6 +170,8 @@ export interface DockerEventDto {
 
 export interface StatsTick {
   cpu_percent: number;
+  /** CPU 限额（核数，来自容器配置的 --cpus / 绑核；未配置为 null） */
+  cpu_limit_cores: number | null;
   mem_usage: number;
   mem_limit: number;
   mem_percent: number;

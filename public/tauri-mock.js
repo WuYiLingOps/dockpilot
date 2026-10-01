@@ -489,6 +489,7 @@ volumes:
     const memLimit = 4 * 1024 * 1024 * 1024;
     return {
       cpu_percent: 12 + wave * 46,
+      cpu_limit_cores: 1.5,
       mem_usage: memUsage,
       mem_limit: memLimit,
       mem_percent: (memUsage / memLimit) * 100,

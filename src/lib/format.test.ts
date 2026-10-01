@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   firstLine,
   formatBytes,
+  formatCores,
   formatPorts,
   imageGroup,
   imageGroupLabel,
@@ -50,6 +51,21 @@ describe("shortId", () => {
   it("截断到 12 位，空值回退 -", () => {
     expect(shortId("sha256:abcdef1234567890")).toBe("sha256:abcde");
     expect(shortId("")).toBe("-");
+  });
+});
+
+describe("formatCores", () => {
+  it("去掉多余的尾零并带单位", () => {
+    expect(formatCores(1.5)).toBe("1.5 核");
+    expect(formatCores(2)).toBe("2 核");
+    expect(formatCores(1.25)).toBe("1.25 核");
+    expect(formatCores(0.5)).toBe("0.5 核");
+  });
+
+  it("非法输入显示 -", () => {
+    expect(formatCores(0)).toBe("-");
+    expect(formatCores(-1)).toBe("-");
+    expect(formatCores(Number.NaN)).toBe("-");
   });
 });
 

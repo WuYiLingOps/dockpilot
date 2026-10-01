@@ -36,6 +36,12 @@ export function shortId(id: string): string {
   return id ? id.slice(0, 12) : "-";
 }
 
+/** CPU 核数展示：去掉多余的尾零（1.5 → "1.5 核"，2 → "2 核"） */
+export function formatCores(cores: number): string {
+  if (!Number.isFinite(cores) || cores <= 0) return "-";
+  return `${Number(cores.toFixed(2))} 核`;
+}
+
 /** RFC3339 时间字符串（卷/网络/构建缓存的 created 字段）转 unix 秒；无效时返回 0（timeAgo 显示 "-"） */
 export function rfc3339ToUnix(s: string | null | undefined): number {
   if (!s) return 0;

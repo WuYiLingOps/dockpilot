@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useId, useMemo, useState } from "react";
 import { Activity } from "lucide-react";
 import { api } from "../../lib/api";
-import { formatBytes } from "../../lib/format";
+import { formatBytes, formatCores } from "../../lib/format";
 import type { ContainerHealthDto, StatsTick } from "../../types/docker";
 import { Badge, EmptyState, HEALTH_META } from "../ui";
 
@@ -254,6 +254,7 @@ export function OverviewView({ id, running }: { id: string; running: boolean }) 
   const mem = useMemo(() => ticks.map((t) => t.mem_percent), [ticks]);
   const rxRate = useMemo(() => rates(ticks.map((t) => t.net_rx)), [ticks]);
   const txRate = useMemo(() => rates(ticks.map((t) => t.net_tx)), [ticks]);
+  const cpuLimit = latest?.cpu_limit_cores ?? null;
 
   if (!running) {
     return (
@@ -273,7 +274,15 @@ export function OverviewView({ id, running }: { id: string; running: boolean }) 
       <HealthCard id={id} />
 
       <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">
-        <StatCard label="CPU" value={`${(latest?.cpu_percent ?? 0).toFixed(1)}%`} />
+        <StatCard
+          label="CPU"
+          value={`${(latest?.cpu_percent ?? 0).toFixed(1)}%`}
+          sub={
+            latest && cpuLimit
+              ? `限额 ${formatCores(cpuLimit)} · 占 ${((latest.cpu_percent / (cpuLimit * 100)) * 100).toFixed(1)}%`
+              : undefined
+          }
+        />
         <StatCard
           label="内存"
           value={formatBytes(latest?.mem_usage ?? 0)}
@@ -298,7 +307,8 @@ export function OverviewView({ id, running }: { id: string; running: boolean }) 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         <Chart
           label="CPU 使用率"
-          max={100}
+          // 有限额时纵轴对齐限额口径（100% = 1 核），无限额时自适应峰值，避免多核用量被裁剪
+          max={cpuLimit ? cpuLimit * 100 : undefined}
           format={(n) => `${n.toFixed(1)}%`}
           lines={[{ name: "CPU", color: "var(--app-accent)", series: cpu }]}
         />

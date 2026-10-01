@@ -377,6 +377,8 @@ pub struct DockerEventDto {
 #[derive(Debug, Clone, Serialize)]
 pub struct StatsTick {
     pub cpu_percent: f64,
+    /// CPU 限额（核数，来自 inspect 的 NanoCpus/CpusetCpus；未配置为 None）
+    pub cpu_limit_cores: Option<f64>,
     pub mem_usage: u64,
     pub mem_limit: u64,
     pub mem_percent: f64,
