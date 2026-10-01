@@ -99,3 +99,56 @@ jobs:
       # 会产生竞态，故强制串行；全部测试仅数秒，无时长影响
       - name: 测试
         run: cargo test --manifest-path src-tauri/Cargo.toml --lib -- --test-threads=1
+
+  ssh-smoke:
+    name: SSH 冒烟（sshd 容器 × russh 密码认证）
+    # 依赖 Docker Hub 镜像拉取，抖动不应阻塞门禁；失败在 PR 中仍可见
+    continue-on-error: true
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Tauri Linux 系统依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: 缓存 Cargo 编译产物
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: 放开 docker socket 权限
+        run: sudo chmod 666 /var/run/docker.sock || true
+
+      # openssh-server 容器：新建用户 + 密码登录（root 已存在于镜像内不可用作
+      # USER_NAME），挂载宿主 docker.sock 供隧道转发目标；镜像内 sshd 固定监听 2222。
+      # 初始化三步缺一不可：放开 AllowTcpForwarding（镜像默认 no，会连带禁掉
+      # direct-streamlocal 转发）；把登录用户加入宿主 docker.sock 的 GID 组
+      - name: 启动 sshd 容器
+        run: |
+          docker run -d --name dockpilot-sshd -p 2222:2222 \
+            -e PASSWORD_ACCESS=true -e USER_NAME=ituser -e USER_PASSWORD=dockpilot-it \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            linuxserver/openssh-server:latest
+          timeout 40 bash -c 'until echo | nc -w 2 127.0.0.1 2222 2>/dev/null | grep -q "SSH-"; do sleep 1; done'
+          docker exec dockpilot-sshd sed -i 's/^AllowTcpForwarding no/AllowTcpForwarding yes/' /config/sshd/sshd_config
+          GID=$(stat -c %g /var/run/docker.sock)
+          docker exec dockpilot-sshd groupadd -o -g "$GID" dockersock
+          docker exec dockpilot-sshd usermod -aG dockersock ituser
+          docker restart dockpilot-sshd
+          timeout 40 bash -c 'until echo | nc -w 2 127.0.0.1 2222 2>/dev/null | grep -q "SSH-"; do sleep 1; done'
+
+      # 跑 #[ignore] 的 russh 引擎用例：密码认证 → 隧道 → exec → 远程写入往返
+      - name: russh 密码认证冒烟
+        run: cargo test --manifest-path src-tauri/Cargo.toml --lib -- --ignored remote_ssh_russh_auth
+        env:
+          DOCKERPILOT_REMOTE_SSH: ituser@127.0.0.1:2222
+          DOCKERPILOT_SSH_PASSWORD: dockpilot-it
+
+      - name: 容器日志（诊断用）
+        if: failure()
+        run: docker logs dockpilot-sshd || true
