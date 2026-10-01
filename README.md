@@ -194,13 +194,14 @@ npm run tauri build
 
 ```bash
 mkdir -p ~/.local/share/applications
-cat > ~/.local/share/applications/dockpilot-dev.desktop <<'EOF'
+REPO=$PWD   # 仓库克隆目录，按实际路径调整
+cat > ~/.local/share/applications/dockpilot-dev.desktop <<EOF
 [Desktop Entry]
 Categories=Development;Utility;
 Comment=DockPilot 开发模式（调试二进制）
-Exec=/home/hj/ProjectData/docker-desktop/src-tauri/target/debug/dockpilot
+Exec=$REPO/src-tauri/target/debug/dockpilot
 StartupWMClass=dockpilot
-Icon=/home/hj/ProjectData/docker-desktop/design/app-icon.png
+Icon=$REPO/design/app-icon.png
 Name=DockPilot (Dev)
 Terminal=false
 Type=Application
