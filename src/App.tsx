@@ -10,10 +10,10 @@ import { SyncBanners } from "./components/settings/SyncBanners";
 import { Overview } from "./pages/Overview";
 import { Containers } from "./pages/Containers";
 import { ContainerDetail } from "./pages/ContainerDetail";
-import { Images } from "./pages/Images";
+import { Images } from "./pages/images";
 import { Compose } from "./pages/Compose";
 import { ComposeDetail } from "./pages/ComposeDetail";
-import { Storage, type StorageTab } from "./pages/Storage";
+import { Storage, type StorageTab } from "./pages/storage";
 import { Cleanup } from "./pages/Cleanup";
 import { ConnectionDialog } from "./components/settings/ConnectionDialog";
 import {
