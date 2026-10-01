@@ -1,4 +1,5 @@
 import { invoke, Channel } from "@tauri-apps/api/core";
+import { applog } from "./applog";
 import type {
   ContainerDto,
   ContainerHealthDto,
@@ -55,7 +56,7 @@ function withCancel(sidPromise: Promise<string>): Unsubscribe {
   return () => {
     void sidPromise
       .then((sid) => invoke("cancel_stream", { streamId: sid }))
-      .catch(() => {});
+      .catch((e) => applog.errorOf("取消流任务失败", e));
   };
 }
 
@@ -259,7 +260,9 @@ export const api = {
   subscribeEvents: (onEvent: (e: DockerEventDto) => void): Unsubscribe => {
     const ch = new Channel<DockerEventDto>();
     ch.onmessage = onEvent;
-    void invoke("subscribe_events", { onEvent: ch }).catch(() => {});
+    void invoke("subscribe_events", { onEvent: ch }).catch((e) =>
+      applog.errorOf("订阅 Docker 事件失败，列表将退化为手动刷新", e),
+    );
     return () => {};
   },
 
@@ -272,11 +275,16 @@ export const api = {
     return withCancel(invoke<string>("exec_attach", { execId, onChunk: ch }));
   },
 
+  // 终端会话已结束时写入/resize 会失败，属正常竞态，仅记日志不向 UI 报错
   execInput: (execId: string, data: string) =>
-    invoke<void>("exec_input", { execId, data }).catch(() => {}),
+    invoke<void>("exec_input", { execId, data }).catch((e) =>
+      applog.warn(`终端输入写入失败（会话可能已关闭）: ${String(e)}`),
+    ),
 
   execResize: (execId: string, width: number, height: number) =>
-    invoke<void>("exec_resize", { execId, width, height }).catch(() => {}),
+    invoke<void>("exec_resize", { execId, width, height }).catch((e) =>
+      applog.warn(`终端尺寸调整失败（会话可能已关闭）: ${String(e)}`),
+    ),
 
   // ---- 设置 / 镜像加速 / 空间清理 ----
 
