@@ -49,6 +49,7 @@ import type {
   LastCrashInfo,
   LogFileMeta,
 } from "../types/diagnostics";
+import type { AppUpdateInfo, DownloadProgress } from "../types/appUpdate";
 
 type Unsubscribe = () => void;
 
@@ -416,4 +417,22 @@ export const api = {
 
   /** 扫描当前连接配置的目录，发现 compose 文件并写入跟踪记录 */
   scanComposeDirs: () => invoke<ScanComposeResultDto>("scan_compose_dirs"),
+
+  // ---- 应用更新 ----
+
+  /** 查询 GitHub 最新 release 并与当前版本比较（节流与防重入由前端 store 负责） */
+  checkAppUpdate: () => invoke<AppUpdateInfo>("check_update"),
+
+  /** 下载当前平台更新安装包（进度经 Channel 推送），返回落盘路径 */
+  downloadAppUpdate: (url: string, onProgress: (p: DownloadProgress) => void) => {
+    const ch = new Channel<DownloadProgress>();
+    ch.onmessage = onProgress;
+    return invoke<string>("download_app_update", { url, onProgress: ch });
+  },
+
+  /** 自动安装已下载的安装包（Windows 被动运行 NSIS 装完自动重启；Linux 经 pkexec dpkg 安装后重启） */
+  installAppUpdate: (path: string) => invoke<void>("install_app_update", { path }),
+
+  /** 以系统安装器打开安装包（自动安装失败时的兜底） */
+  openDownloadedUpdate: (path: string) => invoke<void>("open_downloaded_update", { path }),
 };

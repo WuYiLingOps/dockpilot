@@ -41,7 +41,7 @@ reqwest = { version = "0.13", default-features = false, features = ["rustls", "h
 # provider 时 rustls 无法从 features 自动选择；直接依赖 rustls 以便启动时显式安装默认 provider，
 # 否则 bollard TLS 建连的 ClientConfig::builder() 会 panic（release 下 panic=abort 直接闪退）
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "logging", "tls12"] }
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time", "process", "io-util"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time", "process", "io-util", "fs"] }
 futures = "0.3"
 tokio-util = "0.7"
 uuid = { version = "1", features = ["v4"] }

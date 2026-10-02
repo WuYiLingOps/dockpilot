@@ -16,6 +16,7 @@ const localSettings = (): AppSettings => ({
   logs_timestamps: false,
   terminal_shell: "bash",
   notifications_enabled: true,
+  auto_check_updates: true,
   close_action: "exit",
   debug_logging: false,
   log_retention_days: 14,

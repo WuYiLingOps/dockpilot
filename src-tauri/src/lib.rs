@@ -1,3 +1,4 @@
+mod app_update;
 mod cleanup;
 mod daemon_config;
 mod diagnostics;
@@ -348,6 +349,10 @@ pub fn run() {
             docker::conn::test_connection,
             settings::get_settings,
             settings::set_settings,
+            app_update::check_update,
+            app_update::download_app_update,
+            app_update::open_downloaded_update,
+            app_update::install_app_update,
             ssh_secrets::set_ssh_secret,
             daemon_config::read_daemon_config,
             daemon_config::validate_daemon_json,

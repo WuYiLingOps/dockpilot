@@ -7,12 +7,14 @@ import {
   CloudUpload,
   Code2,
   Container,
+  Download,
   ExternalLink,
   FileText,
   Gauge,
   Info,
   Package,
   Palette,
+  RefreshCw,
   Terminal,
   X,
   type LucideIcon,
@@ -20,11 +22,20 @@ import {
 import { useEffect, useState } from "react";
 import appIcon from "../../../design/app-icon.png";
 import { api } from "../../lib/api";
+import {
+  checkNow,
+  downloadAndOpen,
+  installAppUpdate,
+  openDownloadedInstaller,
+  openReleasePage,
+  useAppUpdateStore,
+} from "../../lib/appUpdate";
+import { formatBytes, timeAgo } from "../../lib/format";
 import { useSettings, useUpdateSettings } from "../../lib/settings";
 import { useIsWindows } from "../../lib/platform";
 import { useTheme, type ThemeMode } from "../../lib/theme";
 import type { AppSettings } from "../../types/settings";
-import { IconButton, SearchInput, Select, Switch } from "../ui";
+import { Button, IconButton, SearchInput, Select, Spinner, Switch } from "../ui";
 import { Card, Row } from "./SettingsCard";
 import { DiagnosticsSettings } from "./DiagnosticsSettings";
 import { MirrorSettings } from "./MirrorSettings";
@@ -55,7 +66,7 @@ const CATEGORIES: {
     label: "应用",
     desc: "刷新间隔、通知与关闭行为",
     icon: AppWindow,
-    keywords: ["刷新", "轮询", "间隔", "通知", "桌面通知", "关闭", "托盘", "后台", "最小化"],
+    keywords: ["刷新", "轮询", "间隔", "通知", "桌面通知", "关闭", "托盘", "后台", "最小化", "更新", "升级", "检查更新"],
   },
   {
     key: "appearance",
@@ -147,6 +158,105 @@ function LinkRow({
   );
 }
 
+/** 软件更新区块（关于分组）：手动检查入口、状态展示与应用内下载/自动安装（进度条 + 重启更新） */
+function UpdateCheckSection() {
+  const st = useAppUpdateStore();
+  const checking = st.status === "checking";
+  const downloading = st.status === "downloading";
+  const installing = st.status === "installing";
+  const busy = checking || downloading || installing;
+  const progress = st.downloadProgress;
+  const pct =
+    progress && progress.total > 0
+      ? Math.min(100, Math.floor((progress.downloaded / progress.total) * 100))
+      : null;
+
+  const statusText = () => {
+    switch (st.status) {
+      case "checking":
+        return "正在检查…";
+      case "available":
+        return st.latest ? `发现新版本 v${st.latest.latest_version}` : "发现新版本";
+      case "downloading": {
+        if (!progress) return "正在下载安装包…";
+        const done = `${formatBytes(progress.downloaded)}${
+          progress.total > 0 ? ` / ${formatBytes(progress.total)}` : ""
+        }`;
+        return pct !== null
+          ? `正在下载安装包 ${pct}%（${done}）`
+          : `正在下载安装包（${done}）`;
+      }
+      case "downloaded":
+        return "安装包已就绪";
+      case "installing":
+        return "正在安装更新，完成后应用将自动重启…";
+      case "up-to-date":
+        return "已是最新版本";
+      case "error":
+        return st.error ?? "检查失败";
+      case "idle":
+        return st.lastCheckAt
+          ? `上次检查：${timeAgo(Math.floor(st.lastCheckAt / 1000))}`
+          : "检查 GitHub 最新版本";
+    }
+  };
+
+  return (
+    <div className="px-1 pt-1">
+      <div className="flex items-center gap-3 rounded-btn px-3 py-2.5">
+        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-ctl bg-panel2 text-fg3">
+          {busy ? <Spinner className="h-3.5 w-3.5" /> : <RefreshCw size={15} />}
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="text-[13px] font-medium text-fg">软件更新</div>
+          <div
+            className={cn(
+              "truncate text-[11px]",
+              st.status === "error" ? "text-err" : "text-fg3",
+            )}
+            title={st.status === "error" ? (st.error ?? undefined) : undefined}
+          >
+            {statusText()}
+          </div>
+        </div>
+        {installing ? (
+          <Button variant="outline" disabled>
+            <Spinner className="h-3 w-3" />
+            安装中…
+          </Button>
+        ) : st.status === "downloaded" ? (
+          <>
+            <Button variant="tinted" onClick={() => void installAppUpdate()}>
+              <Download size={13} />
+              安装更新
+            </Button>
+            {/* 自动安装失败（如无 polkit 代理）时的兜底出口 */}
+            <Button variant="outline" onClick={() => void openDownloadedInstaller()}>
+              打开安装包
+            </Button>
+          </>
+        ) : st.status === "available" && st.latest ? (
+          st.latest.download ? (
+            <Button variant="tinted" onClick={() => void downloadAndOpen()}>
+              <Download size={13} />
+              下载更新
+            </Button>
+          ) : (
+            // 未匹配到当前平台附件：回落跳转 Releases 页
+            <Button variant="tinted" onClick={openReleasePage}>
+              前往下载
+            </Button>
+          )
+        ) : (
+          <Button variant="outline" disabled={busy} onClick={() => void checkNow(true)}>
+            {checking ? "检查中…" : downloading ? "下载中…" : "检查更新"}
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /** 关于分组（自带查询：应用版本 / Docker 引擎） */
 function AboutCard() {
   const version = useQuery({
@@ -179,6 +289,9 @@ function AboutCard() {
           <div className="mt-0.5 text-[13px] text-fg3">{version.data ?? "-"}</div>
         </div>
       </div>
+
+      {/* 检查更新：与启动提醒消费同一模块 store（lib/appUpdate） */}
+      <UpdateCheckSection />
 
       {/* 项目链接 */}
       <div className="px-1 pt-2">
@@ -312,6 +425,15 @@ export function SettingsDialog({
               <Switch
                 checked={settings?.notifications_enabled ?? true}
                 onChange={(v) => patch({ notifications_enabled: v })}
+              />
+            </Row>
+            <Row
+              label="自动检查更新"
+              desc="启动时联网检查新版本，仅提醒不自动下载；手动「检查更新」不受此开关限制"
+            >
+              <Switch
+                checked={settings?.auto_check_updates ?? true}
+                onChange={(v) => patch({ auto_check_updates: v })}
               />
             </Row>
             <Row

@@ -48,6 +48,8 @@ export interface AppSettings {
   terminal_shell: TerminalShell;
   /** 容器异常（非零退出/OOM/健康检查失败）时发送系统通知 */
   notifications_enabled: boolean;
+  /** 启动时自动检查更新（仅提醒，不自动下载；手动「检查更新」不受此开关限制） */
+  auto_check_updates: boolean;
   /** 关闭窗口行为：ask 每次关闭时弹窗询问（默认）；minimize 最小化到托盘；exit 完全退出 */
   close_action: CloseAction;
   /** 调试日志：开启后应用运行日志降为 Debug 级别（立即生效），供故障排查 */

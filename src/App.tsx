@@ -25,6 +25,7 @@ import { onOpenAppLogViewer } from "./lib/applog";
 import { useIsWindows } from "./lib/platform";
 import { activeConnection, useSettings, useSettingsThemeSync } from "./lib/settings";
 import { useCloudSync } from "./hooks/useCloudSync";
+import { useAppUpdate } from "./hooks/useAppUpdate";
 import type { LastCrashInfo } from "./types/diagnostics";
 
 /** Docker 引擎不可达时的引导页（覆盖内容区，侧栏保持可见） */
@@ -141,6 +142,8 @@ export default function App() {
   const { data: settings } = useSettings();
   // 云同步自动化：启动远端检查、设置变更去抖上传、窗口可见时检查
   useCloudSync();
+  // 更新检查自动化：启动静默检查，结果在设置「关于 → 软件更新」展示
+  useAppUpdate();
 
   // 使用日志查看器：横幅与设置页「故障诊断」经信号打开
   useEffect(() => onOpenAppLogViewer(() => setLogViewerOpen(true)), []);

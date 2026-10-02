@@ -141,6 +141,8 @@ pub struct AppSettings {
     pub terminal_shell: String,
     /// 容器异常（非零退出/OOM/健康检查失败）时发送系统通知
     pub notifications_enabled: bool,
+    /// 启动时自动检查更新（仅提醒，不自动下载；手动「检查更新」不受此开关限制）
+    pub auto_check_updates: bool,
     /// 关闭窗口行为："ask" 关闭时前端弹窗询问（默认）| "minimize" 最小化到托盘后台 | "exit" 完全退出
     pub close_action: String,
     /// 调试日志：开启后运行日志级别降为 Debug（立即生效，用于排查问题）
@@ -170,6 +172,7 @@ impl Default for AppSettings {
             logs_timestamps: false,
             terminal_shell: "bash".into(),
             notifications_enabled: true,
+            auto_check_updates: true,
             close_action: "ask".into(),
             debug_logging: false,
             log_retention_days: 14,
@@ -521,6 +524,13 @@ mod tests {
         assert_eq!(s.theme, "dark");
         assert_eq!(s.containers_refresh_secs, 10);
         assert_eq!(s.terminal_shell, "bash");
+    }
+
+    #[test]
+    fn auto_check_updates_defaults_to_true() {
+        assert!(AppSettings::default().auto_check_updates);
+        // 旧配置缺字段 → serde default 补 true
+        assert!(parse_settings(r#"{"theme":"dark"}"#).auto_check_updates);
     }
 
     #[test]
