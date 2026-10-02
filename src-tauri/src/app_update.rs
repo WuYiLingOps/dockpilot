@@ -259,6 +259,34 @@ fn updates_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
     Ok(dir)
 }
 
+/// 应用启动时清空更新目录（尽力而为）：安装完成后的残留安装包与中断下载的
+/// .part 残片都在此清理——Windows 安装器运行期间安装包文件被系统锁定，
+/// 只能等装完重启后的新进程（本函数）删除；Linux 虽已装完即删，此处再兜底一次。
+pub fn cleanup_updates_dir(app: &tauri::AppHandle) {
+    let dir = match updates_dir(app) {
+        Ok(dir) => dir,
+        Err(_) => return,
+    };
+    remove_dir_files(&dir);
+}
+
+/// 删除目录内的全部文件（不动子目录；目录不存在时为空操作）。单独抽出便于单测。
+fn remove_dir_files(dir: &std::path::Path) {
+    let entries = match std::fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(_) => return, // 目录尚不存在（从未下载过），无需清理
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_file() {
+            match std::fs::remove_file(&path) {
+                Ok(()) => log::info!("已清理更新目录残留: {}", path.display()),
+                Err(e) => log::warn!("清理更新目录失败 {}: {e}", path.display()),
+            }
+        }
+    }
+}
+
 /// 下载前清空更新目录中的旧安装包（只删文件，不动目录本身）
 async fn clean_updates_dir(dir: &std::path::Path) -> CmdResult<()> {
     tokio::fs::create_dir_all(dir)
@@ -435,6 +463,11 @@ pub async fn install_app_update(app: tauri::AppHandle, path: String) -> CmdResul
                 }
             ));
         }
+        // 安装完成即删安装包（此时文件已不被占用；Windows 侧因安装器锁定文件，
+        // 由启动时的 cleanup_updates_dir 兜底）
+        if let Err(e) = tokio::fs::remove_file(&target).await {
+            log::warn!("清理已安装的更新包失败 {}: {e}", target.display());
+        }
         log::info!("更新安装完成，重启应用");
         app.restart()
     }
@@ -477,6 +510,34 @@ mod tests {
         // 其他平台无匹配
         assert!(pick_asset(&assets, "macos", "x86_64").is_none());
         assert!(pick_asset(&[], "linux", "x86_64").is_none());
+    }
+
+    #[test]
+    fn remove_dir_files_clears_files_keeps_subdirs() {
+        let base = std::env::temp_dir().join(format!(
+            "dockpilot_updates_test_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let dir = base.join("updates");
+        std::fs::create_dir_all(dir.join("sub")).unwrap();
+        std::fs::write(dir.join("dockpilot_1.0.5_amd64.deb"), b"pkg").unwrap();
+        std::fs::write(dir.join("dockpilot_1.0.5_amd64.deb.part"), b"half").unwrap();
+
+        // 常规清理：文件（含 .part 残片）删除，子目录保留，目录本身保留
+        remove_dir_files(&dir);
+        assert!(!dir.join("dockpilot_1.0.5_amd64.deb").exists());
+        assert!(!dir.join("dockpilot_1.0.5_amd64.deb.part").exists());
+        assert!(dir.join("sub").is_dir());
+        assert!(dir.is_dir());
+
+        // 目录不存在时空操作不 panic
+        remove_dir_files(&base.join("missing"));
+
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]

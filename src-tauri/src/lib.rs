@@ -285,6 +285,8 @@ pub fn run() {
 
             // SSH 引擎无 AppHandle 调用链，启动时缓存配置目录（密钥与主机指纹读取用）
             docker::ssh_client::init_config_dir(app.handle());
+            // 清理更新目录残留（安装包被 Windows 安装器占用，只能等重启后的新进程删除）
+            app_update::cleanup_updates_dir(app.handle());
             docker::events::start_global_listener(app.handle(), tx);
             Ok(())
         })
