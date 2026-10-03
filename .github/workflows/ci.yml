@@ -80,11 +80,16 @@ jobs:
         run: sudo chmod 666 /var/run/docker.sock || true
 
       # 容器创建类集成测试假设本机已有 busybox:stable（与作者日常环境一致），
-      # runner 为干净环境需预拉取；镜像存于作者阿里云 ACR 公开仓库（匿名可拉）
+      # runner 为干净环境需预拉取。GitHub runner 出口直拉 Docker Hub 易撞匿名限流，
+      # 阿里云 ACR 对海外 IP 不稳定（dockerauth 阶段连接重置），故首选 AWS ECR
+      # Public 的 library 官方镜像（匿名可拉、对 GitHub runner 网络友好），
+      # 失败回退 Docker Hub；两源都失败时由末尾 inspect 令步骤失败
       - name: 预拉取测试镜像
         run: |
-          docker pull registry.cn-hangzhou.aliyuncs.com/wylhub/busybox:latest
-          docker tag registry.cn-hangzhou.aliyuncs.com/wylhub/busybox:latest busybox:stable
+          for src in public.ecr.aws/docker/library/busybox:latest docker.io/library/busybox:stable; do
+            docker pull "$src" && docker tag "$src" busybox:stable && break
+          done
+          docker image inspect busybox:stable > /dev/null
 
       - name: 格式检查
         run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
