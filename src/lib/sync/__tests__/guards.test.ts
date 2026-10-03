@@ -13,6 +13,8 @@ const conns = (n: number): ConnectionProfile[] =>
     host: "",
     cert_path: "",
     key_path: "",
+    key_id: "",
+  identity_id: "",
     remote_socket: "",
     auth: "key",
     secret_backend: "",

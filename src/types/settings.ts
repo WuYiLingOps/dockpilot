@@ -18,8 +18,12 @@ export interface ConnectionProfile {
   host: string;
   /** tls: 证书目录（含 ca.pem / cert.pem / key.pem） */
   cert_path: string;
-  /** ssh: 可选私钥路径 */
+  /** ssh: 可选私钥路径（文件型凭证；key_id 非空时不用） */
   key_path: string;
+  /** ssh: SSH 钥匙串私钥条目 id（空 = 不用钥匙串；随云同步跨设备可用） */
+  key_id: string;
+  /** ssh: SSH 身份条目 id（空 = 不用身份；非空时用户名与认证由身份决定） */
+  identity_id: string;
   /** ssh: 远程 docker socket 路径（空 = /var/run/docker.sock） */
   remote_socket: string;
   /** ssh: 认证方式（空 = key）；连接一律由内置 russh 引擎承载 */
@@ -36,10 +40,37 @@ export interface ConnectionTestResult {
   error: string;
 }
 
+/** SSH 钥匙串条目（与后端 SshKeyEntry 对应；PEM/口令存本机密钥库，此处仅元数据） */
+export interface SshKeyEntry {
+  id: string;
+  label: string;
+  /** 公钥指纹（OpenSSH SHA256:xxx，导入时计算；旧迁移条目可为空） */
+  fingerprint: string;
+  /** OpenSSH 公钥全文（导入时由 PEM 推导，可复制到服务器 authorized_keys） */
+  public_key: string;
+  /** 创建时间（unix 秒） */
+  created_at: number;
+}
+
+/** SSH 身份（与后端 SshIdentity 对应；密码存本机密钥库，此处仅元数据） */
+export interface SshIdentity {
+  id: string;
+  label: string;
+  username: string;
+  /** 可选关联的钥匙串私钥条目 id（空 = 密码认证） */
+  key_id: string;
+  /** 创建时间（unix 秒） */
+  created_at: number;
+}
+
 export interface AppSettings {
   theme: ThemeMode;
   docker_socket: string;
   connections: ConnectionProfile[];
+  /** SSH 钥匙串：跨连接复用的导入式私钥条目（材料在本机密钥库） */
+  ssh_keys: SshKeyEntry[];
+  /** SSH 身份：跨连接复用的登录身份（密码在本机密钥库） */
+  ssh_identities: SshIdentity[];
   active_connection_id: string;
   containers_refresh_secs: number;
   images_refresh_secs: number;
@@ -50,6 +81,8 @@ export interface AppSettings {
   notifications_enabled: boolean;
   /** 启动时自动检查更新（仅提醒，不自动下载；手动「检查更新」不受此开关限制） */
   auto_check_updates: boolean;
+  /** 云同步携带 SSH 凭证（登录密码/口令/钥匙串私钥；明文进同步载荷，由同步密码信封加密） */
+  sync_credentials: boolean;
   /** 关闭窗口行为：ask 每次关闭时弹窗询问（默认）；minimize 最小化到托盘；exit 完全退出 */
   close_action: CloseAction;
   /** 调试日志：开启后应用运行日志降为 Debug 级别（立即生效），供故障排查 */

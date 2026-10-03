@@ -21,7 +21,10 @@ use std::time::Duration;
 use russh::client::{self, Handle};
 #[cfg(unix)]
 use russh::keys::agent::client::AgentClient;
-use russh::keys::{self, load_secret_key, HashAlg, PrivateKeyWithHashAlg, PublicKeyOrCertificate};
+use russh::keys::{
+    self, decode_secret_key, load_secret_key, HashAlg, PrivateKeyWithHashAlg,
+    PublicKeyOrCertificate,
+};
 use russh::{ChannelMsg, Disconnect};
 use tokio::sync::Mutex;
 
@@ -227,11 +230,6 @@ fn parse_dest_with(host: &str, fallback_user: &str) -> Result<(String, String, u
     Ok((user, host_part.to_string(), port))
 }
 
-/// 缺 user 时回落本机登录名（对齐 OpenSSH 行为），无法确定时要求显式给出
-pub(crate) fn parse_dest(host: &str) -> Result<(String, String, u16), String> {
-    parse_dest_with(host, &default_user())
-}
-
 fn default_user() -> String {
     std::env::var("USER")
         .or_else(|_| std::env::var("LOGNAME"))
@@ -243,6 +241,12 @@ enum AuthMethod {
     Password(String),
     Key {
         path: PathBuf,
+        passphrase: Option<String>,
+    },
+    /// 导入式私钥：PEM 全文存 secret_store，认证时内存解码（不落临时文件，
+    /// 跨设备同步后无需本地路径即可使用）
+    KeyPem {
+        pem: String,
         passphrase: Option<String>,
     },
     Agent,
@@ -263,6 +267,15 @@ fn resolve_auth(
             .or_else(|| ssh_secrets::load(dir, p, "password"))
             .ok_or_else(|| SshError::Auth("尚未保存密码，请编辑连接并填写".into()))?;
         return Ok(AuthMethod::Password(pass));
+    }
+    // 钥匙串私钥优先：PEM 存 secret_store 的 sshkeypem/{key_id}（随云同步跨设备
+    // 落地本机），内存解码、不读文件路径，也无需临时文件；口令随条目（sshkeypass/）
+    if !p.key_id.is_empty() {
+        let pem = ssh_secrets::load_keychain(dir, p, &p.key_id, "pem").ok_or_else(|| {
+            SshError::Auth("钥匙串私钥不存在，请到「SSH 凭证」重新导入或改用文件路径".into())
+        })?;
+        let passphrase = ssh_secrets::load_keychain(dir, p, &p.key_id, "passphrase");
+        return Ok(AuthMethod::KeyPem { pem, passphrase });
     }
     let key_path = p.key_path.trim();
     if !key_path.is_empty() {
@@ -291,6 +304,30 @@ fn resolve_auth(
     Ok(AuthMethod::DefaultKeys)
 }
 
+/// 身份认证解析：身份关联了钥匙串私钥 → KeyPem；否则身份密码
+/// （瞬态密码优先——测试连通性手动输入的场景）
+fn resolve_identity_auth(
+    dir: &Path,
+    p: &ConnectionProfile,
+    identity: &ssh_secrets::ResolvedSshIdentity,
+    secrets: &TransientSecrets,
+) -> Result<AuthMethod, SshError> {
+    if !identity.key_id.is_empty() {
+        let pem = ssh_secrets::load_keychain(dir, p, &identity.key_id, "pem").ok_or_else(|| {
+            SshError::Auth("身份关联的钥匙串私钥不存在，请到「SSH 凭证」检查".into())
+        })?;
+        let passphrase = ssh_secrets::load_keychain(dir, p, &identity.key_id, "passphrase");
+        return Ok(AuthMethod::KeyPem { pem, passphrase });
+    }
+    let pass = identity
+        .password
+        .clone()
+        .filter(|s| !s.is_empty())
+        .or_else(|| secrets.password.clone())
+        .ok_or_else(|| SshError::Auth("身份未设置密码，请到「SSH 凭证」补全".into()))?;
+    Ok(AuthMethod::Password(pass))
+}
+
 fn default_key_paths() -> Vec<PathBuf> {
     let home = std::env::var_os("HOME")
         .or_else(|| std::env::var_os("USERPROFILE"))
@@ -312,7 +349,14 @@ async fn connect_and_auth(
     dir: &Path,
 ) -> Result<Arc<Handle<ClientHandler>>, SshError> {
     let config = Arc::new(client_config());
-    let (user, host, port) = parse_dest(&p.host).map_err(SshError::Connect)?;
+    // SSH 身份解析：连接引用身份时，用户名与认证完全由身份决定
+    // （host 的 user 段被覆盖，可省略；host 解析的回落用户名交给身份用户名）
+    let identity = ssh_secrets::load_identity_for_connect(dir, p);
+    let (mut user, host, port) =
+        parse_dest_with(&p.host, &default_user()).map_err(SshError::Connect)?;
+    if let Some(id) = &identity {
+        user = id.username.clone();
+    }
     let handler = ClientHandler {
         dest: dest_key(&host, port),
         dir: dir.to_path_buf(),
@@ -323,7 +367,11 @@ async fn connect_and_auth(
     )
     .await
     .map_err(|_| SshError::Connect(format!("连接 {host}:{port} 超时（10s 内未完成握手）")))??;
-    authenticate(&mut handle, &user, resolve_auth(p, secrets, dir)?).await?;
+    let method = match &identity {
+        Some(id) => resolve_identity_auth(dir, p, id, secrets)?,
+        None => resolve_auth(p, secrets, dir)?,
+    };
+    authenticate(&mut handle, &user, method).await?;
     Ok(Arc::new(handle))
 }
 
@@ -353,6 +401,17 @@ async fn authenticate(
                     "（口令可能不正确）"
                 };
                 SshError::Auth(format!("加载私钥 {} 失败: {e}{hint}", path.display()))
+            })?;
+            pubkey_auth(handle, user, key).await
+        }
+        AuthMethod::KeyPem { pem, passphrase } => {
+            let key = decode_secret_key(&pem, passphrase.as_deref()).map_err(|e| {
+                let hint = if passphrase.is_none() {
+                    "（若私钥有口令，请在连接设置中填写并保存）"
+                } else {
+                    "（口令可能不正确）"
+                };
+                SshError::Auth(format!("解析导入的私钥失败: {e}{hint}"))
             })?;
             pubkey_auth(handle, user, key).await
         }

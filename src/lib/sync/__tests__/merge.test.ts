@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import type { ConnectionProfile } from "../../../types/settings";
-import type { SyncPayload } from "../../../types/sync";
+import type { ConnectionProfile, SshKeyEntry } from "../../../types/settings";
+import type { SshCredentialSync, SyncPayload } from "../../../types/sync";
 import { fingerprint, mergeSyncPayloads } from "../merge";
 
 const conn = (id: string, name: string, host = ""): ConnectionProfile => ({
@@ -12,6 +12,8 @@ const conn = (id: string, name: string, host = ""): ConnectionProfile => ({
   host,
   cert_path: "",
   key_path: "",
+  key_id: "",
+  identity_id: "",
   remote_socket: "",
   auth: "key",
   secret_backend: "",
@@ -120,5 +122,68 @@ describe("fingerprint", () => {
   it("键顺序不影响指纹", () => {
     expect(fingerprint({ a: 1, b: { c: 2, d: 3 } })).toBe(fingerprint({ b: { d: 3, c: 2 }, a: 1 }));
     expect(fingerprint({ a: 1 })).not.toBe(fingerprint({ a: 2 }));
+  });
+});
+
+describe("SSH 凭证三方合并（profile_id/kind 复合 id）", () => {
+  const cred = (target_id: string, kind: string, value: string): SshCredentialSync => ({
+    target_id,
+    kind,
+    value,
+  });
+
+  it("单侧新增的凭证条目保留，合并结果剥离复合 id", () => {
+    const base = payload([], { ssh_credentials: [cred("a", "password", "old")] });
+    const local = payload([], { ssh_credentials: [cred("a", "password", "old"), cred("a", "key_pem", "PEM")] });
+    const remote = payload([], { ssh_credentials: [cred("a", "password", "old")] });
+
+    const r = mergeSyncPayloads(base, local, remote);
+    expect(r.payload.ssh_credentials).toEqual([
+      cred("a", "password", "old"),
+      cred("a", "key_pem", "PEM"),
+    ]);
+    expect(r.hadConflicts).toBe(false);
+  });
+
+  it("两侧同条目都修改 → 本地优先并计冲突；单侧删除生效", () => {
+    const base = payload([], { ssh_credentials: [cred("a", "password", "old")] });
+    const local = payload([], { ssh_credentials: [cred("a", "password", "local-new")] });
+    const remote = payload([], { ssh_credentials: [cred("a", "password", "remote-new")] });
+    const r = mergeSyncPayloads(base, local, remote);
+    expect(r.payload.ssh_credentials).toEqual([cred("a", "password", "local-new")]);
+    expect(r.hadConflicts).toBe(true);
+
+    // 本地删除（条目消失）而远端未改 → 删除生效
+    const r2 = mergeSyncPayloads(base, payload([]), payload([], { ssh_credentials: [cred("a", "password", "old")] }));
+    expect(r2.payload.ssh_credentials).toEqual([]);
+  });
+});
+
+describe("SSH 钥匙串条目合并（按 id）", () => {
+  const key = (id: string, label: string): SshKeyEntry => ({
+    id,
+    label,
+    fingerprint: "SHA256:test",
+    public_key: "",
+    created_at: 1,
+  });
+
+  it("单侧新增的钥匙串条目保留", () => {
+    const base = payload([]);
+    const local = payload([], { ssh_keys: [key("k1", "本机导入")] });
+    const remote = payload([], { ssh_keys: [key("k2", "云端导入")] });
+
+    const r = mergeSyncPayloads(base, local, remote);
+    expect(r.payload.ssh_keys?.map((k) => k.id).sort()).toEqual(["k1", "k2"]);
+    expect(r.hadConflicts).toBe(false);
+  });
+
+  it("本机删除钥匙串条目、远端未改 → 删除生效（引用该条目的连接 key_id 由 sanitize 悬空清理）", () => {
+    const base = payload([], { ssh_keys: [key("k1", "旧钥")] });
+    const local = payload([]);
+    const remote = payload([], { ssh_keys: [key("k1", "旧钥")] });
+
+    const r = mergeSyncPayloads(base, local, remote);
+    expect(r.payload.ssh_keys).toEqual([]);
   });
 });

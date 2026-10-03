@@ -11,9 +11,10 @@
 
 import { useCallback, useEffect, useRef, useSyncExternalStore } from "react";
 import { toast } from "sonner";
+import { api } from "../lib/api";
 import { useSettings, useUpdateSettings } from "../lib/settings";
 import * as engine from "../lib/sync/engine";
-import { applySyncPayload, payloadFingerprint, toSyncPayload } from "../lib/sync/payload";
+import { applySyncPayload, buildSyncPayload, payloadFingerprint } from "../lib/sync/payload";
 import type { AppSettings } from "../types/settings";
 import type { SyncPayload, SyncResult } from "../types/sync";
 
@@ -41,6 +42,16 @@ export function useSyncApplyLocal(): (payload: SyncPayload) => Promise<void> {
       if (!current) throw new Error("设置尚未加载，无法应用同步数据");
       const next = applySyncPayload(current, payload);
       await update.mutateAsync(next);
+      // SSH 凭证落地本机 secret_store（此步在连接档案写入后，条目必然已存在；
+      // 失败不阻断设置应用，凭证可由下次同步重新导入）
+      const creds = payload.ssh_credentials;
+      if (creds?.length) {
+        try {
+          await api.importSshSecrets(creds);
+        } catch (e) {
+          toast.error(`SSH 凭证写入本机失败: ${String(e)}`);
+        }
+      }
     },
     [update],
   );
@@ -199,26 +210,37 @@ export function useCloudSync(): void {
     };
   }, [canSync, settings, state.startupChecked]);
 
-  // 设置变更 → 去抖 3 秒自动同步（指纹去重 + 回填跳过在引擎侧）
+  // 设置变更 → 去抖 3 秒自动同步（指纹去重 + 回填跳过在引擎侧）；
+  // 载荷含 SSH 凭证时需经 IPC 异步导出，改用异步构建 + cancelled 标记防竞态
   useEffect(() => {
     if (!settings || !canSync || !state.autoSync || !state.startupChecked) return;
-    const payload = toSyncPayload(settings);
-    if (engine.isPayloadSkipped(payload)) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    void (async () => {
+      const payload = await buildSyncPayload(settings);
+      if (cancelled || engine.isPayloadSkipped(payload)) return;
 
-    const timer = setTimeout(() => {
-      const s = settingsRef.current;
-      if (!s) return;
-      // 定时器触发前设置可能又变了：以最新设置构建载荷再查一次指纹
-      if (engine.isPayloadSkipped(toSyncPayload(s))) return;
-      void engine
-        .syncNow(s, { reason: "auto", applyLocal: (p) => applyLocalRef.current(p) })
-        .then((r) => {
+      timer = setTimeout(() => {
+        const s = settingsRef.current;
+        if (!s) return;
+        // 定时器触发前设置可能又变了：以最新设置构建载荷再查一次指纹
+        void (async () => {
+          const latest = await buildSyncPayload(s);
+          if (engine.isPayloadSkipped(latest)) return;
+          const r = await engine.syncNow(s, {
+            reason: "auto",
+            applyLocal: (p) => applyLocalRef.current(p),
+          });
           if (!r.success && r.error && !r.conflictDetected && !r.shrinkBlocked && r.error !== "empty-vault-guard") {
             toast.error(`云同步失败: ${r.error}`);
           }
-        });
-    }, DEBOUNCE_MS);
-    return () => clearTimeout(timer);
+        })().catch(() => {});
+      }, DEBOUNCE_MS);
+    })();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
   }, [settings, canSync, state.autoSync, state.startupChecked]);
 
   // 窗口重新可见 → 强制检查远端（节流 30 秒；不依赖自动同步开关）
@@ -240,6 +262,6 @@ export function useCloudSync(): void {
 }
 
 /** 供日志/调试：当前本地载荷指纹（判断"是否真的变了"） */
-export function localPayloadFingerprint(settings: AppSettings): string {
-  return payloadFingerprint(toSyncPayload(settings));
+export async function localPayloadFingerprint(settings: AppSettings): Promise<string> {
+  return payloadFingerprint(await buildSyncPayload(settings));
 }

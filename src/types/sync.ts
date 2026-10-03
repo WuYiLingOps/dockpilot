@@ -1,6 +1,14 @@
 /** 云同步域类型与常量（对应方案 sync-gist-plan.md；算法移植自 Netcatty） */
 
-import type { AppSettings, ConnectionProfile, RegistryProfile, ThemeMode, TerminalShell } from "./settings";
+import type {
+  AppSettings,
+  ConnectionProfile,
+  RegistryProfile,
+  SshIdentity,
+  SshKeyEntry,
+  ThemeMode,
+  TerminalShell,
+} from "./settings";
 
 // ============================================================================
 // 状态机
@@ -53,14 +61,31 @@ export interface SyncedScalarSettings {
   logs_timestamps?: boolean;
   terminal_shell?: TerminalShell;
   notifications_enabled?: boolean;
+  /** 云同步是否携带 SSH 凭证（默认开） */
+  sync_credentials?: boolean;
+}
+
+/** 云同步携带的 SSH 凭证条目（明文；整体载荷由同步密码信封加密保护） */
+export interface SshCredentialSync {
+  /** 连接 id（password / key_passphrase）或钥匙串条目 id（keychain_*） */
+  target_id: string;
+  /** "password" | "key_passphrase" | "keychain_pem" | "keychain_passphrase" | "identity_password" */
+  kind: string;
+  value: string;
 }
 
 /** 解密后的同步载荷 */
 export interface SyncPayload {
   connections: ConnectionProfile[];
+  /** SSH 钥匙串条目元数据（材料经 ssh_credentials 同步） */
+  ssh_keys?: SshKeyEntry[];
+  /** SSH 身份元数据（密码经 ssh_credentials 同步） */
+  ssh_identities?: SshIdentity[];
   /** 仅元数据；secret_backend 为设备本地字段，上传前归一化为空串 */
   registries: RegistryProfile[];
   settings?: SyncedScalarSettings;
+  /** SSH 凭证（sync_credentials 开启时由本机 secret_store 导出；对端应用后写入其本机 secret_store） */
+  ssh_credentials?: SshCredentialSync[];
   syncedAt: number;
 }
 
@@ -305,6 +330,7 @@ export const SYNC_SCALAR_SETTING_KEYS = [
   "logs_timestamps",
   "terminal_shell",
   "notifications_enabled",
+  "sync_credentials",
 ] as const satisfies readonly (keyof SyncedScalarSettings)[];
 
 export type SyncScalarSettingKey = (typeof SYNC_SCALAR_SETTING_KEYS)[number];
@@ -318,4 +344,5 @@ export const pickSyncedSettings = (s: AppSettings): SyncedScalarSettings => ({
   logs_timestamps: s.logs_timestamps,
   terminal_shell: s.terminal_shell,
   notifications_enabled: s.notifications_enabled,
+  sync_credentials: s.sync_credentials,
 });

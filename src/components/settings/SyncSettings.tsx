@@ -11,6 +11,7 @@ import { toast } from "sonner";
 import { cn, Badge, Button, IconButton, Input, Modal, Spinner, Switch } from "../ui";
 import { copyText } from "../../lib/clipboard";
 import { formatLastSync, SYNC_CONSTANTS, type DeviceFlowStart, type SecurityState, type SyncState } from "../../types/sync";
+import { useSettings, useUpdateSettings } from "../../lib/settings";
 import * as engine from "../../lib/sync/engine";
 import { useCloudSyncState, useSyncActions } from "../../hooks/useCloudSync";
 
@@ -32,6 +33,8 @@ const SECURITY_STATE_META: Record<SecurityState, { label: string; tone: "neutral
 export function SyncSettings() {
   const state = useCloudSyncState();
   const actions = useSyncActions();
+  const { data: settings } = useSettings();
+  const update = useUpdateSettings();
 
   const [authStart, setAuthStart] = useState<DeviceFlowStart | null>(null);
   const [authBusy, setAuthBusy] = useState(false);
@@ -291,6 +294,24 @@ export function SyncSettings() {
             disabled={!connected || !unlocked}
             title={connected && unlocked ? undefined : "需先连接 GitHub 并解锁同步密码"}
             onChange={(v) => engine.setAutoSync(v)}
+          />
+        </div>
+
+        {/* SSH 凭证同步开关（AppSettings 标量，随同步载荷跨设备保持一致） */}
+        <div className="flex min-h-13 items-center justify-between gap-4 px-4 py-2.5">
+          <div className="min-w-0">
+            <div className="text-[13px] text-fg">同步 SSH 凭证</div>
+            <div className="mt-0.5 text-[11px] leading-4 text-fg3">
+              登录密码、路径型私钥口令、钥匙串私钥与身份密码随云同步跨设备（明文进同步载荷，由同步密码加密保护）
+            </div>
+          </div>
+          <Switch
+            checked={settings?.sync_credentials ?? true}
+            disabled={!connected || !unlocked}
+            title={connected && unlocked ? undefined : "需先连接 GitHub 并解锁同步密码"}
+            onChange={(v) => {
+              if (settings) update.mutate({ ...settings, sync_credentials: v });
+            }}
           />
         </div>
 

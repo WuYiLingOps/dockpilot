@@ -50,6 +50,8 @@ import type {
   LogFileMeta,
 } from "../types/diagnostics";
 import type { AppUpdateInfo, DownloadProgress } from "../types/appUpdate";
+import type { SshCredentialSync } from "../types/sync";
+import type { SshIdentity, SshKeyEntry } from "../types/settings";
 
 type Unsubscribe = () => void;
 
@@ -315,9 +317,55 @@ export const api = {
       keyPassphrase: keyPassphrase || null,
     }),
 
-  /** 保存/清除 SSH 密钥（kind: "password" = 登录密码，"key_passphrase" = 私钥口令）；secret 空 = 清除 */
+  /** 保存/清除连接侧 SSH 密钥（kind: "password" = 登录密码，"key_passphrase" = 路径型私钥口令）；secret 空 = 清除 */
   setSshSecret: (profileId: string, kind: "password" | "key_passphrase", secret: string) =>
     invoke<void>("set_ssh_secret", { profileId, kind, secret }),
+
+  /** 保存钥匙串私钥条目（导入/更新 PEM/重命名）：返回含公钥指纹的条目 */
+  saveSshKeyEntry: (
+    id: string | null,
+    label: string,
+    pem: string | null,
+    passphrase: string | null,
+  ) =>
+    invoke<SshKeyEntry>("save_ssh_key_entry", {
+      id: id || null,
+      label,
+      pem: pem || null,
+      passphrase: passphrase || null,
+    }),
+
+  /** 删除钥匙串私钥条目（被连接引用时后端拒绝） */
+  deleteSshKeyEntry: (id: string) => invoke<void>("delete_ssh_key_entry", { id }),
+
+  /** 保存 SSH 身份（新建/重命名/改用户名/改密码/关联私钥）：返回含创建时间的条目 */
+  saveSshIdentity: (
+    id: string | null,
+    label: string,
+    username: string,
+    password: string | null,
+    keyId: string | null,
+  ) =>
+    invoke<SshIdentity>("save_ssh_identity", {
+      id: id || null,
+      label,
+      username,
+      password: password || null,
+      keyId: keyId || null,
+    }),
+
+  /** 删除 SSH 身份（被连接引用时后端拒绝） */
+  deleteSshIdentity: (id: string) => invoke<void>("delete_ssh_identity", { id }),
+
+  /** 云同步导出 SSH 凭证：连接侧密码/口令与钥匙串 PEM/口令（非空者） */
+  exportSshSecrets: () => invoke<SshCredentialSync[]>("export_ssh_secrets"),
+
+  /** 云同步导入 SSH 凭证：写入本机 secret_store（upsert，不清除未提及条目） */
+  importSshSecrets: (entries: SshCredentialSync[]) =>
+    invoke<void>("import_ssh_secrets", { entries }),
+
+  /** 读取私钥文件内容（钥匙串导入用）：校验 PEM 头并拒绝 .pub */
+  readPrivateKeyFile: (path: string) => invoke<string>("read_private_key_file", { path }),
 
   /** 用户确认后接受主机的新指纹（覆盖 TOFU 记录） */
   acceptHostKey: (dest: string, fingerprint: string, algo: string) =>

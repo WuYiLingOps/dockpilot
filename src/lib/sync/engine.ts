@@ -48,7 +48,7 @@ import {
 import { mergeSyncPayloads } from "./merge";
 import { detectSuspiciousShrink } from "./guards";
 import { createSyncedFileSignature, decideRemoteChanged } from "./anchor";
-import { payloadFingerprint, toSyncPayload } from "./payload";
+import { buildSyncPayload, payloadFingerprint } from "./payload";
 import * as gist from "./gist";
 import * as auth from "./auth";
 import type { TokenBackend } from "./auth";
@@ -615,7 +615,7 @@ async function runSync(settings: AppSettings, opts: SyncOptions, seq: number): P
     hasRemoteFile: remoteFile !== null,
   });
 
-  const localPayload = toSyncPayload(settings);
+  const localPayload = await buildSyncPayload(settings);
   const base = loadBase();
 
   const finish = (result: SyncResult): SyncResult => {
@@ -847,7 +847,7 @@ export async function forcePushLocal(settings: AppSettings, baseVersion?: number
     const anchor = loadAnchor();
     const resolvedBaseVersion =
       baseVersion ?? blockedRemoteFile?.meta.version ?? anchor?.version ?? 0;
-    const payload = toSyncPayload(settings);
+    const payload = await buildSyncPayload(settings);
     const result = await uploadPayload(payload, {
       overrideShrink: true,
       base: loadBase(),

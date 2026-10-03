@@ -287,6 +287,11 @@ pub fn run() {
             docker::ssh_client::init_config_dir(app.handle());
             // 清理更新目录残留（安装包被 Windows 安装器占用，只能等重启后的新进程删除）
             app_update::cleanup_updates_dir(app.handle());
+            // 老配置的"每连接内嵌私钥"幂等迁移为钥匙串引用（secret_store 判定，无则零成本）
+            let migrated = ssh_secrets::migrate_embedded_to_keychain(app.handle());
+            if migrated > 0 {
+                log::info!("SSH 钥匙串迁移完成：{migrated} 个连接");
+            }
             docker::events::start_global_listener(app.handle(), tx);
             Ok(())
         })
@@ -356,6 +361,13 @@ pub fn run() {
             app_update::open_downloaded_update,
             app_update::install_app_update,
             ssh_secrets::set_ssh_secret,
+            ssh_secrets::save_ssh_key_entry,
+            ssh_secrets::delete_ssh_key_entry,
+            ssh_secrets::save_ssh_identity,
+            ssh_secrets::delete_ssh_identity,
+            ssh_secrets::export_ssh_secrets,
+            ssh_secrets::import_ssh_secrets,
+            ssh_secrets::read_private_key_file,
             daemon_config::read_daemon_config,
             daemon_config::validate_daemon_json,
             daemon_config::write_daemon_json,

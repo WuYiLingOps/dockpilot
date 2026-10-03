@@ -27,7 +27,7 @@ import {
   type ConnectionProfile,
   type ConnectionTestResult,
 } from "../../types/settings";
-import { Badge, Button, IconButton, Input, Modal, SegmentedControl, Spinner } from "../ui";
+import { Badge, Button, IconButton, Input, Modal, SegmentedControl, Select, Spinner } from "../ui";
 
 /** 连接类型的图标与 Badge 色调（TCP 明文给警示色） */
 const KIND_META: Record<ConnectionKind, { icon: typeof House; tone: "accent" | "ok" | "warn" | "neutral" }> = {
@@ -78,7 +78,10 @@ function validateDraft(p: ConnectionProfile): string | null {
   }
   if (p.kind === "ssh") {
     if (!p.host.trim()) return "请填写 SSH 地址";
-    if (!p.host.includes("@")) return "SSH 地址需为 user@host 形式（密码认证同样需要用户名）";
+    // 使用 SSH 身份时用户名来自身份，host 可只写 host[:port]
+    if (p.identity_id === "" && !p.host.includes("@")) {
+      return "SSH 地址需为 user@host 形式（密码认证同样需要用户名），或在上方选择 SSH 身份";
+    }
     if (p.auth !== "password" && p.key_path.trim().toLowerCase().endsWith(".pub")) {
       return "请选择私钥文件，不要选择 .pub 公钥文件（例如 id_rsa.pub）";
     }
@@ -96,6 +99,8 @@ function emptyDraft(kind: ConnectionKind = "local"): ConnectionProfile {
     host: "",
     cert_path: "",
     key_path: "",
+    key_id: "",
+  identity_id: "",
     remote_socket: "",
     auth: "key",
     secret_backend: "",
@@ -149,6 +154,8 @@ export function ConnectionSettings() {
   if (!settings) return null;
   const connections = settings.connections;
   const activeId = settings.active_connection_id;
+  const sshKeys = settings.ssh_keys;
+  const sshIdentities = settings.ssh_identities;
 
   const openDraft = (p: ConnectionProfile, isNewDraft: boolean) => {
     setDraft({ ...p });
@@ -157,13 +164,13 @@ export function ConnectionSettings() {
     setDraftPassphrase("");
   };
 
-  /** 持久化草稿的 ssh 瞬态密钥；空值跳过（保持原密钥） */
+  /** 持久化草稿的连接侧密钥；空值跳过（保持原密钥）；钥匙串私钥由「SSH 凭证」页管理 */
   const persistSshSecrets = async (p: ConnectionProfile) => {
     if (p.kind !== "ssh") return;
     if (p.auth === "password" && draftPassword) {
       await api.setSshSecret(p.id, "password", draftPassword);
     }
-    if (p.auth !== "password" && draftPassphrase) {
+    if (p.auth !== "password" && p.auth === "key" && p.key_id === "" && draftPassphrase) {
       await api.setSshSecret(p.id, "key_passphrase", draftPassphrase);
     }
   };
@@ -503,7 +510,11 @@ export function ConnectionSettings() {
                   <Input
                     value={draft.host}
                     onChange={(e) => setDraft({ ...draft, host: e.target.value })}
-                    placeholder="user@ip 或 user@ip:port"
+                    placeholder={
+                      draft.identity_id
+                        ? "ip 或 ip:端口（用户名来自所选 SSH 身份）"
+                        : "user@ip 或 user@ip:port"
+                    }
                     className="font-mono"
                     spellCheck={false}
                   />
@@ -535,6 +546,40 @@ export function ConnectionSettings() {
             {draft.kind === "ssh" && (
               <>
                 <div>
+                  <div className="mb-1.5 text-[12px] text-fg3">
+                    SSH 身份（可选：用户名与认证由身份统一提供，跨连接复用）
+                  </div>
+                  <Select
+                    value={draft.identity_id || ""}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      // 切换身份时清掉瞬态输入，避免误存
+                      setDraftPassword("");
+                      setDraftPassphrase("");
+                      setDraft({ ...draft, identity_id: v });
+                    }}
+                    className="w-full"
+                  >
+                    <option value="">不使用（手动配置认证）</option>
+                    {sshIdentities.map((i) => (
+                      <option key={i.id} value={i.id}>
+                        {i.label}（{i.username}
+                        {i.key_id ? " · 钥匙串私钥" : " · 密码"}）
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+
+                {draft.identity_id !== "" && (
+                  <div className="rounded-ctl border border-edge bg-panel2/50 px-2.5 py-2 text-[11px] leading-4 text-fg3">
+                    使用 SSH 身份：连接时以身份的用户名登录，认证方式与凭证由身份提供
+                    （可在「设置 → SSH 凭证」中修改）。下方认证配置暂不参与。
+                  </div>
+                )}
+
+                {draft.identity_id === "" && (
+                <>
+                <div>
                   <div className="mb-1.5 text-[12px] text-fg3">认证方式</div>
                   <SegmentedControl
                     options={CONNECTION_AUTHS}
@@ -544,8 +589,7 @@ export function ConnectionSettings() {
                       if (k === "password") setDraftPassphrase("");
                       else setDraftPassword("");
                       setDraft({ ...draft, auth: k });
-                    }}
-                  />
+                    }}                  />
                 </div>
 
                 {draft.auth === "password" ? (
@@ -583,55 +627,89 @@ export function ConnectionSettings() {
                   </label>
                 ) : (
                   <label className="block">
-                    <span className="mb-1 block text-[12px] text-fg3">私钥路径（可选）</span>
-                    <div className="flex gap-2">
-                      <Input
-                        value={draft.key_path}
-                        onChange={(e) => setDraft({ ...draft, key_path: e.target.value })}
-                        placeholder={
-                          isWindows
-                            ? "建议指定私钥路径（Windows 版暂不支持 ssh-agent），留空则尝试默认私钥"
-                            : "留空则依次尝试 ssh-agent 与默认私钥（~/.ssh/id_*）"
-                        }
-                        className="flex-1 font-mono"
-                        spellCheck={false}
-                      />
-                      <Button variant="outline" onClick={() => void pickKeyFile()}>
-                        选择文件
-                      </Button>
-                    </div>
-                    {draft.key_path.trim() && (
-                      <div className="mt-2">
-                        <span className="mb-1 block text-[12px] text-fg3">私钥口令（可选）</span>
+                    <span className="mb-1 block text-[12px] text-fg3">私钥来源</span>
+                    <Select
+                      value={draft.key_id ? `key:${draft.key_id}` : "path"}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setDraft({ ...draft, key_id: v.startsWith("key:") ? v.slice(4) : "" });
+                      }}
+                      className="w-full"
+                    >
+                      <option value="path">
+                        私钥文件路径（留空则依次尝试 ssh-agent 与默认私钥）
+                      </option>
+                      {sshKeys.map((k) => (
+                        <option key={k.id} value={`key:${k.id}`}>
+                          钥匙串：{k.label}
+                        </option>
+                      ))}
+                    </Select>
+                    {draft.key_id === "" && (
+                      <div className="mt-2 flex flex-col gap-2">
                         <div className="flex gap-2">
                           <Input
-                            type="password"
-                            value={draftPassphrase}
-                            onChange={(e) => setDraftPassphrase(e.target.value)}
-                            placeholder={draft.secret_backend ? "已保存，留空保持不变" : "私钥有口令时填写"}
-                            className="flex-1"
-                            autoComplete="off"
+                            value={draft.key_path}
+                            onChange={(e) => setDraft({ ...draft, key_path: e.target.value })}
+                            placeholder={
+                              isWindows
+                                ? "建议指定私钥路径（Windows 版暂不支持 ssh-agent），留空则尝试默认私钥"
+                                : "留空则依次尝试 ssh-agent 与默认私钥（~/.ssh/id_*）"
+                            }
+                            className="flex-1 font-mono"
+                            spellCheck={false}
                           />
-                          {draft.secret_backend && (
-                            <Button
-                              variant="outline"
-                              onClick={() => {
-                                void api
-                                  .setSshSecret(draft.id, "key_passphrase", "")
-                                  .then(() => {
-                                    setDraft({ ...draft, secret_backend: "" });
-                                    toast.success("已清除保存的口令");
-                                  })
-                                  .catch((e) => toast.error(`清除口令失败: ${e}`));
-                              }}
-                            >
-                              清除已保存
-                            </Button>
-                          )}
+                          <Button variant="outline" onClick={() => void pickKeyFile()}>
+                            选择文件
+                          </Button>
                         </div>
+                        {draft.key_path.trim() && (
+                          <div className="mt-1">
+                            <span className="mb-1 block text-[12px] text-fg3">私钥口令（可选）</span>
+                            <div className="flex gap-2">
+                              <Input
+                                type="password"
+                                value={draftPassphrase}
+                                onChange={(e) => setDraftPassphrase(e.target.value)}
+                                placeholder={draft.secret_backend ? "已保存，留空保持不变" : "私钥有口令时填写"}
+                                className="flex-1"
+                                autoComplete="off"
+                              />
+                              {draft.secret_backend && (
+                                <Button
+                                  variant="outline"
+                                  onClick={() => {
+                                    void api
+                                      .setSshSecret(draft.id, "key_passphrase", "")
+                                      .then(() => {
+                                        setDraft({ ...draft, secret_backend: "" });
+                                        toast.success("已清除保存的口令");
+                                      })
+                                      .catch((e) => toast.error(`清除口令失败: ${e}`));
+                                  }}
+                                >
+                                  清除已保存
+                                </Button>
+                              )}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
+                    {draft.key_id !== "" && (
+                      <div className="mt-1.5 rounded-btn bg-panel2/50 px-2.5 py-1.5 text-[11px] leading-4 text-fg3">
+                        使用 SSH 钥匙串私钥：加密存于本机密钥库、随云同步跨设备可用；
+                        私钥口令在「设置 → SSH 凭证」中管理
+                      </div>
+                    )}
+                    <span className="mt-1.5 block text-[11px] text-fg3">
+                      {sshKeys.length === 0
+                        ? "提示：在「设置 → SSH 凭证」导入私钥后可跨连接复用、随云同步跨设备"
+                        : `钥匙串中共 ${sshKeys.length} 把私钥；导入 / 删除请到「设置 → SSH 凭证」`}
+                    </span>
                   </label>
+                )}
+                </>
                 )}
 
                 <label className="block">

@@ -3,6 +3,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   Activity,
   AppWindow,
+  KeyRound,
   Bug,
   CloudUpload,
   Code2,
@@ -38,6 +39,7 @@ import type { AppSettings } from "../../types/settings";
 import { Button, IconButton, SearchInput, Select, Spinner, Switch } from "../ui";
 import { Card, Row } from "./SettingsCard";
 import { DiagnosticsSettings } from "./DiagnosticsSettings";
+import { SshKeySettings } from "./SshKeySettings";
 import { MirrorSettings } from "./MirrorSettings";
 import { RegistrySettings } from "./RegistrySettings";
 import { SyncSettings } from "./SyncSettings";
@@ -47,6 +49,7 @@ export type SettingsCategory =
   | "app"
   | "appearance"
   | "terminal"
+  | "sshkeys"
   | "registries"
   | "mirror"
   | "sync"
@@ -81,6 +84,13 @@ const CATEGORIES: {
     desc: "终端 Shell 与容器日志默认值",
     icon: Terminal,
     keywords: ["终端", "shell", "bash", "sh", "ash", "日志", "回看", "时间戳", "tail"],
+  },
+  {
+    key: "sshkeys",
+    label: "SSH 凭证",
+    desc: "钥匙串私钥管理与跨设备同步",
+    icon: KeyRound,
+    keywords: ["ssh", "凭证", "钥匙串", "密钥", "私钥", "指纹", "导入"],
   },
   {
     key: "registries",
@@ -508,6 +518,8 @@ export function SettingsDialog({
             </Row>
           </Card>
         );
+      case "sshkeys":
+        return <SshKeySettings />;
       case "registries":
         return <RegistrySettings />;
       case "mirror":

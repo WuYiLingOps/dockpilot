@@ -1,14 +1,17 @@
 import { describe, expect, it } from "vitest";
 
 import type { AppSettings } from "../../../types/settings";
+import type { SyncPayload } from "../../../types/sync";
 import { applySyncPayload, payloadFingerprint, toSyncPayload } from "../payload";
 
 const localSettings = (): AppSettings => ({
   theme: "dark",
   docker_socket: "/legacy/sock",
   connections: [
-    { id: "local", name: "本地", kind: "local", socket_path: "", host: "", cert_path: "", key_path: "", remote_socket: "", auth: "key", secret_backend: "" },
+    { id: "local", name: "本地", kind: "local", socket_path: "", host: "", cert_path: "", key_path: "", key_id: "", identity_id: "", remote_socket: "", auth: "key", secret_backend: "" },
   ],
+  ssh_keys: [],
+  ssh_identities: [],
   active_connection_id: "local",
   containers_refresh_secs: 10,
   images_refresh_secs: 20,
@@ -17,6 +20,7 @@ const localSettings = (): AppSettings => ({
   terminal_shell: "bash",
   notifications_enabled: true,
   auto_check_updates: true,
+  sync_credentials: true,
   close_action: "exit",
   debug_logging: false,
   log_retention_days: 14,
@@ -52,7 +56,7 @@ describe("载荷映射", () => {
     const incoming = toSyncPayload(settings);
     incoming.connections = [
       ...incoming.connections,
-      { id: "srv", name: "服务器", kind: "ssh", socket_path: "", host: "root@1.2.3.4", cert_path: "", key_path: "", remote_socket: "", auth: "key", secret_backend: "" },
+      { id: "srv", name: "服务器", kind: "ssh", socket_path: "", host: "root@1.2.3.4", cert_path: "", key_path: "", key_id: "", identity_id: "", remote_socket: "", auth: "key", secret_backend: "" },
     ];
     incoming.registries = [
       ...incoming.registries,
@@ -86,5 +90,29 @@ describe("载荷映射", () => {
     const c = toSyncPayload(localSettings());
     c.settings = { ...c.settings, theme: "light" };
     expect(payloadFingerprint(c)).not.toBe(payloadFingerprint(a));
+  });
+});
+
+describe("SSH 钥匙串元数据应用", () => {
+  it("applySyncPayload 落地载荷的 ssh_keys（连接 key_id 引用得以解析）", () => {
+    const settings = localSettings();
+    const incoming = toSyncPayload(settings);
+    incoming.ssh_keys = [
+      { id: "k1", label: "腾讯云", fingerprint: "SHA256:x", public_key: "", created_at: 1 },
+    ];
+    incoming.connections = incoming.connections.map((c) =>
+      c.kind === "ssh" ? { ...c, key_id: "k1" } : c,
+    );
+    const next = applySyncPayload(settings, incoming);
+    expect(next.ssh_keys).toEqual([{ id: "k1", label: "腾讯云", fingerprint: "SHA256:x", public_key: "", created_at: 1 }]);
+  });
+
+  it("载荷无 ssh_keys（旧云端载荷 / 开关关闭）时保留本机钥匙串", () => {
+    const settings = localSettings();
+    settings.ssh_keys = [{ id: "k1", label: "本机", fingerprint: "", public_key: "", created_at: 1 }];
+    const incoming = toSyncPayload(settings);
+    delete (incoming as Partial<SyncPayload>).ssh_keys;
+    const next = applySyncPayload(settings, incoming);
+    expect(next.ssh_keys).toEqual([{ id: "k1", label: "本机", fingerprint: "", public_key: "", created_at: 1 }]);
   });
 });

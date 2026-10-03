@@ -12,8 +12,13 @@
  * 能拉到云端既有设置），冲突计数。
  */
 
-import type { RegistryProfile, ConnectionProfile } from "../../types/settings";
-import type { SyncPayload, SyncedScalarSettings } from "../../types/sync";
+import type {
+  RegistryProfile,
+  ConnectionProfile,
+  SshIdentity,
+  SshKeyEntry,
+} from "../../types/settings";
+import type { SshCredentialSync, SyncPayload, SyncedScalarSettings } from "../../types/sync";
 import { SYNC_SCALAR_SETTING_KEYS } from "../../types/sync";
 
 // ---------------------------------------------------------------------------
@@ -228,13 +233,79 @@ export function mergeSyncPayloads(
     remote.registries ?? [],
   );
 
+  // SSH 钥匙串条目元数据:实体级三方合并
+  const sshKeys = mergeEntityArrays<SshKeyEntry>(
+    b.ssh_keys ?? [],
+    local.ssh_keys ?? [],
+    remote.ssh_keys ?? [],
+  );
+
+  // SSH 身份元数据:实体级三方合并
+  const sshIdentities = mergeEntityArrays<SshIdentity>(
+    b.ssh_identities ?? [],
+    local.ssh_identities ?? [],
+    remote.ssh_identities ?? [],
+  );
+
+  // SSH 凭证:按 target_id/kind 复合 id 做实体级三方合并。刻意不进收缩护栏
+  // （CHECKED_ENTITIES）:sync_credentials 开关属用户主动行为,关闭后凭证减少
+  // 不应被误判为"静默丢数据"而拒绝同步。
+  const credentialKey = (c: SshCredentialSync) => `${c.target_id}/${c.kind}`;
+  const tagCredential = (c: SshCredentialSync) => ({ ...c, id: credentialKey(c) });
+  const sshCredentials = mergeEntityArrays<SshCredentialSync & { id: string }>(
+    (b.ssh_credentials ?? []).map(tagCredential),
+    (local.ssh_credentials ?? []).map(tagCredential),
+    (remote.ssh_credentials ?? []).map(tagCredential),
+  );
+
   const summary: MergeSummary = {
-    added: { local: connections.added.local + registries.added.local, remote: connections.added.remote + registries.added.remote },
-    deleted: { local: connections.deleted.local + registries.deleted.local, remote: connections.deleted.remote + registries.deleted.remote },
+    added: {
+      local:
+        connections.added.local +
+        registries.added.local +
+        sshKeys.added.local +
+        sshIdentities.added.local +
+        sshCredentials.added.local,
+      remote:
+        connections.added.remote +
+        registries.added.remote +
+        sshKeys.added.remote +
+        sshIdentities.added.remote +
+        sshCredentials.added.remote,
+    },
+    deleted: {
+      local:
+        connections.deleted.local +
+        registries.deleted.local +
+        sshKeys.deleted.local +
+        sshIdentities.deleted.local +
+        sshCredentials.deleted.local,
+      remote:
+        connections.deleted.remote +
+        registries.deleted.remote +
+        sshKeys.deleted.remote +
+        sshIdentities.deleted.remote +
+        sshCredentials.deleted.remote,
+    },
     modified: {
-      local: connections.modified.local + registries.modified.local,
-      remote: connections.modified.remote + registries.modified.remote,
-      conflicts: connections.conflicts + registries.conflicts,
+      local:
+        connections.modified.local +
+        registries.modified.local +
+        sshKeys.modified.local +
+        sshIdentities.modified.local +
+        sshCredentials.modified.local,
+      remote:
+        connections.modified.remote +
+        registries.modified.remote +
+        sshKeys.modified.remote +
+        sshIdentities.modified.remote +
+        sshCredentials.modified.remote,
+      conflicts:
+        connections.conflicts +
+        registries.conflicts +
+        sshKeys.conflicts +
+        sshIdentities.conflicts +
+        sshCredentials.conflicts,
     },
   };
 
@@ -243,8 +314,11 @@ export function mergeSyncPayloads(
 
   const payload: SyncPayload = {
     connections: connections.merged,
+    ssh_keys: sshKeys.merged,
+    ssh_identities: sshIdentities.merged,
     registries: registries.merged,
     settings: settings.merged,
+    ssh_credentials: sshCredentials.merged.map(({ id: _tag, ...c }) => c),
     syncedAt: Date.now(),
   };
 

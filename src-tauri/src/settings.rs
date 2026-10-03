@@ -21,6 +21,13 @@ pub struct ConnectionProfile {
     pub host: String,
     pub cert_path: String,
     pub key_path: String,
+    /// ssh 类型：钥匙串私钥条目 id（空 = 不用钥匙串）。非空时连接时从
+    /// secret_store 的 sshkeypem/{key_id} 读 PEM 内存解码，不再读 key_path；
+    /// 随云同步跨设备可用（引用的条目见 ssh_keys）
+    pub key_id: String,
+    /// ssh 类型：SSH 身份条目 id（空 = 不用身份）。非空时连接的用户名与认证
+    /// 完全由身份决定（host 的 user 段被覆盖，可省略），key_id/key_path/密码暂不参与
+    pub identity_id: String,
     /// ssh 类型：远程 docker socket 路径，空 = /var/run/docker.sock
     pub remote_socket: String,
     /// ssh 类型：认证方式 "key"（私钥/agent，默认）| "password"（密码存 secret_store）。
@@ -42,6 +49,8 @@ impl ConnectionProfile {
             host: String::new(),
             cert_path: String::new(),
             key_path: String::new(),
+            key_id: String::new(),
+            identity_id: String::new(),
             remote_socket: String::new(),
             auth: String::new(),
             secret_backend: String::new(),
@@ -115,6 +124,36 @@ pub struct ComposeScanDir {
     pub path: String,
 }
 
+/// SSH 钥匙串条目：跨连接复用的导入式私钥（元数据；PEM 与口令存 secret_store，
+/// key_id 见 ssh_secrets::keychain_pem_key / keychain_passphrase_key）
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct SshKeyEntry {
+    pub id: String,
+    pub label: String,
+    /// 公钥指纹（OpenSSH `SHA256:xxx` 格式，导入时由 PEM 计算；旧迁移条目可为空）
+    pub fingerprint: String,
+    /// OpenSSH 公钥全文（导入时由 PEM 推导，可复制到服务器 authorized_keys）
+    pub public_key: String,
+    /// 创建时间（unix 秒）
+    pub created_at: i64,
+}
+
+/// SSH 身份：跨连接复用的登录身份（用户名 + 密码 + 可选关联钥匙串私钥）。
+/// 密码存 secret_store 的 sshidpass/{id}；被连接的 identity_id 引用后，
+/// 连接的用户名与认证完全由身份决定。
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct SshIdentity {
+    pub id: String,
+    pub label: String,
+    pub username: String,
+    /// 可选关联的钥匙串私钥条目 id（空 = 密码认证）
+    pub key_id: String,
+    /// 创建时间（unix 秒）
+    pub created_at: i64,
+}
+
 /// 应用设置：持久化到 app_config_dir()/settings.json。
 /// 反序列化带 #[serde(default)]，旧文件缺字段自动补默认值，
 /// 文件缺失或损坏时整体回落默认值。
@@ -127,6 +166,10 @@ pub struct AppSettings {
     pub docker_socket: String,
     /// 连接配置列表，始终保证至少一个本地连接
     pub connections: Vec<ConnectionProfile>,
+    /// SSH 钥匙串：跨连接复用的导入式私钥条目（PEM 在 secret_store，此处仅元数据）
+    pub ssh_keys: Vec<SshKeyEntry>,
+    /// SSH 身份：跨连接复用的登录身份（密码在 secret_store，此处仅元数据）
+    pub ssh_identities: Vec<SshIdentity>,
     /// 当前激活的连接 id
     pub active_connection_id: String,
     /// 容器列表轮询间隔（秒）
@@ -143,6 +186,9 @@ pub struct AppSettings {
     pub notifications_enabled: bool,
     /// 启动时自动检查更新（仅提醒，不自动下载；手动「检查更新」不受此开关限制）
     pub auto_check_updates: bool,
+    /// 云同步是否携带 SSH 凭证（登录密码 / 口令 / 导入的私钥；明文进同步载荷，
+    /// 由同步密码信封加密保护）
+    pub sync_credentials: bool,
     /// 关闭窗口行为："ask" 关闭时前端弹窗询问（默认）| "minimize" 最小化到托盘后台 | "exit" 完全退出
     pub close_action: String,
     /// 调试日志：开启后运行日志级别降为 Debug（立即生效，用于排查问题）
@@ -165,6 +211,8 @@ impl Default for AppSettings {
             // 反序列化旧配置时以本 Default 为底：留空让 migrate() 统一补本地连接，
             // 避免旧配置被误判为"已有连接列表"而跳过迁移
             connections: Vec::new(),
+            ssh_keys: Vec::new(),
+            ssh_identities: Vec::new(),
             active_connection_id: String::new(),
             containers_refresh_secs: 10,
             images_refresh_secs: 20,
@@ -173,6 +221,7 @@ impl Default for AppSettings {
             terminal_shell: "bash".into(),
             notifications_enabled: true,
             auto_check_updates: true,
+            sync_credentials: true,
             close_action: "ask".into(),
             debug_logging: false,
             log_retention_days: 14,
@@ -252,6 +301,17 @@ pub fn sanitize(mut s: AppSettings) -> AppSettings {
     // 连接配置：字段归一化 + 空 id 生成 + id 去重（保留首个，重复者换新 id）
     use std::collections::HashSet;
     let mut seen = HashSet::new();
+    let keychain_ids: HashSet<String> = s.ssh_keys.iter().map(|k| k.id.clone()).collect();
+    // 身份元数据修剪：label/去空白、关联钥匙串悬空清理；无用户名的身份无意义，剔除
+    for i in &mut s.ssh_identities {
+        i.label = i.label.trim().to_string();
+        i.username = i.username.trim().to_string();
+        if !i.key_id.is_empty() && !keychain_ids.contains(&i.key_id) {
+            i.key_id.clear();
+        }
+    }
+    s.ssh_identities.retain(|i| !i.username.is_empty());
+    let identity_ids: HashSet<String> = s.ssh_identities.iter().map(|i| i.id.clone()).collect();
     for c in &mut s.connections {
         c.id = c.id.trim().to_string();
         c.name = c.name.trim().to_string();
@@ -271,12 +331,23 @@ pub fn sanitize(mut s: AppSettings) -> AppSettings {
             if c.auth != "password" {
                 c.auth = "key".into();
             }
+            // 钥匙串引用仅对 key 认证有意义，且必须指向存在的条目（悬空引用清空，
+            // 避免连接时才报"私钥不存在"）
+            if c.auth != "key" || (!c.key_id.is_empty() && !keychain_ids.contains(&c.key_id)) {
+                c.key_id.clear();
+            }
+            // 身份引用悬空清理（指向不存在的身份）
+            if !c.identity_id.is_empty() && !identity_ids.contains(&c.identity_id) {
+                c.identity_id.clear();
+            }
             if SecretBackend::parse(&c.secret_backend).is_none() {
                 c.secret_backend = String::new();
             }
         } else {
             c.auth.clear();
             c.secret_backend.clear();
+            c.key_id.clear();
+            c.identity_id.clear();
         }
         if c.id.is_empty() {
             c.id = uuid::Uuid::new_v4().to_string();
@@ -429,6 +500,16 @@ pub fn load(app: &tauri::AppHandle) -> AppSettings {
     }
 }
 
+/// load 的目录参数化变体：供无 AppHandle 的模块（如 ssh_client 的身份解析）
+/// 读取设置，与 load 口径一致（migrate + sanitize）。
+pub fn load_from_dir(dir: &std::path::Path) -> AppSettings {
+    let path = dir.join("settings.json");
+    match std::fs::read_to_string(&path) {
+        Ok(text) => migrate(sanitize(parse_settings(&text))),
+        Err(_) => AppSettings::default(),
+    }
+}
+
 /// tmp + rename 原子写入，避免半截文件
 pub fn save(app: &tauri::AppHandle, s: &AppSettings) -> Result<(), String> {
     let path = config_file(app)?;
@@ -531,6 +612,50 @@ mod tests {
         assert!(AppSettings::default().auto_check_updates);
         // 旧配置缺字段 → serde default 补 true
         assert!(parse_settings(r#"{"theme":"dark"}"#).auto_check_updates);
+    }
+
+    #[test]
+    fn sanitize_clears_dangling_identity_and_key_refs() {
+        let mut s = AppSettings::default();
+        // ssh 连接引用不存在的身份 → 清空
+        s.connections.push(ConnectionProfile {
+            id: "a".into(),
+            kind: "ssh".into(),
+            host: "ghost@h".into(),
+            identity_id: "ghost-id".into(),
+            key_id: "ghost-key".into(),
+            ..Default::default()
+        });
+        // 身份关联不存在的钥匙串条目 → 清空其 key_id
+        s.ssh_identities.push(SshIdentity {
+            id: "i1".into(),
+            label: "测试身份".into(),
+            username: "root".into(),
+            key_id: "ghost-key".into(),
+            created_at: 1,
+        });
+        s.ssh_keys.push(SshKeyEntry {
+            id: "k1".into(),
+            label: "真实私钥".into(),
+            fingerprint: String::new(),
+            public_key: String::new(),
+            created_at: 1,
+        });
+
+        let s = sanitize(s);
+
+        assert_eq!(s.connections[0].identity_id, "");
+        assert_eq!(s.connections[0].key_id, "");
+        // 身份本身保留（有用户名），悬空 key_id 清空
+        assert_eq!(s.ssh_identities[0].username, "root");
+        assert_eq!(s.ssh_identities[0].key_id, "");
+    }
+
+    #[test]
+    fn sync_credentials_defaults_to_true() {
+        assert!(AppSettings::default().sync_credentials);
+        // 旧配置缺字段 → serde default 补 true
+        assert!(parse_settings(r#"{"theme":"dark"}"#).sync_credentials);
     }
 
     #[test]
