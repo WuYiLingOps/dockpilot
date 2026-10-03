@@ -14,7 +14,14 @@ const BULK_SHRINK_MIN_ABSOLUTE = 2;
 /** 绝对收缩：丢失 ≥10 个直接判定（大库小比例也能拦住） */
 const LARGE_SHRINK_ABSOLUTE = 10;
 
-const CHECKED_ENTITIES: readonly SyncEntityType[] = ["connections", "registries"];
+/** 凭证条目（ssh_credentials）刻意不入护栏：sync_credentials 开关属用户主动行为，
+ *  关闭后凭证减少不应被误判为"静默丢数据"；元数据（钥匙串/身份）无此豁免场景 */
+const CHECKED_ENTITIES: readonly SyncEntityType[] = [
+  "connections",
+  "registries",
+  "ssh_keys",
+  "ssh_identities",
+];
 
 const countOf = (p: SyncPayload, key: SyncEntityType): number => {
   const v = p[key];

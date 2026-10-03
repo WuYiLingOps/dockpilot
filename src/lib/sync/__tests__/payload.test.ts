@@ -116,3 +116,32 @@ describe("SSH 钥匙串元数据应用", () => {
     expect(next.ssh_keys).toEqual([{ id: "k1", label: "本机", fingerprint: "", public_key: "", created_at: 1 }]);
   });
 });
+
+describe("SSH 身份元数据应用", () => {
+  it("applySyncPayload 落地载荷的 ssh_identities（连接 identity_id 引用得以解析，身份密码导入依赖它）", () => {
+    const settings = localSettings();
+    const incoming = toSyncPayload(settings);
+    incoming.ssh_keys = [
+      { id: "k1", label: "腾讯云", fingerprint: "SHA256:x", public_key: "", created_at: 1 },
+    ];
+    incoming.ssh_identities = [
+      { id: "i1", label: "运维", username: "root", key_id: "k1", created_at: 2 },
+    ];
+    incoming.connections = incoming.connections.map((c) =>
+      c.kind === "ssh" ? { ...c, identity_id: "i1" } : c,
+    );
+    const next = applySyncPayload(settings, incoming);
+    expect(next.ssh_identities).toEqual([
+      { id: "i1", label: "运维", username: "root", key_id: "k1", created_at: 2 },
+    ]);
+  });
+
+  it("载荷无 ssh_identities（旧云端载荷 / 开关关闭）时保留本机身份", () => {
+    const settings = localSettings();
+    settings.ssh_identities = [{ id: "i1", label: "本机身份", username: "root", key_id: "", created_at: 3 }];
+    const incoming = toSyncPayload(settings);
+    delete (incoming as Partial<SyncPayload>).ssh_identities;
+    const next = applySyncPayload(settings, incoming);
+    expect(next.ssh_identities).toEqual([{ id: "i1", label: "本机身份", username: "root", key_id: "", created_at: 3 }]);
+  });
+});

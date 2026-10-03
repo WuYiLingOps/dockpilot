@@ -10,7 +10,7 @@ import { Cloud, Download, ExternalLink, History, KeyRound, Lock, Pencil, Refresh
 import { toast } from "sonner";
 import { cn, Badge, Button, IconButton, Input, Modal, Spinner, Switch } from "../ui";
 import { copyText } from "../../lib/clipboard";
-import { formatLastSync, SYNC_CONSTANTS, type DeviceFlowStart, type SecurityState, type SyncState } from "../../types/sync";
+import { formatLastSync, SYNC_CONSTANTS, type DeviceFlowStart, type SecurityState, type SyncEntityType, type SyncState } from "../../types/sync";
 import { useSettings, useUpdateSettings } from "../../lib/settings";
 import * as engine from "../../lib/sync/engine";
 import { useCloudSyncState, useSyncActions } from "../../hooks/useCloudSync";
@@ -27,6 +27,14 @@ const SECURITY_STATE_META: Record<SecurityState, { label: string; tone: "neutral
   NO_KEY: { label: "未设密码", tone: "warn" },
   LOCKED: { label: "已锁定", tone: "neutral" },
   UNLOCKED: { label: "已解锁", tone: "ok" },
+};
+
+/** 收缩护栏横幅的实体显示名 */
+const SHRINK_ENTITY_LABEL: Record<SyncEntityType, string> = {
+  connections: "连接配置",
+  registries: "镜像仓库",
+  ssh_keys: "钥匙串私钥",
+  ssh_identities: "SSH 身份",
 };
 
 /** 设置页 · 云同步分组 */
@@ -157,7 +165,7 @@ export function SyncSettings() {
             <div className="min-w-0 flex-1">
               <div className="text-[13px] font-medium text-fg">同步已暂停：本次推送会删除过多数据</div>
               <div className="mt-0.5 text-[11px] leading-4 text-fg3">
-                {state.shrinkFinding.entityType === "connections" ? "连接配置" : "镜像仓库"}从{" "}
+                {SHRINK_ENTITY_LABEL[state.shrinkFinding.entityType]}从{" "}
                 {state.shrinkFinding.baseCount} 条减少到 {state.shrinkFinding.outgoingCount} 条（丢失{" "}
                 {state.shrinkFinding.lost} 条）。可能是本机数据异常，为保护云端已停止自动推送。
               </div>

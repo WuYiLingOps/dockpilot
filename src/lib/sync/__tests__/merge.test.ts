@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { ConnectionProfile, SshKeyEntry } from "../../../types/settings";
+import type { ConnectionProfile, SshIdentity, SshKeyEntry } from "../../../types/settings";
 import type { SshCredentialSync, SyncPayload } from "../../../types/sync";
 import { fingerprint, mergeSyncPayloads } from "../merge";
 
@@ -185,5 +185,33 @@ describe("SSH 钥匙串条目合并（按 id）", () => {
 
     const r = mergeSyncPayloads(base, local, remote);
     expect(r.payload.ssh_keys).toEqual([]);
+  });
+});
+
+describe("SSH 身份元数据合并（按 id）", () => {
+  const ident = (id: string, username: string): SshIdentity => ({
+    id,
+    label: id,
+    username,
+    key_id: "",
+    created_at: 1,
+  });
+
+  it("新设备拉取：远端身份以 added.remote 并入合并载荷", () => {
+    const local = payload([]);
+    const remote = payload([], { ssh_identities: [ident("i1", "root")] });
+
+    const r = mergeSyncPayloads(null, local, remote);
+    expect(r.payload.ssh_identities).toEqual([ident("i1", "root")]);
+    expect(r.summary.added.remote).toBe(1);
+  });
+
+  it("本机删除身份、远端未改 → 删除生效", () => {
+    const base = payload([], { ssh_identities: [ident("i1", "root")] });
+    const local = payload([]);
+    const remote = payload([], { ssh_identities: [ident("i1", "root")] });
+
+    const r = mergeSyncPayloads(base, local, remote);
+    expect(r.payload.ssh_identities).toEqual([]);
   });
 });

@@ -51,8 +51,9 @@ export async function buildSyncPayload(settings: AppSettings): Promise<SyncPaylo
  * 将合并/下载的载荷应用到本机设置。
  * 保留设备本地的 active_connection_id 与 docker_socket；
  * 已存在 registry 的 secret_backend 保留本机值（新条目置空待首次录入密码时回填）；
- * SSH 钥匙串元数据随载荷落地（载荷无该字段时保留本机——旧云端载荷 / 开关关闭），
- * 连接的 key_id 引用据此解析，凭证材料随后经 import_ssh_secrets 写入本机密钥库。
+ * SSH 钥匙串与身份元数据随载荷落地（载荷无该字段时保留本机——旧云端载荷 /
+ * 开关关闭），连接的 key_id / identity_id 引用据此解析，凭证材料随后经
+ * import_ssh_secrets 写入本机密钥库（身份密码导入以身份元数据存在为前提）。
  */
 export function applySyncPayload(settings: AppSettings, payload: SyncPayload): AppSettings {
   const localBackends = new Map(settings.registries.map((r) => [r.id, r.secret_backend]));
@@ -65,6 +66,7 @@ export function applySyncPayload(settings: AppSettings, payload: SyncPayload): A
     ...settings,
     connections: payload.connections.map((c) => ({ ...c })),
     ssh_keys: payload.ssh_keys ?? settings.ssh_keys,
+    ssh_identities: payload.ssh_identities ?? settings.ssh_identities,
     registries,
     ...(payload.settings ?? {}),
   };

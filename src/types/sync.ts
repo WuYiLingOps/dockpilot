@@ -105,7 +105,7 @@ export interface ProviderSyncAnchor {
   observedAt: number;
 }
 
-export type SyncEntityType = "connections" | "registries";
+export type SyncEntityType = "connections" | "registries" | "ssh_keys" | "ssh_identities";
 
 export type ShrinkFinding =
   | { suspicious: false }
