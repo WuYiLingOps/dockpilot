@@ -627,24 +627,28 @@ export function ConnectionSettings() {
                   </label>
                 ) : (
                   <label className="block">
-                    <span className="mb-1 block text-[12px] text-fg3">私钥来源</span>
-                    <Select
-                      value={draft.key_id ? `key:${draft.key_id}` : "path"}
-                      onChange={(e) => {
-                        const v = e.target.value;
-                        setDraft({ ...draft, key_id: v.startsWith("key:") ? v.slice(4) : "" });
-                      }}
-                      className="w-full"
-                    >
-                      <option value="path">
-                        私钥文件路径（留空则依次尝试 ssh-agent 与默认私钥）
-                      </option>
-                      {sshKeys.map((k) => (
-                        <option key={k.id} value={`key:${k.id}`}>
-                          钥匙串：{k.label}
-                        </option>
-                      ))}
-                    </Select>
+                    {sshKeys.length > 0 && (
+                      <>
+                        <span className="mb-1 block text-[12px] text-fg3">私钥来源</span>
+                        <Select
+                          value={draft.key_id ? `key:${draft.key_id}` : "path"}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            setDraft({ ...draft, key_id: v.startsWith("key:") ? v.slice(4) : "" });
+                          }}
+                          className="w-full"
+                        >
+                          <option value="path">
+                            私钥文件路径（留空则依次尝试 ssh-agent 与默认私钥）
+                          </option>
+                          {sshKeys.map((k) => (
+                            <option key={k.id} value={`key:${k.id}`}>
+                              钥匙串：{k.label}
+                            </option>
+                          ))}
+                        </Select>
+                      </>
+                    )}
                     {draft.key_id === "" && (
                       <div className="mt-2 flex flex-col gap-2">
                         <div className="flex gap-2">

@@ -254,7 +254,14 @@ pub async fn test_connection(
         password: ssh_password.filter(|s| !s.is_empty()),
         passphrase: key_passphrase.filter(|s| !s.is_empty()),
     };
-    let conn = ActiveConn::new(profile);
+    // 测试强制新建 SSH 会话（临时 id 不命中隧道复用表），确保所填/所存凭证
+    // 真实参与认证——复用活跃隧道会让错误密码也"测试成功"；活跃连接本身
+    // 不受影响（其隧道独立存活，测试隧道用后即毁）
+    let mut probe_profile = profile.clone();
+    if probe_profile.kind == "ssh" {
+        probe_profile.id = format!("__test__{}", probe_profile.id);
+    }
+    let conn = ActiveConn::new(probe_profile);
     match probe_with(&conn, &secrets).await {
         Ok((ms, version)) => {
             // 测试用的 ssh 隧道即时回收（若与当前活跃连接同 id 则保留）

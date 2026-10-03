@@ -486,24 +486,26 @@ export function SshKeySettings() {
               autoComplete="off"
             />
           </label>
-          <label className="block">
-            <span className="mb-1 block text-[12px] text-fg3">关联钥匙串私钥（可选）</span>
-            <Select
-              value={identityDraft?.keyId ?? ""}
-              onChange={(e) => setIdentityDraft((d) => (d ? { ...d, keyId: e.target.value } : d))}
-              className="w-full"
-            >
-              <option value="">不关联（使用密码认证）</option>
-              {sshKeys.map((k) => (
-                <option key={k.id} value={k.id}>
-                  {k.label}
-                </option>
-              ))}
-            </Select>
-            <span className="mt-1 block text-[11px] text-fg3">
-              关联后，引用此身份的连接将以该私钥认证（密码不再使用）
-            </span>
-          </label>
+          {sshKeys.length > 0 && (
+            <label className="block">
+              <span className="mb-1 block text-[12px] text-fg3">关联钥匙串私钥（可选）</span>
+              <Select
+                value={identityDraft?.keyId ?? ""}
+                onChange={(e) => setIdentityDraft((d) => (d ? { ...d, keyId: e.target.value } : d))}
+                className="w-full"
+              >
+                <option value="">不关联（使用密码认证）</option>
+                {sshKeys.map((k) => (
+                  <option key={k.id} value={k.id}>
+                    {k.label}
+                  </option>
+                ))}
+              </Select>
+              <span className="mt-1 block text-[11px] text-fg3">
+                关联后，引用此身份的连接将以该私钥认证（密码不再使用）
+              </span>
+            </label>
+          )}
         </div>
       </Modal>
 
