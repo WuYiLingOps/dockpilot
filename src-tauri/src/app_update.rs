@@ -1,8 +1,10 @@
-//! 应用更新检查：查询 GitHub Releases 最新版，与当前版本比较后把结果交给前端。
+//! 应用更新：查询 GitHub Releases 最新版，按平台与发行形态匹配更新包，下载后自动应用。
 //!
 //! 为什么走 Rust：与云同步同一网络约定——复用 reqwest 的超时 / 退避重试 / 完整
 //! 错误链与 HTTPS_PROXY 指引（模式照抄 github_sync.rs，独立实现避免耦合云同步模块）。
-//! 仅检查与提醒，不下载不安装；应用内下载安装的升级路径见方案文档（.zcode/plans/）。
+//! 更新应用方式按发行形态分派（detect_distribution_form）：deb 经 pkexec 提权安装、
+//! NSIS 被动安装，Windows 便携版原位替换自身后拉起新版本（见 install_app_update；
+//! 方案细节见 .zcode/plans/ 方案文档）。
 
 use std::sync::OnceLock;
 
@@ -122,14 +124,90 @@ struct GhAsset {
     size: Option<u64>,
 }
 
-/// 从 release 附件中挑出当前平台的安装包：
-/// Linux → .deb（x86_64 匹配 amd64 / aarch64 匹配 arm64）；Windows → NSIS `-setup.exe`（x64）。
-/// 其余平台或未匹配返回 None（前端回落跳转 Releases 页）。
-fn pick_asset(assets: &[GhAsset], os: &str, arch: &str) -> Option<UpdateAssetDto> {
-    let (suffix, arch_hint): (&str, Option<&str>) = match (os, arch) {
-        ("linux", "x86_64") => (".deb", Some("amd64")),
-        ("linux", "aarch64") => (".deb", Some("arm64")),
-        ("windows", "x86_64") => ("-setup.exe", Some("x64")),
+/// 当前运行的发行形态：决定附件匹配后缀与更新应用路径
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DistributionForm {
+    /// Linux deb 安装（系统包管理器接管）
+    Deb,
+    /// Windows NSIS 安装版
+    NsisInstaller,
+    /// Windows 便携版（裸 exe，免安装）
+    Portable,
+}
+
+/// 检测当前运行的发行形态；识别不了的边缘态回落（前端回落「前往下载」兜底）。
+fn detect_distribution_form() -> DistributionForm {
+    if cfg!(target_os = "windows") {
+        // 文件名优先：便携版附件按 `-portable.exe` 命名，浏览器下载保留附件名
+        if exe_filename_is_portable(&current_exe_filename()) {
+            return DistributionForm::Portable;
+        }
+        // NSIS 安装版在注册表写有卸载项；无安装记录的裸 exe（含被改名的便携版）按便携兜底
+        return if nsis_uninstall_key_exists() {
+            DistributionForm::NsisInstaller
+        } else {
+            DistributionForm::Portable
+        };
+    }
+    DistributionForm::Deb
+}
+
+/// 便携版文件名判定（纯函数便于单测）：文件名（大小写不敏感）含 `portable` 即命中
+fn exe_filename_is_portable(file_name: &str) -> bool {
+    file_name.to_lowercase().contains("portable")
+}
+
+/// 当前进程的可执行文件名（获取失败为空串，交由后续判定兜底）
+fn current_exe_filename() -> String {
+    std::env::current_exe()
+        .ok()
+        .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
+        .unwrap_or_default()
+}
+
+/// NSIS 卸载注册表项检测：Tauri NSIS 默认按当前用户安装（HKCU），兼容查 HKLM；
+/// 不依赖具体键名，按「卸载项数据中含应用名」搜索。查询失败按未安装处理，
+/// 误判为便携版时走替换路径更新的仍是同一个应用（见方案文档「形态误判的可接受降级」）。
+#[cfg(target_os = "windows")]
+fn nsis_uninstall_key_exists() -> bool {
+    let roots = [
+        r"HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall",
+        r"HKLM\Software\Microsoft\Windows\CurrentVersion\Uninstall",
+    ];
+    for root in roots {
+        let hit = std::process::Command::new("reg")
+            .args(["query", root, "/s", "/f", "DockPilot", "/d"])
+            .output()
+            .map(|o| o.status.success() && !o.stdout.is_empty())
+            .unwrap_or(false);
+        if hit {
+            return true;
+        }
+    }
+    false
+}
+
+/// 非 Windows 平台无 NSIS 安装概念，恒 false（detect 的 cfg! 分支跨平台编译）
+#[cfg(not(target_os = "windows"))]
+fn nsis_uninstall_key_exists() -> bool {
+    false
+}
+
+/// 从 release 附件中挑出当前平台与发行形态对应的更新包：
+/// Linux → .deb（x86_64 匹配 amd64 / aarch64 匹配 arm64）；
+/// Windows → NSIS `-setup.exe` / 便携版 `_portable.exe`（x64）。
+/// 其余平台、形态或未匹配返回 None（前端回落跳转 Releases 页）。
+fn pick_asset(
+    assets: &[GhAsset],
+    os: &str,
+    arch: &str,
+    form: DistributionForm,
+) -> Option<UpdateAssetDto> {
+    let (suffix, arch_hint): (&str, Option<&str>) = match (os, arch, form) {
+        ("linux", "x86_64", DistributionForm::Deb) => (".deb", Some("amd64")),
+        ("linux", "aarch64", DistributionForm::Deb) => (".deb", Some("arm64")),
+        ("windows", "x86_64", DistributionForm::NsisInstaller) => ("-setup.exe", Some("x64")),
+        ("windows", "x86_64", DistributionForm::Portable) => ("_portable.exe", Some("x64")),
         _ => return None,
     };
     assets
@@ -224,6 +302,7 @@ pub async fn check_update() -> CmdResult<UpdateCheckDto> {
         release.assets.as_deref().unwrap_or(&[]),
         std::env::consts::OS,
         std::env::consts::ARCH,
+        detect_distribution_form(),
     );
     Ok(UpdateCheckDto {
         current_version: current,
@@ -259,16 +338,39 @@ fn updates_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
     Ok(dir)
 }
 
-/// 应用启动时清空更新目录（尽力而为）：安装完成后的残留安装包与中断下载的
-/// .part 残片都在此清理——Windows 安装器运行期间安装包文件被系统锁定，
-/// 只能等装完重启后的新进程（本函数）删除；Linux 虽已装完即删，此处再兜底一次。
+/// 应用启动时清空更新目录（尽力而为）：安装完成后的残留更新包与中断下载的
+/// .part 残片都在此清理——Windows 安装器运行期间更新包文件被系统锁定，
+/// 只能等装完重启后的新进程（本函数）删除；Linux 虽已替换即删，此处再兜底一次。
+/// Windows 便携版自替换改名的 <exe>.old 残留也在此清理。
 pub fn cleanup_updates_dir(app: &tauri::AppHandle) {
     let dir = match updates_dir(app) {
         Ok(dir) => dir,
         Err(_) => return,
     };
     remove_dir_files(&dir);
+    cleanup_old_exe();
 }
+
+/// 便携版自替换残留清理：运行中 exe 改名的 <exe>.old 在新进程启动后已不被占用，
+/// 此处删除（被占用时 warn 跳过，下次启动再清）。
+#[cfg(target_os = "windows")]
+fn cleanup_old_exe() {
+    let Ok(exe) = std::env::current_exe() else {
+        return;
+    };
+    let mut old = exe.into_os_string();
+    old.push(".old");
+    let old = std::path::PathBuf::from(old);
+    match std::fs::remove_file(&old) {
+        Ok(()) => log::info!("已清理便携版替换残留: {}", old.display()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => log::warn!("清理便携版替换残留失败 {}: {e}", old.display()),
+    }
+}
+
+/// 非 Windows 平台无便携版 .old 残留，空实现（cleanup_updates_dir 跨平台调用）
+#[cfg(not(target_os = "windows"))]
+fn cleanup_old_exe() {}
 
 /// 删除目录内的全部文件（不动子目录；目录不存在时为空操作）。单独抽出便于单测。
 fn remove_dir_files(dir: &std::path::Path) {
@@ -308,8 +410,8 @@ async fn clean_updates_dir(dir: &std::path::Path) -> CmdResult<()> {
     Ok(())
 }
 
-/// 下载当前平台安装包到 app_cache_dir()/updates（进度经 Channel 推送），
-/// 完成后返回落盘路径；前端随即调用 open_downloaded_update 拉起系统安装器。
+/// 下载当前平台更新包到 app_cache_dir()/updates（进度经 Channel 推送），
+/// 完成后返回落盘路径；前端随即调用 install_app_update 按发行形态自动应用更新。
 #[tauri::command]
 pub async fn download_app_update(
     app: tauri::AppHandle,
@@ -402,11 +504,18 @@ fn validate_installer_path(
     Ok(target)
 }
 
-/// 拉起已下载的安装包（Windows 运行 NSIS 安装向导，Linux 经 xdg-open 走 deb 安装流程）。
-/// 自动安装失败时的兜底出口。
+/// 拉起已下载的更新包（Windows 运行 NSIS 安装向导，Linux 经 xdg-open 走 deb 安装流程）。
+/// 自动更新失败时的兜底出口；便携版没有系统安装器，返回手动替换指引。
 #[tauri::command]
 pub async fn open_downloaded_update(app: tauri::AppHandle, path: String) -> CmdResult<()> {
     let target = validate_installer_path(&app, &path)?;
+    if matches!(detect_distribution_form(), DistributionForm::Portable) {
+        // 直接打开 exe 会被单实例机制送回当前进程，没有意义；给出替换指引
+        return Err(format!(
+            "该发行形态无系统安装器：新版本已下载到 {}，请手动用它替换当前程序文件后重新打开应用",
+            target.display()
+        ));
+    }
     log::info!("拉起更新安装包: {}", target.display());
     tauri_plugin_opener::OpenerExt::opener(&app)
         .open_path(target.to_string_lossy(), None::<&str>)
@@ -414,63 +523,140 @@ pub async fn open_downloaded_update(app: tauri::AppHandle, path: String) -> CmdR
     Ok(())
 }
 
-/// 自动安装已下载的更新包：
-/// Windows → 以被动模式（/P）运行 NSIS 安装器，自动关闭运行中的应用并在完成后重启；
+/// 自动应用已下载的更新包（按发行形态分派）：
+/// Windows 安装版 → 以被动模式（/P）运行 NSIS 安装器，自动关闭运行中的应用并在完成后重启；
+/// Windows 便携版 → 原位替换自身（旧 exe 改名 .old、新 exe 移入原路径）后拉起新版本；
 /// Linux（deb）→ 经 pkexec 提权 dpkg -i 安装（弹系统授权框），成功后自动重启应用。
-/// 失败或取消时可退回「打开安装包」交由系统安装器接管。
+/// 失败或取消时可退回「打开更新包」（便携版返回手动替换指引）。
 #[tauri::command]
 pub async fn install_app_update(app: tauri::AppHandle, path: String) -> CmdResult<()> {
     let target = validate_installer_path(&app, &path)?;
-    log::info!("开始安装更新: {}", target.display());
+    let form = detect_distribution_form();
+    log::info!("开始应用更新（{form:?}）: {}", target.display());
 
     #[cfg(target_os = "windows")]
     {
-        std::process::Command::new(&target)
-            // NSIS 被动模式：只显示进度不询问，自动关闭运行中的应用，装完默认重启
-            .arg("/P")
-            .spawn()
-            .map_err(|e| format!("启动安装程序失败: {e}"))?;
-        Ok(())
+        match form {
+            DistributionForm::Portable => install_portable_update(&target).await,
+            DistributionForm::NsisInstaller => {
+                std::process::Command::new(&target)
+                    // NSIS 被动模式：只显示进度不询问，自动关闭运行中的应用，装完默认重启
+                    .arg("/P")
+                    .spawn()
+                    .map_err(|e| format!("启动安装程序失败: {e}"))?;
+                Ok(())
+            }
+            _ => Err("无法识别当前发行形态，请前往下载页手动更新".into()),
+        }
     }
 
     #[cfg(not(target_os = "windows"))]
     {
-        // 授权等待 + dpkg 安装全程；用户迟迟不输密码时以超时兜底
-        let output = tokio::time::timeout(
-            std::time::Duration::from_secs(300),
-            tokio::process::Command::new("pkexec")
-                .args(["dpkg", "-i"])
-                .arg(&target)
-                .output(),
-        )
-        .await
-        .map_err(|_| "安装超时，请检查 polkit 授权窗口状态".to_string())?
-        .map_err(|e| format!("无法启动 pkexec: {e}（请确认系统安装了 polkit）"))?;
-
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        if stderr.contains("dismissed") || stderr.contains("cancelled") {
-            return Err("已取消安装授权".into());
+        match form {
+            DistributionForm::Deb => install_deb_update(&app, &target).await,
+            _ => Err("发行形态与运行平台不匹配".into()),
         }
-        if !output.status.success() {
-            let code = output.status.code().unwrap_or(-1);
-            let line = stderr.lines().last().unwrap_or("").trim();
-            return Err(format!(
-                "安装更新失败: {}",
-                if line.is_empty() {
-                    format!("dpkg 退出码 {code}")
-                } else {
-                    line.to_string()
-                }
-            ));
-        }
-        // 安装完成即删安装包（此时文件已不被占用；Windows 侧因安装器锁定文件，
-        // 由启动时的 cleanup_updates_dir 兜底）
-        if let Err(e) = tokio::fs::remove_file(&target).await {
-            log::warn!("清理已安装的更新包失败 {}: {e}", target.display());
-        }
-        log::info!("更新安装完成，重启应用");
-        app.restart()
     }
+}
+
+/// deb 安装路径：pkexec 提权 dpkg -i（弹系统授权框），成功后删更新包并重启应用
+#[cfg(not(target_os = "windows"))]
+async fn install_deb_update(app: &tauri::AppHandle, target: &std::path::Path) -> CmdResult<()> {
+    // 授权等待 + dpkg 安装全程；用户迟迟不输密码时以超时兜底
+    let output = tokio::time::timeout(
+        std::time::Duration::from_secs(300),
+        tokio::process::Command::new("pkexec")
+            .args(["dpkg", "-i"])
+            .arg(target)
+            .output(),
+    )
+    .await
+    .map_err(|_| "安装超时，请检查 polkit 授权窗口状态".to_string())?
+    .map_err(|e| format!("无法启动 pkexec: {e}（请确认系统安装了 polkit）"))?;
+
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    if stderr.contains("dismissed") || stderr.contains("cancelled") {
+        return Err("已取消安装授权".into());
+    }
+    if !output.status.success() {
+        let code = output.status.code().unwrap_or(-1);
+        let line = stderr.lines().last().unwrap_or("").trim();
+        return Err(format!(
+            "安装更新失败: {}",
+            if line.is_empty() {
+                format!("dpkg 退出码 {code}")
+            } else {
+                line.to_string()
+            }
+        ));
+    }
+    // 安装完成即删更新包（此时文件已不被占用；Windows 侧因安装器锁定文件，
+    // 由启动时的 cleanup_updates_dir 兜底）
+    if let Err(e) = tokio::fs::remove_file(target).await {
+        log::warn!("清理已安装的更新包失败 {}: {e}", target.display());
+    }
+    log::info!("更新安装完成，重启应用");
+    app.restart()
+}
+
+/// Windows 便携版替换路径：运行中 exe 改名为 .old（Windows 允许改名运行中文件），
+/// 新 exe 移入原路径（保留用户原文件名）后拉起新版本。任一步失败回滚改名，旧程序无损；
+/// .old 残留由下次启动的 cleanup_old_exe 清理。不能用 app.restart()：
+/// 改名后 current_exe() 的指向已有歧义。
+#[cfg(target_os = "windows")]
+async fn install_portable_update(target: &std::path::Path) -> CmdResult<()> {
+    let exe = std::env::current_exe().map_err(|e| format!("定位当前程序失败: {e}"))?;
+    let mut old = exe.clone().into_os_string();
+    old.push(".old");
+    let old = std::path::PathBuf::from(old);
+    // 上次替换的 .old 残留先删（正常已被启动清理；失败不阻断）
+    let _ = tokio::fs::remove_file(&old).await;
+
+    tokio::fs::rename(&exe, &old)
+        .await
+        .map_err(|e| format!("旧程序改名失败: {e}（可能被安全软件占用，请手动更新）"))?;
+    if let Err(e) = move_into_place(target, &exe).await {
+        // 回滚改名，保证旧程序无损
+        let _ = tokio::fs::rename(&old, &exe).await;
+        return Err(e);
+    }
+    log::info!("便携版已替换为 {}，拉起新版本", exe.display());
+    spawn_replacement(&exe)
+}
+
+/// 把新版本文件移入目标路径：同文件系统直接 rename（原子换入，运行中实例继续持有旧
+/// inode / 句柄）；跨文件系统（rename 失败，如缓存目录与程序不在同一盘）先拷贝到目标
+/// 同目录旁的临时文件再 rename。成功后源文件不再存在于 updates 目录。
+#[cfg(target_os = "windows")]
+async fn move_into_place(src: &std::path::Path, dst: &std::path::Path) -> CmdResult<()> {
+    if tokio::fs::rename(src, dst).await.is_ok() {
+        return Ok(());
+    }
+    let tmp = dst.with_extension("update.tmp");
+    if let Err(e) = tokio::fs::copy(src, &tmp).await {
+        return Err(format!(
+            "拷贝新版本失败: {e}（目标目录可能只读，请手动更新）"
+        ));
+    }
+    if let Err(e) = tokio::fs::rename(&tmp, dst).await {
+        let _ = tokio::fs::remove_file(&tmp).await;
+        return Err(format!(
+            "移入新版本失败: {e}（目标目录可能只读，请手动更新）"
+        ));
+    }
+    let _ = tokio::fs::remove_file(src).await;
+    Ok(())
+}
+
+/// 拉起新版本并退出当前进程。新旧进程短暂并存，旧进程退出先于新进程完成单实例
+/// 检测（与 app.restart() 的时序一致），新进程正常接管。
+#[cfg(target_os = "windows")]
+fn spawn_replacement(bin: &std::path::Path) -> CmdResult<()> {
+    std::process::Command::new(bin)
+        .spawn()
+        .map_err(|e| format!("拉起新版本失败: {e}"))?;
+    log::info!("新版本已拉起，退出当前进程");
+    std::process::exit(0)
 }
 
 #[cfg(test)]
@@ -488,28 +674,52 @@ mod tests {
     }
 
     #[test]
-    fn pick_asset_matches_platform_installer() {
+    fn pick_asset_matches_platform_and_form() {
         let assets = vec![
             asset("DockPilot_1.0.5_x64-setup.exe"),
             asset("dockpilot_1.0.5_amd64.deb"),
             asset("dockpilot_1.0.5_arm64.deb"),
+            asset("DockPilot_1.0.5_x64_portable.exe"),
             asset("latest.json"),
         ];
-        // Linux x86_64 → amd64 .deb
-        let d = pick_asset(&assets, "linux", "x86_64").unwrap();
+        // Linux x86_64 deb 安装 → amd64 .deb
+        let d = pick_asset(&assets, "linux", "x86_64", DistributionForm::Deb).unwrap();
         assert_eq!(d.name, "dockpilot_1.0.5_amd64.deb");
-        // Windows x86_64 → NSIS x64
-        let w = pick_asset(&assets, "windows", "x86_64").unwrap();
+        // Windows 安装版 → NSIS x64；便携版 → -portable.exe
+        let w = pick_asset(
+            &assets,
+            "windows",
+            "x86_64",
+            DistributionForm::NsisInstaller,
+        )
+        .unwrap();
         assert_eq!(w.name, "DockPilot_1.0.5_x64-setup.exe");
+        let p = pick_asset(&assets, "windows", "x86_64", DistributionForm::Portable).unwrap();
+        assert_eq!(p.name, "DockPilot_1.0.5_x64_portable.exe");
         // Linux arm64 → arm64 .deb
-        let a = pick_asset(&assets, "linux", "aarch64").unwrap();
+        let a = pick_asset(&assets, "linux", "aarch64", DistributionForm::Deb).unwrap();
         assert_eq!(a.name, "dockpilot_1.0.5_arm64.deb");
+        // 形态与附件错配不命中（后缀互不串扰）
+        assert!(pick_asset(&assets, "linux", "x86_64", DistributionForm::NsisInstaller).is_none());
+        assert!(pick_asset(&assets, "windows", "x86_64", DistributionForm::Deb).is_none());
         // 名称里缺架构提示不匹配（arm64 机器不拿到 amd64 包）
         let only_amd64 = vec![asset("dockpilot_1.0.5_amd64.deb")];
-        assert!(pick_asset(&only_amd64, "linux", "aarch64").is_none());
+        assert!(pick_asset(&only_amd64, "linux", "aarch64", DistributionForm::Deb).is_none());
         // 其他平台无匹配
-        assert!(pick_asset(&assets, "macos", "x86_64").is_none());
-        assert!(pick_asset(&[], "linux", "x86_64").is_none());
+        assert!(pick_asset(&assets, "macos", "x86_64", DistributionForm::Deb).is_none());
+        assert!(pick_asset(&[], "linux", "x86_64", DistributionForm::Deb).is_none());
+    }
+
+    #[test]
+    fn exe_filename_is_portable_detection() {
+        // 附件名（浏览器下载保留）
+        assert!(exe_filename_is_portable("DockPilot_1.0.5_x64_portable.exe"));
+        // 大小写不敏感
+        assert!(exe_filename_is_portable("dockpilot_1.0.5_x64_PORTABLE.EXE"));
+        // 安装版 / 不含 portable 的改名不命中（交由 NSIS 卸载注册表项兜底判定）
+        assert!(!exe_filename_is_portable("DockPilot_1.0.5_x64-setup.exe"));
+        assert!(!exe_filename_is_portable("dockpilot.exe"));
+        assert!(!exe_filename_is_portable(""));
     }
 
     #[test]

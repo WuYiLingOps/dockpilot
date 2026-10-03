@@ -158,7 +158,7 @@ function LinkRow({
   );
 }
 
-/** 软件更新区块（关于分组）：手动检查入口、状态展示与应用内下载/自动安装（进度条 + 重启更新） */
+/** 软件更新区块（关于分组）：手动检查入口、状态展示与应用内下载/自动更新（进度条 + 重启生效） */
 function UpdateCheckSection() {
   const st = useAppUpdateStore();
   const checking = st.status === "checking";
@@ -178,18 +178,18 @@ function UpdateCheckSection() {
       case "available":
         return st.latest ? `发现新版本 v${st.latest.latest_version}` : "发现新版本";
       case "downloading": {
-        if (!progress) return "正在下载安装包…";
+        if (!progress) return "正在下载更新包…";
         const done = `${formatBytes(progress.downloaded)}${
           progress.total > 0 ? ` / ${formatBytes(progress.total)}` : ""
         }`;
         return pct !== null
-          ? `正在下载安装包 ${pct}%（${done}）`
-          : `正在下载安装包（${done}）`;
+          ? `正在下载更新包 ${pct}%（${done}）`
+          : `正在下载更新包（${done}）`;
       }
       case "downloaded":
-        return "安装包已就绪";
+        return "更新包已就绪";
       case "installing":
-        return "正在安装更新，完成后应用将自动重启…";
+        return "正在应用更新，完成后将自动重启…";
       case "up-to-date":
         return "已是最新版本";
       case "error":
@@ -222,17 +222,17 @@ function UpdateCheckSection() {
         {installing ? (
           <Button variant="outline" disabled>
             <Spinner className="h-3 w-3" />
-            安装中…
+            更新中…
           </Button>
         ) : st.status === "downloaded" ? (
           <>
             <Button variant="tinted" onClick={() => void installAppUpdate()}>
               <Download size={13} />
-              安装更新
+              应用更新
             </Button>
-            {/* 自动安装失败（如无 polkit 代理）时的兜底出口 */}
+            {/* 自动更新失败（如无 polkit 授权代理）时的兜底出口；便携版给出手动替换指引 */}
             <Button variant="outline" onClick={() => void openDownloadedInstaller()}>
-              打开安装包
+              打开更新包
             </Button>
           </>
         ) : st.status === "available" && st.latest ? (

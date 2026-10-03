@@ -174,23 +174,29 @@ npm run build        # 前端 tsc + vite 构建
 
 ### 方式一：下载安装包（推荐）
 
-从 [Releases](https://github.com/WuYiLingOps/dockpilot/releases) 下载对应平台的安装包：Linux 为 `.deb`，Windows 为 NSIS `.exe`（首次运行可能出现 SmartScreen 未知发布者提示，当前未配置代码签名）。
+从 [Releases](https://github.com/WuYiLingOps/dockpilot/releases) 下载对应平台的安装包：
+
+- **Linux deb**（`DockPilot_<版本>_amd64.deb`）：Ubuntu 22.04 / 24.04 等 Debian 系，`sudo apt install ./DockPilot_*_amd64.deb` 或双击安装
+- **Windows NSIS 安装包**（`DockPilot_<版本>_x64-setup.exe`）：安装向导，自动创建开始菜单 / 桌面快捷方式
+- **Windows 便携版**（`DockPilot_<版本>_x64_portable.exe`）：单个 exe 免安装，放到任意目录双击即用，删除文件即卸载；与安装版共用同一份配置数据，可无缝互换；需系统已有 WebView2 运行时（Windows 11 自带）
+
+所有 Windows 包当前未配置代码签名，首次运行可能出现 SmartScreen 未知发布者提示（「更多信息 → 仍要运行」）；Windows 版仅支持远程连接（SSH / TLS / TCP）。
 
 ### 方式二：本地构建
 
 Linux 使用 `management.sh` 打包 deb；Windows 使用 GitHub Actions 的 Windows runner 构建 NSIS 安装包。一键脚本支持版本同步、打包、安装和卸载：
 
 ```bash
-./management.sh build        # 打包 deb（使用项目当前版本）
-./management.sh build 0.3.4  # 同步版本号后打包 deb
-./management.sh version 0.3.4 # 只同步版本号，不执行构建
-./management.sh install      # 安装最新的 deb（脚本自动通过 sudo 提权）
-./management.sh uninstall    # 卸载 dock-pilot
+./management.sh build           # 打包 deb（使用项目当前版本）
+./management.sh build 0.3.4     # 同步版本号后打包 deb
+./management.sh version 0.3.4   # 只同步版本号，不执行构建
+./management.sh install         # 安装最新的 deb（脚本自动通过 sudo 提权）
+./management.sh uninstall       # 卸载 dock-pilot
 ```
 
 - `version <版本号>` 同步更新 `package.json`、`package-lock.json`、`Cargo.toml`、`Cargo.lock` 与 `tauri.conf.json`；`build <版本号>` 先执行同样的版本同步
-- `build` 会自动清理旧 deb，并给版本号附加当日日期（如 `0.3.1+20260925`）便于追溯与覆盖安装；构建阶段通过 Cargo 命令行 `--config` 覆盖项目本地和用户全局配置，脚本内置阿里云、清华和中科大源（当前默认清华源，切换时按注释成对启用对应的 `replace-with` 和 `registry` 参数）
-- 手动方式：`npm run tauri build`，产物在 `src-tauri/target/release/bundle/deb/`（deb 包名为 `dock-pilot`），例如 `sudo apt install ./DockPilot_0.3.1_amd64.deb`
+- `build` 会自动清理旧产物，并给版本号附加当日日期（如 `0.3.1+20260925`）便于追溯与覆盖安装；构建阶段通过 Cargo 命令行 `--config` 覆盖项目本地和用户全局配置，脚本内置阿里云、清华和中科大源（当前默认清华源，切换时按注释成对启用对应的 `replace-with` 和 `registry` 参数）
+- 手动方式：`npm run tauri build -- --bundles deb`（与 `management.sh build` 口径一致），deb 产物在 `src-tauri/target/release/bundle/deb/`（deb 包名为 `dock-pilot`），例如 `sudo apt install ./DockPilot_0.3.1_amd64.deb`
 - Windows NSIS 安装器内置快捷方式图标刷新钩子（`src-tauri/windows/installer-hooks.nsh`）：覆盖安装后自动重写已存在的桌面 / 开始菜单快捷方式并通知系统清空图标缓存，避免升级后快捷方式仍显示旧版本图标（Windows 会按 exe 路径缓存图标，且升级安装不会重建快捷方式）
 
 **本地直接运行**（无需安装 deb）：
@@ -294,7 +300,7 @@ src/
 
 ## 版本与发布
 
-版本号统一维护在 `package.json`、`Cargo.toml` 与 `tauri.conf.json`，`./management.sh version <x.y.z>` 一键同步；历次版本的变更与安装包见 [Releases](https://github.com/WuYiLingOps/dockpilot/releases) 页。
+版本号统一维护在 `package.json`、`Cargo.toml` 与 `tauri.conf.json`，`./management.sh version <x.y.z>` 一键同步；Release 附件含 Linux deb 与 Windows NSIS 安装包 / 便携版 exe 三种格式，历次版本的变更与安装包见 [Releases](https://github.com/WuYiLingOps/dockpilot/releases) 页。
 
 ## 致谢
 

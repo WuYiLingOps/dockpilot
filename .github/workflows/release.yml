@@ -1,7 +1,7 @@
 name: Release
 
-# 推送 v* tag 时自动构建 deb（Linux）与 NSIS 安装包（Windows）并发布 GitHub Release；
-# 也可在 Actions 页手动触发（仅构建，上传 artifact 不发版）
+# 推送 v* tag 时自动构建 deb（Linux）与 NSIS 安装包 + 便携版 exe（Windows）
+# 并发布 GitHub Release；也可在 Actions 页手动触发（仅构建，上传 artifact 不发版）
 on:
   push:
     tags: ["v*"]
@@ -18,10 +18,13 @@ jobs:
         include:
           - os: ubuntu-22.04
             platform: linux
-            artifact: src-tauri/target/release/bundle/deb/*.deb
+            artifact: |
+              src-tauri/target/release/bundle/deb/*.deb
           - os: windows-latest
             platform: windows
-            artifact: src-tauri/target/release/bundle/nsis/*.exe
+            artifact: |
+              src-tauri/target/release/bundle/nsis/*.exe
+              src-tauri/target/release/DockPilot_*_x64_portable.exe
     runs-on: ${{ matrix.os }}
     env:
       # 云同步的 GitHub OAuth App client_id（公开值，构建期经 Vite 注入前端产物，见 .env.example）；
@@ -97,7 +100,9 @@ jobs:
 
           ### 📦 安装包
           - Ubuntu 22.04 / 24.04 的 deb 安装包见下方 Assets
-          - Windows 10/11 的 NSIS 安装包（DockPilot_x64-setup.exe）见下方 Assets；Windows 版仅支持远程连接（SSH / TLS / TCP），需启用 OpenSSH 客户端；未签名，首次运行 SmartScreen 会提示保留
+          - Windows 10/11 的 NSIS 安装包（DockPilot_x64-setup.exe）见下方 Assets
+          - Windows 便携版（DockPilot_x64_portable.exe）免安装：下载后放到任意目录双击即用，删除即卸载，与安装版共用同一份配置数据；需系统已有 WebView2 运行时（Windows 11 自带）
+          - Windows 版仅支持远程连接（SSH / TLS / TCP）；所有 Windows 包未签名，首次运行 SmartScreen 会提示保留
 
           ### 📝 更新内容
           ${COMMITS}
@@ -108,7 +113,8 @@ jobs:
             echo 'NOTES_EOF'
           } >> "$GITHUB_OUTPUT"
 
-      # tauri-action 按 runner 平台构建：Linux 出 deb，Windows 出 NSIS（bundle.targets 需同时声明两者）
+      # tauri-action 按 runner 平台构建并上传全部产物：Linux 出 deb，
+      # Windows 出 NSIS（bundle.targets 需同时声明两者）
       - name: 构建并发布 Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: tauri-apps/tauri-action@v0
@@ -121,10 +127,30 @@ jobs:
           releaseDraft: false
           prerelease: false
 
+      # Windows 便携版：裸 exe 直接作为 Release 附件（免安装、下载即用，tauri 无此 bundler 目标）。
+      # 附件命名后缀 -portable.exe 与 app_update.rs pick_asset 的匹配约定耦合，两侧须同步改动
+      - name: 附加 Windows 便携版 exe
+        if: startsWith(github.ref, 'refs/tags/v') && matrix.platform == 'windows'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          V=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          cp src-tauri/target/release/dockpilot.exe "DockPilot_${V}_x64_portable.exe"
+          gh release upload "${{ github.ref_name }}" "DockPilot_${V}_x64_portable.exe" --clobber
+
       # 手动触发走普通 tauri build 做构建验证（不创建 Release）；tauri-action 仅在 tag 推送时运行
       - name: 仅构建验证（手动触发）
         if: github.event_name == 'workflow_dispatch'
         run: npm run tauri build
+
+      # 手动触发同样产出便携版 exe（tag 路径由「附加 Windows 便携版 exe」上传到 Release）
+      - name: 复制便携版 exe（手动触发）
+        if: github.event_name == 'workflow_dispatch' && matrix.platform == 'windows'
+        shell: bash
+        run: |
+          V=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          cp src-tauri/target/release/dockpilot.exe "src-tauri/target/release/DockPilot_${V}_x64_portable.exe"
 
       # 手动触发只做构建验证：产物可在本次运行页面的 Artifacts 下载
       - name: 上传构建产物

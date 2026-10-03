@@ -5,7 +5,18 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## [Unreleased]
+## [1.0.5] - 2026-10-03
+
+### 新增
+
+- **Windows 便携版**：单个 exe 免安装（`DockPilot_<版本>_x64_portable.exe`），下载后放到任意目录双击即用、删除文件即卸载，与安装版共享同一份配置数据
+- **应用内更新支持自动替换自身**：便携版改名替换后拉起新版本（替换失败自动回滚，旧文件由下次启动清理）；deb / NSIS 安装版流程不变；无法识别的发行形态回落「前往下载」
+- Release 产物扩展：Windows 便携版 exe 随 GitHub Release 发布（由构建产物直接改名附加）
+
+### 变更
+
+- 软件更新文案按发行形态中性化（「安装包」→「更新包」、「安装更新」→「应用更新」等），三种发行形态下语义一致
+- Release 说明模板与贡献指南不再要求 Windows 安装 OpenSSH 客户端（1.0.4 起内置 russh 引擎全面替代系统 ssh，旧文案遗漏已清理）
 
 ## [1.0.4] - 2026-10-02
 
@@ -107,7 +118,8 @@
 - 镜像拉取 / 推送 / 批量导出导入，Compose 项目识别与操作，磁盘用量与空间清理
 - 镜像仓库凭据管理（系统钥匙串存储），GitHub Gist 端到端加密云同步
 
-[Unreleased]: https://github.com/WuYiLingOps/dockpilot/compare/v1.0.4...HEAD
+[Unreleased]: https://github.com/WuYiLingOps/dockpilot/compare/v1.0.5...HEAD
+[1.0.5]: https://github.com/WuYiLingOps/dockpilot/compare/v1.0.4...v1.0.5
 [1.0.4]: https://github.com/WuYiLingOps/dockpilot/compare/v1.0.3...v1.0.4
 [1.0.3]: https://github.com/WuYiLingOps/dockpilot/compare/v1.0.2...v1.0.3
 [1.0.2]: https://github.com/WuYiLingOps/dockpilot/compare/v1.0.1...v1.0.2

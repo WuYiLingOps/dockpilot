@@ -40,5 +40,11 @@ Linux 上项目识别与查看仅依赖 Engine API；启动 / 停止等编排操
 **云同步提示解密失败（同步密码可能不同）？**
 两台设备设置过不同的同步密码。在冲突提示中选「使用云端」并输入云端数据的密码（本机同步密码将被重置为云端密码），或选「使用本地覆盖云端」以本机为准。
 
+**Windows 便携版与安装版有什么区别？**
+应用能力与数据完全一致，差异只在分发方式：便携版是单个 exe（`DockPilot_<版本>_x64_portable.exe`），放到任意目录双击即用，不写注册表安装信息、不创建快捷方式，删除文件即卸载；安装版经 NSIS 向导安装，自动创建快捷方式与卸载项。两种形态共用同一份配置（`%APPDATA%\com.dockpilot.app`），可无缝互换。便携版依赖系统 WebView2 运行时（Windows 11 自带；较老的 Windows 10 若缺失请先安装「WebView2 Runtime」，安装版会在安装时自动引导）。
+
+**便携版怎么更新？**
+应用内更新即「替换自身」：下载完成后自动用新版本文件替换当前程序并重启，无需卸载重装，配置自动保留。
+
 **「检查更新」失败或下载更新失败？**
-检查与下载均直连 GitHub（`api.github.com` / `github.com`）。启动自动检查失败是完全静默的（仅记录日志，不打扰使用），手动检查在「设置 → 关于 → 软件更新」进行，失败时页面会显示具体原因：网络不稳定会自动重试后仍失败；若本机访问 GitHub 需要代理，请设置 `HTTPS_PROXY` 环境变量后重启应用（与云同步的网络要求一致）；提示 403 通常是匿名请求达到 GitHub 限流上限（约 1 小时自动恢复）。下载的安装包存放在应用缓存目录的 `updates` 子目录（Linux：`~/.cache/com.dockpilot.app/updates/`；Windows：`%LOCALAPPDATA%\com.dockpilot.app\cache\updates\`），每次下载前自动清理旧包。下载完成后自动安装并重启应用：Windows 以被动模式运行安装向导（自动关闭运行中的应用，完成后自动重启）；Linux 弹出系统授权框、经 `dpkg -i` 安装后自动重启（需 polkit 授权代理，取消授权即中断）。自动安装失败时可点「打开安装包」改由系统安装器接管。更新提醒可在「设置 → 应用 → 自动检查更新」关闭，最新版本也始终可直接到 [Releases 页](https://github.com/WuYiLingOps/dockpilot/releases) 查看。
+检查与下载均直连 GitHub（`api.github.com` / `github.com`）。启动自动检查失败是完全静默的（仅记录日志，不打扰使用），手动检查在「设置 → 关于 → 软件更新」进行，失败时页面会显示具体原因：网络不稳定会自动重试后仍失败；若本机访问 GitHub 需要代理，请设置 `HTTPS_PROXY` 环境变量后重启应用（与云同步的网络要求一致）；提示 403 通常是匿名请求达到 GitHub 限流上限（约 1 小时自动恢复）。下载的更新包存放在应用缓存目录的 `updates` 子目录（Linux：`~/.cache/com.dockpilot.app/updates/`；Windows：`%LOCALAPPDATA%\com.dockpilot.app\cache\updates\`），每次下载前自动清理旧包。下载完成后自动应用更新并重启：Windows 安装版以被动模式运行安装向导（自动关闭运行中的应用，完成后自动重启）；便携版原位替换自身后拉起新版本；Linux deb 弹出系统授权框、经 `dpkg -i` 安装后自动重启（需 polkit 授权代理，取消授权即中断）。自动更新失败时可点「打开更新包」：安装版由系统安装器接管，便携版会提示手动替换方法。更新提醒可在「设置 → 应用 → 自动检查更新」关闭，最新版本也始终可直接到 [Releases 页](https://github.com/WuYiLingOps/dockpilot/releases) 查看。

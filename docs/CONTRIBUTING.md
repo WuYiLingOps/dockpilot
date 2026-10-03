@@ -8,7 +8,7 @@
 | :--- | :--- |
 | Rust | ≥ 1.90（2021 edition） |
 | Node.js | ≥ 24 |
-| 系统 | Linux 需 Tauri 系统依赖（见下），Windows 需 WebView2 与 OpenSSH 客户端 |
+| 系统 | Linux 需 Tauri 系统依赖（见下），Windows 需 WebView2 运行时（SSH 由内置 russh 引擎提供，无需 OpenSSH 客户端） |
 
 Linux（Debian/Ubuntu）系统依赖：
 

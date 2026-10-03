@@ -241,17 +241,29 @@ prepare_path() {
     export PATH
 }
 
-# 打包 deb（版本号自动附加年月日时间戳，如 0.1.0+20260919；打包前清理旧产物）
-build_deb() {
-    local requested_version="${1:-}"
+# 打包 Tauri 产物（bundle_type: deb；subcommand 为对应子命令名，供 sudo 降权重跑）。
+# 版本号自动附加年月日时间戳，如 0.1.0+20260919；打包前清理对应目录旧产物
+build_bundles() {
+    local bundle_type="$1" subcommand="$2"
+    local requested_version="${3:-}"
+    local bundle_dir="${PROJECT_DIR}/src-tauri/target/release/bundle/${bundle_type}"
+    local artifact_glob
+    case "${bundle_type}" in
+        deb) artifact_glob='*.deb' ;;
+        *)
+            color "未知的打包类型: ${bundle_type}" 1
+            exit 1
+            ;;
+    esac
+
     # sudo 下打包自动降权：rustup/cargo/npm 依赖原用户的家目录环境（RUSTUP_HOME 等），
     # root 直接跑会因找不到工具链失败，还会把缓存文件以 root 属主写进用户目录
     if [ "$(id -u)" -eq 0 ] && [ -n "${SUDO_USER:-}" ]; then
         color "检测到 root 环境，打包阶段降权为 ${SUDO_USER} 执行" 0
         if [ -n "${requested_version}" ]; then
-            sudo -u "${SUDO_USER}" "${SCRIPT_PATH}" build "${requested_version}"
+            sudo -u "${SUDO_USER}" "${SCRIPT_PATH}" "${subcommand}" "${requested_version}"
         else
-            sudo -u "${SUDO_USER}" "${SCRIPT_PATH}" build
+            sudo -u "${SUDO_USER}" "${SCRIPT_PATH}" "${subcommand}"
         fi
         if [ $? -ne 0 ]; then
             color "打包失败" 1
@@ -289,9 +301,9 @@ build_deb() {
     fi
 
     # 打包：注入带日期的版本号（--config 以 JSON merge 覆盖 tauri.conf.json 的 version）
-    if [ -d "${BUNDLE_DIR}" ]; then
-        rm -f "${BUNDLE_DIR}"/*.deb
-        color "已清理旧安装包" 0
+    if [ -d "${bundle_dir}" ]; then
+        rm -f "${bundle_dir}"/${artifact_glob}
+        color "已清理旧 ${bundle_type} 产物" 0
     fi
 
     BASE_VERSION=$(grep -m1 -oP '"version"\s*:\s*"\K[^"]+' "${PROJECT_DIR}/src-tauri/tauri.conf.json")
@@ -305,23 +317,28 @@ build_deb() {
     printf '{"version": "%s"}' "${BUILD_VERSION}" > "${MERGE_FILE}"
     color "构建版本: ${BUILD_VERSION}" 0
 
-    color "开始打包 npm run tauri build（release 构建耗时较久）..." 0
+    color "开始打包 npm run tauri build --bundles ${bundle_type}（release 构建耗时较久）..." 0
     BUILD_START_TS=$(date +%s)
-    npm run tauri build -- --config "${MERGE_FILE}"
+    npm run tauri build -- --bundles "${bundle_type}" --config "${MERGE_FILE}"
     check_result "打包"
 
     color "构建耗时: $(format_duration "$(( $(date +%s) - BUILD_START_TS ))")" 0
 
-    DEB_FILE=$(find_deb)
-    if [ -z "${DEB_FILE}" ]; then
-        color "打包完成但未找到 deb 产物，请检查 ${BUNDLE_DIR#${PROJECT_DIR}/}" 1
+    ARTIFACT_FILE=$(ls -t "${bundle_dir}"/${artifact_glob} 2>/dev/null | head -1)
+    if [ -z "${ARTIFACT_FILE}" ]; then
+        color "打包完成但未找到 ${bundle_type} 产物，请检查 ${bundle_dir#${PROJECT_DIR}/}" 1
         exit 1
     fi
-    local deb_rel deb_size
-    deb_rel="${DEB_FILE#${PROJECT_DIR}/}"
-    deb_size=$(ls -lh "${DEB_FILE}" | awk '{print $5}')
-    color "安装包已生成 (${deb_size})" 0
-    ${GREEN}${deb_rel}${END}
+    local artifact_rel artifact_size
+    artifact_rel="${ARTIFACT_FILE#${PROJECT_DIR}/}"
+    artifact_size=$(ls -lh "${ARTIFACT_FILE}" | awk '{print $5}')
+    color "产物已生成 (${artifact_size})" 0
+    ${GREEN}${artifact_rel}${END}
+}
+
+# 打包 deb 安装包
+build_deb() {
+    build_bundles deb build "$@"
 }
 
 # 安装 deb
@@ -425,7 +442,7 @@ show_menu() {
 # 主函数
 main() {
     echo "================================================================"
-    echo "          DockPilot deb 打包/安装/卸载工具"
+    echo "          DockPilot 打包/安装/卸载工具"
     echo "================================================================"
     echo ""
 

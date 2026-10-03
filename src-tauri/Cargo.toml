@@ -1,6 +1,6 @@
 [package]
 name = "dockpilot"
-version = "1.0.4"
+version = "1.0.5"
 description = "轻量级 Docker 桌面管理工具"
 authors = ["hj"]
 edition = "2021"

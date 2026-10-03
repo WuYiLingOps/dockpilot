@@ -1,5 +1,5 @@
 /**
- * 应用更新的模块级 store：启动/手动检查、下载安装包与状态机。
+ * 应用更新的模块级 store：启动/手动检查、下载更新包与状态机。
  * 发现新版本不打扰使用（不弹 toast），统一在设置「关于 → 软件更新」展示与操作。
  * 模块级单例模式仿 lib/sync/engine.ts；localStorage 读写仿 lib/theme.ts（隐私模式降级）。
  */
@@ -49,7 +49,7 @@ export interface AppUpdateState {
   lastCheckAt: number | null;
   /** 下载进度（total 为 0 表示长度未知） */
   downloadProgress: { downloaded: number; total: number } | null;
-  /** 已下载安装包的落盘路径（会话内有效；每次新下载前旧包会被清理） */
+  /** 已下载更新包的落盘路径（会话内有效；每次新下载前旧包会被清理） */
   downloadedPath: string | null;
 }
 
@@ -106,7 +106,7 @@ export function reduce(state: AppUpdateState, event: AppUpdateEvent): AppUpdateS
     case "install-started":
       return { ...state, status: "installing", error: null };
     case "install-failed":
-      // 回到 downloaded 供重试（「安装更新」或「打开安装包」），错误经 toast 呈现
+      // 回到 downloaded 供重试（「应用更新」或「打开更新包」），错误经 toast 呈现
       return { ...state, status: "downloaded" };
     case "reset":
       return { ...state, status: "idle", error: null };
@@ -214,7 +214,7 @@ export async function checkNow(manual: boolean): Promise<void> {
   }
 }
 
-/** 下载当前平台安装包（进度进状态机），完成后自动拉起系统安装器 */
+/** 下载当前平台更新包（进度进状态机），完成后自动按发行形态应用更新 */
 export async function downloadAndOpen(): Promise<void> {
   if (downloading) return;
   const url = getState().latest?.download?.url;
@@ -233,7 +233,7 @@ export async function downloadAndOpen(): Promise<void> {
     await installAppUpdate();
   } catch (e) {
     const msg = errText(e);
-    applog.warn(`下载更新安装包失败: ${msg}`);
+    applog.warn(`下载更新包失败: ${msg}`);
     apply({ type: "download-failed" });
     toast.error(msg, { duration: 10000 });
   } finally {
@@ -242,8 +242,9 @@ export async function downloadAndOpen(): Promise<void> {
 }
 
 /**
- * 自动安装已下载的安装包（下载完成后自动调用；失败后可经「安装更新」重试）。
- * Windows：NSIS 被动安装并自动重启应用；Linux：pkexec 授权后 dpkg 安装并重启。
+ * 自动应用已下载的更新包（下载完成后自动调用；失败后可经「应用更新」重试）。
+ * Windows 安装版：NSIS 被动安装并自动重启；便携版：原位替换自身后拉起新版本。
+ * Linux：deb 经 pkexec 授权安装，完成后自动重启。
  * 成功路径下应用会被关闭/重启，本函数通常不会返回到后续 UI 状态。
  */
 export async function installAppUpdate(): Promise<void> {
@@ -254,13 +255,13 @@ export async function installAppUpdate(): Promise<void> {
     await api.installAppUpdate(path);
   } catch (e) {
     const msg = errText(e);
-    applog.warn(`自动安装更新失败: ${msg}`);
+    applog.warn(`自动应用更新失败: ${msg}`);
     apply({ type: "install-failed" });
     toast.error(msg, { duration: 10000 });
   }
 }
 
-/** 拉起已下载的安装包（下载完成后自动调用；「打开安装包」按钮为重试入口） */
+/** 拉起已下载的更新包（自动更新失败时的兜底；便携版返回手动替换指引） */
 export async function openDownloadedInstaller(): Promise<void> {
   const path = getState().downloadedPath;
   if (!path) return;
