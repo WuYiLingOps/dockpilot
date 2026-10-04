@@ -420,13 +420,27 @@ async fn authenticate(
     }
 }
 
+/// 未找到默认私钥时的报错文案：Windows 上 HOME 通常未设（实际读 %USERPROFILE%\.ssh），
+/// 且无 ssh-agent 支持，需引导显式配置
+#[cfg(unix)]
+const NO_DEFAULT_KEY_MSG: &str =
+    "未配置私钥且未找到 ~/.ssh 下的默认私钥（id_ed25519 / id_ecdsa / id_rsa）";
+#[cfg(not(unix))]
+const NO_DEFAULT_KEY_MSG: &str =
+    "未配置私钥且未找到 .ssh 目录下的默认私钥（id_ed25519 / id_ecdsa / id_rsa）；Windows 版不支持 ssh-agent，请在连接设置中配置私钥路径或改用密码认证";
+
+/// 默认私钥均被服务器拒绝时的补充指引：unix 可经 agent 加载加密私钥，Windows 无 agent 支持
+#[cfg(unix)]
+const DEFAULT_KEY_REJECTED_HINT: &str = "（若私钥有口令请通过 agent 加载，或在连接设置中显式指定）";
+#[cfg(not(unix))]
+const DEFAULT_KEY_REJECTED_HINT: &str =
+    "（若私钥有口令，请在连接设置中指定私钥并填写保存口令，或改用密码认证；Windows 版不支持 ssh-agent）";
+
 /// 依次尝试 ~/.ssh 下的默认私钥（无口令；加密私钥由 agent 或显式配置覆盖）
 async fn try_default_keys(handle: &mut Handle<ClientHandler>, user: &str) -> Result<(), SshError> {
     let paths = default_key_paths();
     if paths.is_empty() {
-        return Err(SshError::Auth(
-            "未配置私钥且未找到 ~/.ssh 下的默认私钥（id_ed25519 / id_ecdsa / id_rsa）".into(),
-        ));
+        return Err(SshError::Auth(NO_DEFAULT_KEY_MSG.into()));
     }
     for path in paths {
         let Ok(key) = load_secret_key(&path, None) else {
@@ -436,9 +450,9 @@ async fn try_default_keys(handle: &mut Handle<ClientHandler>, user: &str) -> Res
             return Ok(());
         }
     }
-    Err(SshError::Auth(
-        "默认私钥均未被服务器接受（若私钥有口令请通过 agent 加载，或在连接设置中显式指定）".into(),
-    ))
+    Err(SshError::Auth(format!(
+        "默认私钥均未被服务器接受{DEFAULT_KEY_REJECTED_HINT}"
+    )))
 }
 
 /// 尝试经 ssh-agent 认证（逐个尝试 agent 中的密钥）。
