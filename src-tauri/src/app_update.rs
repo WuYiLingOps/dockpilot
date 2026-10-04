@@ -165,26 +165,56 @@ fn current_exe_filename() -> String {
         .unwrap_or_default()
 }
 
-/// NSIS 卸载注册表项检测：Tauri NSIS 默认按当前用户安装（HKCU），兼容查 HKLM；
-/// 不依赖具体键名，按「卸载项数据中含应用名」搜索。查询失败按未安装处理，
-/// 误判为便携版时走替换路径更新的仍是同一个应用（见方案文档「形态误判的可接受降级」）。
+/// NSIS 卸载注册表项检测：Tauri NSIS 默认按当前用户安装（HKCU），机器级安装查 HKLM
+/// （32 位安装器写入 WOW6432Node 视图）。遍历卸载项匹配 DisplayName / UninstallString
+/// 中的应用名——用 winreg 纯 API 而非 reg 子进程：GUI 进程（windows_subsystem = "windows"）
+/// spawn 控制台程序 reg.exe 会新开控制台窗口，检查更新时闪黑框（/s 递归全文搜索还拉长了
+/// 黑框的可见时长）。查询失败按未安装处理，误判为便携版时走替换路径更新的仍是同一个应用。
 #[cfg(target_os = "windows")]
 fn nsis_uninstall_key_exists() -> bool {
+    use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
+    use winreg::RegKey;
+
     let roots = [
-        r"HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall",
-        r"HKLM\Software\Microsoft\Windows\CurrentVersion\Uninstall",
+        (
+            HKEY_CURRENT_USER,
+            r"Software\Microsoft\Windows\CurrentVersion\Uninstall",
+        ),
+        (
+            HKEY_LOCAL_MACHINE,
+            r"Software\Microsoft\Windows\CurrentVersion\Uninstall",
+        ),
+        (
+            HKEY_LOCAL_MACHINE,
+            r"Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall",
+        ),
     ];
-    for root in roots {
-        let hit = std::process::Command::new("reg")
-            .args(["query", root, "/s", "/f", "DockPilot", "/d"])
-            .output()
-            .map(|o| o.status.success() && !o.stdout.is_empty())
-            .unwrap_or(false);
-        if hit {
-            return true;
+    for (hkey, path) in roots {
+        let Ok(root) = RegKey::predef(hkey).open_subkey(path) else {
+            continue;
+        };
+        for key in root.enum_keys().flatten() {
+            let Ok(sub) = root.open_subkey(key) else {
+                continue;
+            };
+            let hit = ["DisplayName", "UninstallString"].into_iter().any(|value| {
+                sub.get_value::<String, _>(value)
+                    .map(|data| uninstall_data_is_app(&data))
+                    .unwrap_or(false)
+            });
+            if hit {
+                return true;
+            }
         }
     }
     false
+}
+
+/// 卸载项数据是否指向本应用（大小写不敏感）：NSIS 的 DisplayName 即 productName
+/// 「DockPilot」，UninstallString 是卸载器完整路径，同样含产品目录名
+#[cfg(target_os = "windows")]
+fn uninstall_data_is_app(data: &str) -> bool {
+    data.to_lowercase().contains("dockpilot")
 }
 
 /// 非 Windows 平台无 NSIS 安装概念，恒 false（detect 的 cfg! 分支跨平台编译）
@@ -720,6 +750,21 @@ mod tests {
         assert!(!exe_filename_is_portable("DockPilot_1.0.5_x64-setup.exe"));
         assert!(!exe_filename_is_portable("dockpilot.exe"));
         assert!(!exe_filename_is_portable(""));
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn uninstall_data_is_app_detection() {
+        // NSIS 卸载项的典型数据形态
+        assert!(uninstall_data_is_app("DockPilot"));
+        assert!(uninstall_data_is_app(
+            r"C:\Users\u\AppData\Local\DockPilot\uninstall.exe"
+        ));
+        // 大小写不敏感
+        assert!(uninstall_data_is_app("dockpilot"));
+        // 同为 dock 前缀的其它软件不误判
+        assert!(!uninstall_data_is_app("Docker Desktop"));
+        assert!(!uninstall_data_is_app(""));
     }
 
     #[test]

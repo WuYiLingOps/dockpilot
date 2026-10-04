@@ -134,8 +134,23 @@ async fn detect_cli_remote(p: &ConnectionProfile) -> CmdResult<Cli> {
     Err("远程服务器未检测到 Docker Compose CLI，请在服务器上安装（Debian/Ubuntu：sudo apt install docker-compose-plugin）".into())
 }
 
+/// Windows GUI 进程（windows_subsystem = "windows"）spawn 控制台类子进程（docker /
+/// docker-compose CLI）时，系统会为新进程分配控制台——编排页的 CLI 探测与每次本机
+/// 操作都会闪一个黑框。CREATE_NO_WINDOW 抑制之；非 Windows 无控制台分配概念。
+#[cfg(windows)]
+fn no_window(cmd: &mut Command) -> &mut Command {
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    cmd.creation_flags(CREATE_NO_WINDOW)
+}
+
+/// 非 Windows 平台的空实现（签名一致，调用点零分叉）
+#[cfg(not(windows))]
+fn no_window(cmd: &mut Command) -> &mut Command {
+    cmd
+}
+
 async fn probe(kind: CliKind, program: &str, args: &[&str]) -> Option<Cli> {
-    let fut = Command::new(program).args(args).output();
+    let fut = no_window(Command::new(program).args(args)).output();
     let out = tokio::time::timeout(Duration::from_secs(10), fut)
         .await
         .ok()?
@@ -266,6 +281,7 @@ fn build_cmd_local(
         }
         CliKind::Standalone => Command::new("docker-compose"),
     };
+    no_window(&mut cmd);
     cmd.arg("-p").arg(project);
     for f in files {
         cmd.arg("-f").arg(f);
