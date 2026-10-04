@@ -81,6 +81,8 @@ export interface CloudSyncState {
   emptyVaultPending: EmptyVaultPending | null;
   /** 启动远端检查已完成（自动同步的门闩） */
   startupChecked: boolean;
+  /** GitHub 令牌已失效（API 401）：需重新连接授权，云同步暂停 */
+  tokenInvalid: boolean;
 }
 
 const initialState: CloudSyncState = {
@@ -100,6 +102,7 @@ const initialState: CloudSyncState = {
   shrinkFinding: null,
   emptyVaultPending: null,
   startupChecked: false,
+  tokenInvalid: false,
 };
 
 // ---------------------------------------------------------------------------

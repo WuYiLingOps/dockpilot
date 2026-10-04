@@ -186,8 +186,11 @@ export function SyncSettings() {
               <div className="text-[13px] text-fg">GitHub Gist</div>
               {connected && state.account ? (
                 <div className="truncate text-[11px] text-fg3">
-                  {state.account.name ?? state.account.login ?? state.account.id}（
-                  {state.tokenBackend === "file" ? "令牌存加密文件" : "令牌存系统钥匙串"}）
+                  {state.tokenInvalid
+                    ? "令牌已被服务端作废（修改密码 / 撤销授权），请重新连接"
+                    : `${state.account.name ?? state.account.login ?? state.account.id}（${
+                        state.tokenBackend === "file" ? "令牌存加密文件" : "令牌存系统钥匙串"
+                      }）`}
                 </div>
               ) : (
                 <div className="text-[11px] text-fg3">未连接 —— 授权后配置将加密存入你的私有 Gist</div>
@@ -197,7 +200,24 @@ export function SyncSettings() {
           <div className="flex shrink-0 items-center gap-1.5" data-no-drag>
             {connected ? (
               <>
-                {state.gistId ? <Badge tone="ok">已连接</Badge> : <Badge tone="warn">未找到同步库</Badge>}
+                {state.tokenInvalid ? (
+                  <Badge tone="err">授权已失效</Badge>
+                ) : state.gistId ? (
+                  <Badge tone="ok">已连接</Badge>
+                ) : (
+                  <Badge tone="warn">未找到同步库</Badge>
+                )}
+                {state.tokenInvalid && (
+                  <Button
+                    variant="outline"
+                    onClick={() => void beginConnect()}
+                    disabled={authBusy}
+                    title="GitHub 令牌已被服务端作废（改密 / 撤销授权），重新授权后自动恢复同步"
+                  >
+                    {authBusy ? <Spinner className="h-3.5 w-3.5" /> : <Cloud size={13} />}
+                    重新连接 GitHub
+                  </Button>
+                )}
                 <IconButton title="断开连接（清除本机令牌与同步快照）" onClick={() => void disconnect()}>
                   <Trash2 size={13} className="hover:text-err" />
                 </IconButton>

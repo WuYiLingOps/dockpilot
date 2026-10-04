@@ -48,6 +48,24 @@ export function SyncBanners({ onManage }: { onManage: () => void }) {
     );
   }
 
+  // GitHub 令牌失效：任何页面给一个可直达设置的横幅（云同步已整体暂停）
+  if (state.connected && state.tokenInvalid) {
+    return (
+      <button
+        type="button"
+        onClick={onManage}
+        className="fixed bottom-4 right-4 z-40 flex items-center gap-2 rounded-card border border-err/30 bg-panel px-3.5 py-2.5 text-left shadow-[var(--app-shadow)] transition-colors hover:bg-hover"
+        data-no-drag
+      >
+        <TriangleAlert size={16} className="shrink-0 text-err" />
+        <span className="min-w-0 flex-1 text-[12px] leading-4 text-fg2">
+          GitHub 授权已失效，云同步已暂停 —— 点击重新连接（数据不会丢失）
+        </span>
+        <span className="shrink-0 text-[11px] text-accent">去处理</span>
+      </button>
+    );
+  }
+
   // 冲突 / 阻塞在设置页有完整横幅；其他页面给一个可直达的轻提示
   const needsDecision = state.syncState === "CONFLICT" || state.syncState === "BLOCKED";
   if (!needsDecision) return null;
