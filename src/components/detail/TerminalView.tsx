@@ -9,6 +9,7 @@ import { copyText, readClipboardText } from "../../lib/clipboard";
 import { api } from "../../lib/api";
 import { applog } from "../../lib/applog";
 import { useSettings } from "../../lib/settings";
+import { fallbackShell, isExecStartFailure } from "../../lib/terminal";
 import { useTheme } from "../../lib/theme";
 import { Badge, Button, EmptyState, IconButton, Select } from "../ui";
 import type { ExecFrame } from "../../types/docker";
@@ -60,9 +61,6 @@ function terminalTheme(dark: boolean) {
         brightWhite: "#1d1d1f",
       };
 }
-
-/** shell 自动降级链：容器内不存在当前 shell 时依次回退（Alpine 无 bash 等场景），ash 之后止步 */
-const SHELL_FALLBACK: Record<string, string> = { bash: "sh", sh: "ash", ash: "" };
 
 /** 容器详情 · 终端 Tab（交互式 shell，主题随应用亮暗切换；默认 shell 来自设置） */
 export function TerminalView({ id, running }: { id: string; running: boolean }) {
@@ -183,6 +181,8 @@ export function TerminalView({ id, running }: { id: string; running: boolean }) 
     let pendingInput = "";
     let pendingResize: { cols: number; rows: number } | null = null;
     let resizeWarned = false;
+    // 输出头部（4KB）：daemon 对 exec 启动失败会把 OCI 错误当输出推来，据此识别降级
+    let outputHead = "";
 
     const markEnded = (reason: string) => {
       if (endNotified || disposed) return;
@@ -239,17 +239,25 @@ export function TerminalView({ id, running }: { id: string; running: boolean }) 
             pendingInput = "";
           }
         }
+        if (outputHead.length < 4096) {
+          outputHead = (outputHead + f.text).slice(0, 4096);
+        }
         term.write(f.text);
         return;
       }
-      // exec 启动报 shell 不存在：沿降级链自动重建会话
-      const next = SHELL_FALLBACK[shell];
-      if (next && /executable file not found|no such file/i.test(f.reason)) {
+      // exec 启动失败（容器内无此 shell）：沿降级链自动重建会话
+      const next = fallbackShell(shell, f.reason, outputHead);
+      if (next) {
         fallbackRef.current = shell;
         setShell(next);
         return;
       }
-      markEnded(f.reason);
+      // shell 降级链走完仍失败时给出准确原因，其余沿用后端原因
+      markEnded(
+        f.reason === "进程已退出" && isExecStartFailure(outputHead)
+          ? "终端启动失败：容器内未找到可用的 shell（bash/sh/ash）"
+          : f.reason,
+      );
     };
 
     term.onData((data) => {
