@@ -3,8 +3,7 @@
 //! 为什么走 Rust：与云同步同一网络约定——复用 reqwest 的超时 / 退避重试 / 完整
 //! 错误链与 HTTPS_PROXY 指引（模式照抄 github_sync.rs，独立实现避免耦合云同步模块）。
 //! 更新应用方式按发行形态分派（detect_distribution_form）：deb 经 pkexec 提权安装、
-//! NSIS 被动安装，Windows 便携版原位替换自身后拉起新版本（见 install_app_update；
-//! 方案细节见 .zcode/plans/ 方案文档）。
+//! NSIS 被动安装，Windows 便携版原位替换自身后拉起新版本（见 install_app_update）。
 
 use std::sync::OnceLock;
 
