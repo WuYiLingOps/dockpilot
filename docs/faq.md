@@ -17,7 +17,10 @@ WebKitGTK 在部分 NVIDIA 驱动上 DMABUF 渲染可能黑屏。应用启动时
 GNOME 桌面默认不显示托盘区，需安装 AppIndicator 扩展（Ubuntu 24.04 已内置 `gnome-shell-extension-appindicator`；KDE 及多数桌面原生支持）；Windows 在任务栏右下角托盘区（可能折叠于「^」中）。托盘菜单提供「显示 DockPilot / 退出」；关闭窗口行为可在「设置 → 应用 → 关闭窗口时」中修改。
 
 **Alpine 容器打开终端没反应？**
-默认 shell 为 bash，Alpine 系镜像请在终端页切换为 `sh` 或 `ash`（可在设置中改默认值）。
+Alpine 系镜像通常不含 bash，应用检测到容器内没有当前 shell 时会自动按 bash→sh→ash 依次尝试并在终端内提示；也可以在终端页手动切换，或在设置中修改默认 shell。
+
+**终端里 Tab 补全无效？**
+补全由容器内的 shell 提供，应用只负责透传按键：bash（readline）开箱即用；`sh`（如 Debian 的 dash）与部分 busybox `ash` 不带命令补全，属容器镜像自身的限制，可在终端页切换为 bash 或在镜像内安装。
 
 **容器详情的「文件」页签有什么限制？**
 列表与删除通过在容器内执行 `ls` / `rm` 实现（不经 shell、命令参数直接传入），需要容器处于运行中；上传 / 下载走 Engine 的 archive API（等同 `docker cp`），单次传输上限 512MB（超大文件建议在终端中操作）。删除目录不可恢复，请谨慎操作。

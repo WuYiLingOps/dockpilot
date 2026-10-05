@@ -60,6 +60,8 @@ export interface SyncedScalarSettings {
   logs_default_tail?: number;
   logs_timestamps?: boolean;
   terminal_shell?: TerminalShell;
+  terminal_font_size?: number;
+  terminal_scrollback?: number;
   notifications_enabled?: boolean;
   /** 云同步是否携带 SSH 凭证（默认开） */
   sync_credentials?: boolean;
@@ -329,6 +331,8 @@ export const SYNC_SCALAR_SETTING_KEYS = [
   "logs_default_tail",
   "logs_timestamps",
   "terminal_shell",
+  "terminal_font_size",
+  "terminal_scrollback",
   "notifications_enabled",
   "sync_credentials",
 ] as const satisfies readonly (keyof SyncedScalarSettings)[];
@@ -343,6 +347,8 @@ export const pickSyncedSettings = (s: AppSettings): SyncedScalarSettings => ({
   logs_default_tail: s.logs_default_tail,
   logs_timestamps: s.logs_timestamps,
   terminal_shell: s.terminal_shell,
+  terminal_font_size: s.terminal_font_size,
+  terminal_scrollback: s.terminal_scrollback,
   notifications_enabled: s.notifications_enabled,
   sync_credentials: s.sync_credentials,
 });

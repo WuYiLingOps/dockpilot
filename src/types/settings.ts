@@ -77,6 +77,10 @@ export interface AppSettings {
   logs_default_tail: number;
   logs_timestamps: boolean;
   terminal_shell: TerminalShell;
+  /** 终端字号（px，重开终端会话后生效） */
+  terminal_font_size: number;
+  /** 终端回滚行数（重开终端会话后生效） */
+  terminal_scrollback: number;
   /** 容器异常（非零退出/OOM/健康检查失败）时发送系统通知 */
   notifications_enabled: boolean;
   /** 启动时自动检查更新（仅提醒，不自动下载；手动「检查更新」不受此开关限制） */

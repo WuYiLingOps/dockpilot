@@ -516,6 +516,32 @@ export function SettingsDialog({
                 <option value="ash">ash</option>
               </Select>
             </Row>
+            <Row label="终端字号" desc="重开终端页后生效">
+              <Select
+                value={String(settings?.terminal_font_size ?? 12.5)}
+                className="w-36"
+                onChange={(e) => patch({ terminal_font_size: Number(e.target.value) })}
+              >
+                {[11, 12, 12.5, 14, 16, 18].map((n) => (
+                  <option key={n} value={String(n)}>
+                    {n} px
+                  </option>
+                ))}
+              </Select>
+            </Row>
+            <Row label="终端回滚行数" desc="可向上翻看的历史行数上限">
+              <Select
+                value={String(settings?.terminal_scrollback ?? 1000)}
+                className="w-36"
+                onChange={(e) => patch({ terminal_scrollback: Number(e.target.value) })}
+              >
+                {[500, 1000, 5000, 10000].map((n) => (
+                  <option key={n} value={String(n)}>
+                    {n} 行
+                  </option>
+                ))}
+              </Select>
+            </Row>
           </Card>
         );
       case "sshkeys":

@@ -18,6 +18,8 @@ const localSettings = (): AppSettings => ({
   logs_default_tail: 1000,
   logs_timestamps: false,
   terminal_shell: "bash",
+  terminal_font_size: 12.5,
+  terminal_scrollback: 1000,
   notifications_enabled: true,
   auto_check_updates: true,
   sync_credentials: true,

@@ -79,6 +79,10 @@ export function TerminalView({ id, running }: { id: string; running: boolean }) 
   // shell 自动降级时记录旧值，新会话首帧到达后在终端里说明（重建会话会重置终端内容）
   const fallbackRef = useRef("");
 
+  // 字号/滚回变更需重建终端实例，并入下方 effect 依赖
+  const fontSize = settings?.terminal_font_size ?? 12.5;
+  const scrollback = settings?.terminal_scrollback ?? 1000;
+
   const closeSearch = () => {
     setSearchOpen(false);
     searchRef.current?.clearDecorations();
@@ -118,9 +122,10 @@ export function TerminalView({ id, running }: { id: string; running: boolean }) 
 
     setPhase("connecting");
     const term = new XTerm({
-      fontSize: 12.5,
+      fontSize,
       fontFamily:
         'ui-monospace, "JetBrains Mono", "SFMono-Regular", Menlo, Consolas, "Noto Sans Mono CJK SC", monospace',
+      scrollback,
       cursorBlink: true,
       theme: terminalTheme(isDark),
     });
@@ -281,7 +286,7 @@ export function TerminalView({ id, running }: { id: string; running: boolean }) 
     };
     // 主题切换不重建终端，由下方 effect 单独热更新配色
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id, shell, epoch, running]);
+  }, [id, shell, epoch, running, fontSize, scrollback]);
 
   useEffect(() => {
     const term = termRef.current;

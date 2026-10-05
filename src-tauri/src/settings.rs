@@ -182,6 +182,10 @@ pub struct AppSettings {
     pub logs_timestamps: bool,
     /// 终端默认 shell："bash" | "sh" | "ash"
     pub terminal_shell: String,
+    /// 终端字号（px；重开终端会话后生效）
+    pub terminal_font_size: f32,
+    /// 终端回滚行数（重开终端会话后生效）
+    pub terminal_scrollback: u32,
     /// 容器异常（非零退出/OOM/健康检查失败）时发送系统通知
     pub notifications_enabled: bool,
     /// 启动时自动检查更新（仅提醒，不自动下载；手动「检查更新」不受此开关限制）
@@ -219,6 +223,8 @@ impl Default for AppSettings {
             logs_default_tail: 1000,
             logs_timestamps: false,
             terminal_shell: "bash".into(),
+            terminal_font_size: 12.5,
+            terminal_scrollback: 1000,
             notifications_enabled: true,
             auto_check_updates: true,
             sync_credentials: true,
@@ -293,6 +299,12 @@ pub fn sanitize(mut s: AppSettings) -> AppSettings {
     if !["bash", "sh", "ash"].contains(&s.terminal_shell.as_str()) {
         s.terminal_shell = "bash".into();
     }
+    // f32 先挡 NaN/Inf（clamp 遇非有限值原样返回）
+    if !s.terminal_font_size.is_finite() {
+        s.terminal_font_size = 12.5;
+    }
+    s.terminal_font_size = s.terminal_font_size.clamp(10.0, 24.0);
+    s.terminal_scrollback = s.terminal_scrollback.clamp(100, 10_000);
     s.containers_refresh_secs = s.containers_refresh_secs.clamp(2, 300);
     s.images_refresh_secs = s.images_refresh_secs.clamp(5, 600);
     s.logs_default_tail = s.logs_default_tail.clamp(50, 100_000);
@@ -605,6 +617,8 @@ mod tests {
         assert_eq!(s.theme, "dark");
         assert_eq!(s.containers_refresh_secs, 10);
         assert_eq!(s.terminal_shell, "bash");
+        assert_eq!(s.terminal_font_size, 12.5);
+        assert_eq!(s.terminal_scrollback, 1000);
     }
 
     #[test]
@@ -663,6 +677,8 @@ mod tests {
         let s = sanitize(AppSettings {
             theme: "hacker".into(),
             terminal_shell: "fish".into(),
+            terminal_font_size: 99.0,
+            terminal_scrollback: 0,
             containers_refresh_secs: 0,
             images_refresh_secs: 99999,
             logs_default_tail: 1,
@@ -670,9 +686,17 @@ mod tests {
         });
         assert_eq!(s.theme, "system");
         assert_eq!(s.terminal_shell, "bash");
+        assert_eq!(s.terminal_font_size, 24.0);
+        assert_eq!(s.terminal_scrollback, 100);
         assert_eq!(s.containers_refresh_secs, 2);
         assert_eq!(s.images_refresh_secs, 600);
         assert_eq!(s.logs_default_tail, 50);
+        // NaN/Inf 等非有限值回落默认
+        let s = sanitize(AppSettings {
+            terminal_font_size: f32::NAN,
+            ..Default::default()
+        });
+        assert_eq!(s.terminal_font_size, 12.5);
     }
 
     #[test]
