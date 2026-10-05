@@ -1,13 +1,16 @@
-import { RotateCw } from "lucide-react";
+import { ChevronDown, ChevronUp, RotateCw, Search, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { FitAddon } from "@xterm/addon-fit";
+import { SearchAddon } from "@xterm/addon-search";
 import { Terminal as XTerm } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
+import { toast } from "sonner";
+import { copyText, readClipboardText } from "../../lib/clipboard";
 import { api } from "../../lib/api";
 import { applog } from "../../lib/applog";
 import { useSettings } from "../../lib/settings";
 import { useTheme } from "../../lib/theme";
-import { Badge, Button, EmptyState, Select } from "../ui";
+import { Badge, Button, EmptyState, IconButton, Select } from "../ui";
 import type { ExecFrame } from "../../types/docker";
 
 function terminalTheme(dark: boolean) {
@@ -68,10 +71,45 @@ export function TerminalView({ id, running }: { id: string; running: boolean }) 
   const [shell, setShell] = useState<string>(() => settings?.terminal_shell ?? "bash");
   const [phase, setPhase] = useState<"connecting" | "connected" | "ended">("connecting");
   const [epoch, setEpoch] = useState(0);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [query, setQuery] = useState("");
   const hostRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<XTerm | null>(null);
+  const searchRef = useRef<SearchAddon | null>(null);
   // shell 自动降级时记录旧值，新会话首帧到达后在终端里说明（重建会话会重置终端内容）
   const fallbackRef = useRef("");
+
+  const closeSearch = () => {
+    setSearchOpen(false);
+    searchRef.current?.clearDecorations();
+    termRef.current?.focus();
+  };
+
+  /** 粘贴：经 term.paste 走括号粘贴模式转换，多行文本不会被 shell 逐行执行 */
+  const pasteFromClipboard = async () => {
+    const term = termRef.current;
+    if (!term) return;
+    const text = await readClipboardText();
+    if (text == null) {
+      toast.error("读取剪贴板失败");
+      return;
+    }
+    if (text) term.paste(text);
+  };
+
+  /** 右键：有选区=复制并清除选区，无选区=粘贴（Windows Terminal 风格） */
+  const handleContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const term = termRef.current;
+    if (!term) return;
+    const sel = term.getSelection();
+    if (sel) {
+      void copyText(sel);
+      term.clearSelection();
+      return;
+    }
+    void pasteFromClipboard();
+  };
 
   useEffect(() => {
     if (!running) return;
@@ -89,8 +127,33 @@ export function TerminalView({ id, running }: { id: string; running: boolean }) 
     termRef.current = term;
     const fit = new FitAddon();
     term.loadAddon(fit);
+    const search = new SearchAddon();
+    term.loadAddon(search);
+    searchRef.current = search;
     term.open(host);
     fit.fit();
+
+    // Ctrl+Shift+C/V 复制粘贴（Ctrl+C 保持 SIGINT 中断语义）；Ctrl+F 打开搜索条
+    term.attachCustomKeyEventHandler((ev) => {
+      if (ev.type !== "keydown") return true;
+      if (ev.ctrlKey && ev.shiftKey && !ev.altKey && !ev.metaKey) {
+        if (ev.key === "C" || ev.key === "c") {
+          const sel = term.getSelection();
+          if (sel) void copyText(sel);
+          return false;
+        }
+        if (ev.key === "V" || ev.key === "v") {
+          void pasteFromClipboard();
+          return false;
+        }
+        return true;
+      }
+      if (ev.ctrlKey && !ev.shiftKey && !ev.altKey && !ev.metaKey && ev.key === "f") {
+        setSearchOpen(true);
+        return false;
+      }
+      return true;
+    });
 
     // fit 去抖 50ms：拖拽窗口时 ResizeObserver 连续触发，避免每次都同步 PTY 尺寸
     let fitTimer: number | undefined;
@@ -214,6 +277,7 @@ export function TerminalView({ id, running }: { id: string; running: boolean }) 
       observer.disconnect();
       term.dispose();
       termRef.current = null;
+      searchRef.current = null;
     };
     // 主题切换不重建终端，由下方 effect 单独热更新配色
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -263,8 +327,52 @@ export function TerminalView({ id, running }: { id: string; running: boolean }) 
       <div className="min-h-0 flex-1 p-4">
         <div
           ref={hostRef}
-          className="h-full w-full overflow-hidden rounded-card border border-edge bg-panel p-2 shadow-[var(--app-shadow)] dark:bg-[#161618]"
-        />
+          onContextMenu={handleContextMenu}
+          className="relative h-full w-full overflow-hidden rounded-card border border-edge bg-panel p-2 shadow-[var(--app-shadow)] dark:bg-[#161618]"
+        >
+          {searchOpen && (
+            <div
+              className="absolute right-3 top-3 z-10 flex items-center gap-0.5 rounded-lg border border-edge bg-panel px-1.5 py-1 shadow-[var(--app-shadow)]"
+              data-no-drag
+            >
+              <Search size={13} className="ml-1 shrink-0 text-fg3" />
+              <input
+                autoFocus
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    if (!query) return;
+                    if (e.shiftKey) searchRef.current?.findPrevious(query);
+                    else searchRef.current?.findNext(query);
+                  } else if (e.key === "Escape") {
+                    closeSearch();
+                  }
+                }}
+                placeholder="搜索终端内容"
+                className="w-44 bg-transparent px-1.5 text-[12.5px] text-fg outline-none placeholder:text-fg3"
+              />
+              <IconButton
+                title="上一个（Shift+Enter）"
+                className="h-6 w-6"
+                onClick={() => query && searchRef.current?.findPrevious(query)}
+              >
+                <ChevronUp size={13} />
+              </IconButton>
+              <IconButton
+                title="下一个（Enter）"
+                className="h-6 w-6"
+                onClick={() => query && searchRef.current?.findNext(query)}
+              >
+                <ChevronDown size={13} />
+              </IconButton>
+              <IconButton title="关闭（Esc）" className="h-6 w-6" onClick={closeSearch}>
+                <X size={13} />
+              </IconButton>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

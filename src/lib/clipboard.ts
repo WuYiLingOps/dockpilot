@@ -19,3 +19,12 @@ export async function copyText(text: string): Promise<boolean> {
     }
   }
 }
+
+/** 读取剪贴板文本；不可用时返回 null（部分平台 WebView 拒绝读取方向权限，无可靠回退） */
+export async function readClipboardText(): Promise<string | null> {
+  try {
+    return await navigator.clipboard.readText();
+  } catch {
+    return null;
+  }
+}
