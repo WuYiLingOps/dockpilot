@@ -4,9 +4,11 @@ import { FitAddon } from "@xterm/addon-fit";
 import { Terminal as XTerm } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { api } from "../../lib/api";
+import { applog } from "../../lib/applog";
 import { useSettings } from "../../lib/settings";
 import { useTheme } from "../../lib/theme";
-import { Button, EmptyState, Select } from "../ui";
+import { Badge, Button, EmptyState, Select } from "../ui";
+import type { ExecFrame } from "../../types/docker";
 
 function terminalTheme(dark: boolean) {
   return dark
@@ -56,20 +58,27 @@ function terminalTheme(dark: boolean) {
       };
 }
 
+/** shell 自动降级链：容器内不存在当前 shell 时依次回退（Alpine 无 bash 等场景），ash 之后止步 */
+const SHELL_FALLBACK: Record<string, string> = { bash: "sh", sh: "ash", ash: "" };
+
 /** 容器详情 · 终端 Tab（交互式 shell，主题随应用亮暗切换；默认 shell 来自设置） */
 export function TerminalView({ id, running }: { id: string; running: boolean }) {
   const { isDark } = useTheme();
   const { data: settings } = useSettings();
   const [shell, setShell] = useState<string>(() => settings?.terminal_shell ?? "bash");
+  const [phase, setPhase] = useState<"connecting" | "connected" | "ended">("connecting");
   const [epoch, setEpoch] = useState(0);
   const hostRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<XTerm | null>(null);
+  // shell 自动降级时记录旧值，新会话首帧到达后在终端里说明（重建会话会重置终端内容）
+  const fallbackRef = useRef("");
 
   useEffect(() => {
     if (!running) return;
     const host = hostRef.current;
     if (!host) return;
 
+    setPhase("connecting");
     const term = new XTerm({
       fontSize: 12.5,
       fontFamily:
@@ -83,39 +92,124 @@ export function TerminalView({ id, running }: { id: string; running: boolean }) 
     term.open(host);
     fit.fit();
 
+    // fit 去抖 50ms：拖拽窗口时 ResizeObserver 连续触发，避免每次都同步 PTY 尺寸
+    let fitTimer: number | undefined;
     const observer = new ResizeObserver(() => {
-      try {
-        fit.fit();
-      } catch {
-        // 容器尺寸为 0 时 fit 会抛错（如切页瞬间），忽略即可
-      }
+      window.clearTimeout(fitTimer);
+      fitTimer = window.setTimeout(() => {
+        try {
+          fit.fit();
+        } catch {
+          // 容器尺寸为 0 时 fit 会抛错（如切页瞬间），忽略即可
+        }
+      }, 50);
     });
     observer.observe(host);
 
     let disposed = false;
     let execId = "";
     let unsubOutput: (() => void) | undefined;
+    // 首帧输出到达才算真正连上（exec 已 attach 且在产出）；此前的输入/尺寸先缓存
+    let connected = false;
+    let endNotified = false;
+    let pendingInput = "";
+    let pendingResize: { cols: number; rows: number } | null = null;
+    let resizeWarned = false;
+
+    const markEnded = (reason: string) => {
+      if (endNotified || disposed) return;
+      endNotified = true;
+      setPhase("ended");
+      term.write(`\r\n\x1b[33m── ${reason}，点上方「重连」可重建会话 ──\x1b[0m\r\n`);
+    };
+
+    const sendInput = (data: string) => {
+      api.execInput(execId, data).catch((e) => {
+        applog.warn(`终端输入写入失败（会话可能已关闭）: ${String(e)}`);
+        if (connected) markEnded("会话已断开");
+        // 会话尚未建立完成（exec 创建/启动中）：继续缓存，首帧到达后补发
+        else pendingInput += data;
+      });
+    };
+
+    const doResize = async (cols: number, rows: number, retriable: boolean) => {
+      try {
+        await api.execResize(execId, cols, rows);
+      } catch (e) {
+        // 会话未建立：尺寸留在 pendingResize，首帧到达后补发
+        if (!connected) return;
+        if (retriable) {
+          await new Promise((r) => setTimeout(r, 200));
+          if (!disposed) await doResize(cols, rows, false);
+          return;
+        }
+        applog.warn(`终端尺寸调整失败（会话可能已关闭）: ${String(e)}`);
+        if (!resizeWarned && !disposed) {
+          resizeWarned = true;
+          term.write("\x1b[33m（尺寸同步失败，长行显示可能错位，可点「重连」）\x1b[0m\r\n");
+        }
+      }
+    };
+
+    const onFrame = (f: ExecFrame) => {
+      if (disposed) return;
+      if (f.type === "data") {
+        if (!connected) {
+          connected = true;
+          setPhase("connected");
+          const fb = fallbackRef.current;
+          if (fb) {
+            fallbackRef.current = "";
+            term.write(`\x1b[33m（容器内无 ${fb}，已自动改用 ${shell}）\x1b[0m\r\n`);
+          }
+          if (pendingResize) {
+            void doResize(pendingResize.cols, pendingResize.rows, true);
+            pendingResize = null;
+          }
+          if (pendingInput) {
+            sendInput(pendingInput);
+            pendingInput = "";
+          }
+        }
+        term.write(f.text);
+        return;
+      }
+      // exec 启动报 shell 不存在：沿降级链自动重建会话
+      const next = SHELL_FALLBACK[shell];
+      if (next && /executable file not found|no such file/i.test(f.reason)) {
+        fallbackRef.current = shell;
+        setShell(next);
+        return;
+      }
+      markEnded(f.reason);
+    };
 
     term.onData((data) => {
-      if (execId) void api.execInput(execId, data);
+      if (connected) sendInput(data);
+      else pendingInput += data;
     });
     term.onResize(({ cols, rows }) => {
-      if (execId) void api.execResize(execId, cols, rows);
+      if (!connected) {
+        pendingResize = { cols, rows };
+        return;
+      }
+      void doResize(cols, rows, true);
     });
 
     void (async () => {
       try {
-        execId = await api.execCreate(id, shell);
+        const created = await api.execCreate(id, shell);
         if (disposed) return;
-        unsubOutput = api.execAttach(execId, (s) => term.write(s));
-        await api.execResize(execId, term.cols, term.rows);
+        execId = created;
+        unsubOutput = api.execAttach(execId, onFrame);
       } catch (e) {
-        term.write(`\r\n\x1b[31m连接失败: ${String(e)}\x1b[0m`);
+        markEnded(`连接失败: ${String(e)}`);
       }
     })();
 
     return () => {
       disposed = true;
+      window.clearTimeout(fitTimer);
       unsubOutput?.();
       observer.disconnect();
       term.dispose();
@@ -155,10 +249,16 @@ export function TerminalView({ id, running }: { id: string; running: boolean }) 
           <option value="sh">sh</option>
           <option value="ash">ash</option>
         </Select>
-        <Button variant="ghost" className="h-7" onClick={() => setEpoch((n) => n + 1)}>
+        <Button
+          variant={phase === "ended" ? "tinted" : "ghost"}
+          className="h-7"
+          onClick={() => setEpoch((n) => n + 1)}
+        >
           <RotateCw size={14} />
           重连
         </Button>
+        {phase === "connecting" && <Badge tone="warn">连接中</Badge>}
+        {phase === "ended" && <Badge tone="err">已断开</Badge>}
       </div>
       <div className="min-h-0 flex-1 p-4">
         <div

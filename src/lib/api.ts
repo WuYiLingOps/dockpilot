@@ -8,6 +8,7 @@ import type {
   ContainerUpdateSpec,
   DockerEventDto,
   DockerInfoDto,
+  ExecFrame,
   ExportProgress,
   FileEntry,
   HostStatsDto,
@@ -275,22 +276,18 @@ export const api = {
   execCreate: (id: string, shell: string) =>
     invoke<string>("exec_create", { id, shell }),
 
-  execAttach: (execId: string, onData: (s: string) => void): Unsubscribe => {
-    const ch = new Channel<string>();
-    ch.onmessage = onData;
+  execAttach: (execId: string, onFrame: (f: ExecFrame) => void): Unsubscribe => {
+    const ch = new Channel<ExecFrame>();
+    ch.onmessage = onFrame;
     return withCancel(invoke<string>("exec_attach", { execId, onChunk: ch }));
   },
 
-  // 终端会话已结束时写入/resize 会失败，属正常竞态，仅记日志不向 UI 报错
+  // 输入/尺寸调整的错误由调用方处理：会话已结束时用于更新断开状态（正常竞态）
   execInput: (execId: string, data: string) =>
-    invoke<void>("exec_input", { execId, data }).catch((e) =>
-      applog.warn(`终端输入写入失败（会话可能已关闭）: ${String(e)}`),
-    ),
+    invoke<void>("exec_input", { execId, data }),
 
   execResize: (execId: string, width: number, height: number) =>
-    invoke<void>("exec_resize", { execId, width, height }).catch((e) =>
-      applog.warn(`终端尺寸调整失败（会话可能已关闭）: ${String(e)}`),
-    ),
+    invoke<void>("exec_resize", { execId, width, height }),
 
   // ---- 设置 / 镜像加速 / 空间清理 ----
 

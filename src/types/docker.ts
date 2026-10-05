@@ -161,6 +161,11 @@ export interface LogChunk {
   data: string;
 }
 
+/** 终端输出帧（exec_attach 推送）：data 为正常输出流，ended 为会话结束通知 */
+export type ExecFrame =
+  | { type: "data"; text: string }
+  | { type: "ended"; reason: string };
+
 export interface DockerEventDto {
   kind: string;
   action: string;
