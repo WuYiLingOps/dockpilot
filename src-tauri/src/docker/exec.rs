@@ -295,7 +295,6 @@ mod tests {
 
     #[test]
     fn feeder_reassembles_multibyte_char_across_chunks() {
-        let mut f = Utf8Feeder::new();
         // "中" = e4 b8 ad，任意切点都应无损重组
         for split in 1..3 {
             let mut f = Utf8Feeder::new();
