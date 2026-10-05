@@ -162,51 +162,74 @@ export function BatchPushModal({
         </Select>
       </div>
 
-      <div className="max-h-72 space-y-1.5 overflow-y-auto pr-1">
+      <div className="max-h-80 space-y-1.5 overflow-y-auto pr-1">
         {rows.map((r, i) => (
           <div
             key={`${r.source}-${i}`}
-            className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_86px_120px] items-center gap-2 rounded-ctl border border-edge bg-panel2/40 px-2.5 py-1.5"
+            className="rounded-ctl border border-edge bg-panel2/40 px-2.5 py-1.5"
           >
-            <span className="truncate font-mono text-[11.5px] text-fg2" title={r.source}>
-              {r.source}
-            </span>
-            <input
-              value={r.repository}
-              onChange={(e) => patchRow(i, { repository: e.target.value })}
-              disabled={running || r.status !== "pending"}
-              spellCheck={false}
-              data-no-drag
-              className="h-7 w-full min-w-0 rounded-ctl border border-edge-strong bg-panel px-2 font-mono text-[11.5px] text-fg outline-none focus:border-accent disabled:opacity-60"
-            />
-            <input
-              value={r.tag}
-              onChange={(e) => patchRow(i, { tag: e.target.value })}
-              disabled={running || r.status !== "pending"}
-              spellCheck={false}
-              data-no-drag
-              className="h-7 w-full min-w-0 rounded-ctl border border-edge-strong bg-panel px-2 font-mono text-[11.5px] text-fg outline-none focus:border-accent disabled:opacity-60"
-            />
-            <div className="flex items-center justify-end gap-1 text-[11px]">
-              {r.status === "pending" && <span className="text-fg3">等待</span>}
-              {r.status === "running" && (
-                <>
-                  <Spinner className="h-3 w-3" />
-                  <span className="text-fg3">推送中</span>
-                </>
-              )}
-              {r.status === "done" && (
-                <span className="flex items-center gap-0.5 text-ok">
-                  <Check size={12} /> 完成
-                </span>
-              )}
-              {r.status === "error" && (
-                <span className="flex items-center gap-0.5 text-err">
-                  <X size={12} /> 失败
-                </span>
-              )}
-              {r.status === "cancelled" && <span className="text-warn">已取消</span>}
+            {/* 首行：源镜像完整引用 + 状态 */}
+            <div className="flex items-center gap-2">
+              <span
+                className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-fg2"
+                title={r.source}
+              >
+                {r.source}
+              </span>
+              <div className="flex shrink-0 items-center gap-1 text-[11px]">
+                {r.status === "pending" && <span className="text-fg3">等待</span>}
+                {r.status === "running" && (
+                  <>
+                    <Spinner className="h-3 w-3" />
+                    <span className="text-fg3">推送中</span>
+                  </>
+                )}
+                {r.status === "done" && (
+                  <span className="flex items-center gap-0.5 text-ok">
+                    <Check size={12} /> 完成
+                  </span>
+                )}
+                {r.status === "error" && (
+                  <span className="flex items-center gap-0.5 text-err">
+                    <X size={12} /> 失败
+                  </span>
+                )}
+                {r.status === "cancelled" && <span className="text-warn">已取消</span>}
+              </div>
             </div>
+            {/* 次行：目标仓库名:标签（可编辑） */}
+            <div className="mt-1 flex items-center gap-1.5">
+              <input
+                value={r.repository}
+                onChange={(e) => patchRow(i, { repository: e.target.value })}
+                disabled={running || r.status !== "pending"}
+                spellCheck={false}
+                aria-label="目标仓库名"
+                data-no-drag
+                className="h-7 min-w-0 flex-1 rounded-ctl border border-edge-strong bg-panel px-2 font-mono text-[11.5px] text-fg outline-none focus:border-accent disabled:opacity-60"
+              />
+              <span className="shrink-0 font-mono text-[12px] text-fg3">:</span>
+              <input
+                value={r.tag}
+                onChange={(e) => patchRow(i, { tag: e.target.value })}
+                disabled={running || r.status !== "pending"}
+                spellCheck={false}
+                aria-label="目标标签"
+                data-no-drag
+                className="h-7 w-24 shrink-0 rounded-ctl border border-edge-strong bg-panel px-2 font-mono text-[11.5px] text-fg outline-none focus:border-accent disabled:opacity-60"
+              />
+            </div>
+            {/* 进度 / 失败原因（完成后不重复展示） */}
+            {r.note && (r.status === "running" || r.status === "error") && (
+              <p
+                className={`mt-1 truncate text-[11px] leading-4 ${
+                  r.status === "error" ? "text-err" : "text-fg3"
+                }`}
+                title={r.note}
+              >
+                {r.note}
+              </p>
+            )}
           </div>
         ))}
       </div>
@@ -215,7 +238,7 @@ export function BatchPushModal({
         <p className="mt-2 text-[11px] leading-4 text-fg3">
           {running
             ? "按顺序逐个推送，失败会跳过并继续下一个；关闭弹窗即取消剩余队列。"
-            : `完成 ${doneCount} · 失败 ${failCount}；失败原因见行内状态（悬停源镜像可看完整引用）。`}
+            : `完成 ${doneCount} · 失败 ${failCount}；失败原因见对应行内（悬停源镜像可看完整引用）。`}
         </p>
       )}
       <p className="mt-1.5 text-[11px] text-fg3">
