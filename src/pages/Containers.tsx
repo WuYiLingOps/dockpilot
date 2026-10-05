@@ -10,12 +10,12 @@ import {
   Square,
   Trash2,
 } from "lucide-react";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { api } from "../lib/api";
 import { useSettings } from "../lib/settings";
 import type { ContainerDto, ContainerSpec } from "../types/docker";
-import { useContainerActions } from "../hooks/useContainerActions";
+import { actionPendingText, useContainerActions } from "../hooks/useContainerActions";
 import { timeAgo } from "../lib/format";
 import { CreateContainerModal } from "../components/containers/CreateContainerModal";
 import {
@@ -161,7 +161,17 @@ export function Containers({
               <div>创建时间</div>
               <div />
             </div>
-            {filtered.map((c) => (
+            {filtered.map((c) => {
+              // 该行的生命周期操作进行中：状态列与对应按钮给即时反馈
+              const isRowPending =
+                action.isPending && action.variables?.id === c.id;
+              const spinIcon = (act: string, icon: ReactNode) =>
+                isRowPending && action.variables?.act === act ? (
+                  <Spinner className="h-3.5 w-3.5" />
+                ) : (
+                  icon
+                );
+              return (
               <div
                 key={c.id}
                 onClick={() => onOpen(c.id)}
@@ -169,8 +179,22 @@ export function Containers({
               >
                 <div title={c.status}>
                   <div className="flex items-center gap-1.5 text-[12px] text-fg2">
-                    <StatusDot state={c.state} />
-                    {statusText(c.state)}
+                    {isRowPending ? (
+                      <>
+                        <Spinner
+                          className="h-3 w-3"
+                          color="border-warn/60"
+                        />
+                        <span className="text-warn">
+                          {actionPendingText(action.variables?.act ?? "")}
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        <StatusDot state={c.state} />
+                        {statusText(c.state)}
+                      </>
+                    )}
                   </div>
                 </div>
                 <div className="min-w-0">
@@ -203,7 +227,7 @@ export function Containers({
                 <PortChips ports={c.ports} />
                 <div className="text-[12px] text-fg3">{timeAgo(c.created)}</div>
                 <div
-                  className="flex items-center justify-end gap-0.5 opacity-0 transition-opacity duration-150 group-hover:opacity-100"
+                  className={`flex items-center justify-end gap-0.5 transition-opacity duration-150 ${isRowPending ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}
                   onClick={(e) => e.stopPropagation()}
                   data-no-drag
                 >
@@ -213,7 +237,7 @@ export function Containers({
                       disabled={action.isPending}
                       onClick={() => action.mutate({ id: c.id, act: "start" })}
                     >
-                      <Play size={14} />
+                      {spinIcon("start", <Play size={14} />)}
                     </IconButton>
                   )}
                   {c.state === "running" && (
@@ -223,21 +247,21 @@ export function Containers({
                         disabled={action.isPending}
                         onClick={() => action.mutate({ id: c.id, act: "stop" })}
                       >
-                        <Square size={14} />
+                        {spinIcon("stop", <Square size={14} />)}
                       </IconButton>
                       <IconButton
                         title="重启"
                         disabled={action.isPending}
                         onClick={() => action.mutate({ id: c.id, act: "restart" })}
                       >
-                        <RotateCw size={14} />
+                        {spinIcon("restart", <RotateCw size={14} />)}
                       </IconButton>
                       <IconButton
                         title="暂停"
                         disabled={action.isPending}
                         onClick={() => action.mutate({ id: c.id, act: "pause" })}
                       >
-                        <Pause size={14} />
+                        {spinIcon("pause", <Pause size={14} />)}
                       </IconButton>
                     </>
                   )}
@@ -247,7 +271,7 @@ export function Containers({
                       disabled={action.isPending}
                       onClick={() => action.mutate({ id: c.id, act: "stop" })}
                     >
-                      <Square size={14} />
+                      {spinIcon("stop", <Square size={14} />)}
                     </IconButton>
                   )}
                   {c.state === "paused" && (
@@ -256,7 +280,7 @@ export function Containers({
                       disabled={action.isPending}
                       onClick={() => action.mutate({ id: c.id, act: "unpause" })}
                     >
-                      <Play size={14} />
+                      {spinIcon("unpause", <Play size={14} />)}
                     </IconButton>
                   )}
                   <IconButton title="克隆（以此配置创建新容器）" onClick={() => void clone(c)}>
@@ -272,7 +296,8 @@ export function Containers({
                   </IconButton>
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}
@@ -297,7 +322,7 @@ export function Containers({
               disabled={deleteForce.isPending}
               onClick={() => pendingDelete && deleteForce.mutate(pendingDelete)}
             >
-              确认删除
+              {deleteForce.isPending ? "删除中…" : "确认删除"}
             </Button>
           </>
         }

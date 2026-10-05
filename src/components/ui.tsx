@@ -483,11 +483,19 @@ export function Modal({
   );
 }
 
-export function Spinner({ className }: { className?: string }) {
+export function Spinner({
+  className,
+  color = "border-fg3/60",
+}: {
+  className?: string;
+  /** border 颜色类（与默认色互斥，不能靠 className 追加覆盖） */
+  color?: string;
+}) {
   return (
     <span
       className={cn(
-        "inline-block h-4 w-4 animate-spin rounded-full border-2 border-fg3/60 border-t-transparent",
+        "inline-block h-4 w-4 animate-spin rounded-full border-2 border-t-transparent",
+        color,
         className,
       )}
     />

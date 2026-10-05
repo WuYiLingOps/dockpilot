@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
-import { useContainerActions } from "../hooks/useContainerActions";
+import { actionPendingText, useContainerActions } from "../hooks/useContainerActions";
 import { withDragRegion } from "../lib/drag";
 import { InspectView } from "../components/detail/InspectView";
 import { FileBrowserView } from "../components/detail/FileBrowserView";
@@ -59,6 +59,11 @@ export function ContainerDetail({
   const [updateOpen, setUpdateOpen] = useState(false);
 
   const running = c?.state === "running";
+  // 本容器生命周期操作进行中：按钮 icon/文案与状态徽标给即时反馈
+  const actPending = (act: string) =>
+    action.isPending &&
+    action.variables?.id === c?.id &&
+    action.variables?.act === act;
 
   // 容器被删除后自动返回列表
   useEffect(() => {
@@ -79,7 +84,18 @@ export function ContainerDetail({
             <h1 className="truncate text-[15px] font-semibold text-fg" title={c.name}>
               {c.name}
             </h1>
-            <StateBadge state={c.state} />
+            {actPending("start") ||
+            actPending("stop") ||
+            actPending("restart") ||
+            actPending("pause") ||
+            actPending("unpause") ? (
+              <span className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap text-[12px] font-medium text-warn">
+                <Spinner className="h-3 w-3" color="border-warn/60" />
+                {actionPendingText(action.variables?.act ?? "")}
+              </span>
+            ) : (
+              <StateBadge state={c.state} />
+            )}
             {c.health && <HealthBadge health={c.health} />}
             <span
               className="hidden min-w-0 max-w-[24rem] shrink-[4] truncate font-mono text-[11px] text-fg3 lg:inline"
@@ -99,8 +115,8 @@ export function ContainerDetail({
               disabled={action.isPending}
               onClick={() => action.mutate({ id: c.id, act: "start" })}
             >
-              <Play size={14} />
-              启动
+              {actPending("start") ? <Spinner className="h-3.5 w-3.5" /> : <Play size={14} />}
+              {actPending("start") ? actionPendingText("start") : "启动"}
             </Button>
           )}
           {running && (
@@ -110,24 +126,28 @@ export function ContainerDetail({
                 disabled={action.isPending}
                 onClick={() => action.mutate({ id: c.id, act: "stop" })}
               >
-                <Square size={14} />
-                停止
+                {actPending("stop") ? <Spinner className="h-3.5 w-3.5" /> : <Square size={14} />}
+                {actPending("stop") ? actionPendingText("stop") : "停止"}
               </Button>
               <Button
                 variant="ghost"
                 disabled={action.isPending}
                 onClick={() => action.mutate({ id: c.id, act: "restart" })}
               >
-                <RotateCw size={14} />
-                重启
+                {actPending("restart") ? (
+                  <Spinner className="h-3.5 w-3.5" />
+                ) : (
+                  <RotateCw size={14} />
+                )}
+                {actPending("restart") ? actionPendingText("restart") : "重启"}
               </Button>
               <Button
                 variant="ghost"
                 disabled={action.isPending}
                 onClick={() => action.mutate({ id: c.id, act: "pause" })}
               >
-                <Pause size={14} />
-                暂停
+                {actPending("pause") ? <Spinner className="h-3.5 w-3.5" /> : <Pause size={14} />}
+                {actPending("pause") ? actionPendingText("pause") : "暂停"}
               </Button>
             </>
           )}
@@ -137,8 +157,8 @@ export function ContainerDetail({
               disabled={action.isPending}
               onClick={() => action.mutate({ id: c.id, act: "stop" })}
             >
-              <Square size={14} />
-              停止
+              {actPending("stop") ? <Spinner className="h-3.5 w-3.5" /> : <Square size={14} />}
+              {actPending("stop") ? actionPendingText("stop") : "停止"}
             </Button>
           )}
           {c?.state === "paused" && (
@@ -147,8 +167,8 @@ export function ContainerDetail({
               disabled={action.isPending}
               onClick={() => action.mutate({ id: c.id, act: "unpause" })}
             >
-              <Play size={14} />
-              恢复
+              {actPending("unpause") ? <Spinner className="h-3.5 w-3.5" /> : <Play size={14} />}
+              {actPending("unpause") ? actionPendingText("unpause") : "恢复"}
             </Button>
           )}
           {c && (
@@ -225,7 +245,7 @@ export function ContainerDetail({
                 })
               }
             >
-              确认删除
+              {remove.isPending ? "删除中…" : "确认删除"}
             </Button>
           </>
         }

@@ -55,8 +55,9 @@ import type { SshIdentity, SshKeyEntry } from "../types/settings";
 
 type Unsubscribe = () => void;
 
-/** 将 Channel 回调注册封装成 Promise<取消函数> 的模式 */
-function withCancel(sidPromise: Promise<string>): Unsubscribe {
+/** 将 Channel 回调注册封装成 Promise<取消函数> 的模式；onError 承接 invoke 本身的失败（如命令同步返回 Err） */
+function withCancel(sidPromise: Promise<string>, onError?: (e: string) => void): Unsubscribe {
+  if (onError) sidPromise.catch((e) => onError(String(e)));
   return () => {
     void sidPromise
       .then((sid) => invoke("cancel_stream", { streamId: sid }))
@@ -426,12 +427,13 @@ export const api = {
 
   composeCliInfo: () => invoke<ComposeCliInfoDto>("compose_cli_info"),
 
-  /** 对项目执行操作，输出经 Channel 流式推送；返回取消函数（会 kill 子进程） */
+  /** 对项目执行操作，输出经 Channel 流式推送；返回取消函数（会 kill 子进程）。onError 承接起进程前的同步失败 */
   composeAction: (
     project: string,
     action: string,
     opts: { removeVolumes?: boolean; removeImages?: boolean; services?: string[] },
     onOutput: (o: ComposeOutput) => void,
+    onError?: (e: string) => void,
   ): Unsubscribe => {
     const ch = new Channel<ComposeOutput>();
     ch.onmessage = onOutput;
@@ -444,6 +446,7 @@ export const api = {
         services: opts.services ?? [],
         onOutput: ch,
       }),
+      onError,
     );
   },
 

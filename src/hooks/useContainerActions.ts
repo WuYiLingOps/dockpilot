@@ -10,6 +10,11 @@ const ACT_LABEL: Record<string, string> = {
   unpause: "恢复",
 };
 
+/** 操作进行中的行内中间态文案，如 stop → 「停止中…」 */
+export function actionPendingText(act: string): string {
+  return `${ACT_LABEL[act] ?? act}中…`;
+}
+
 /** 容器生命周期操作，列表页与详情页共用 */
 export function useContainerActions() {
   const qc = useQueryClient();

@@ -97,8 +97,13 @@ export function Compose({
   const quickAction = (p: ComposeProjectDto, action: string, label: string) => {
     if (!cliReady) return;
     quickRun.start(
-      (o) => api.composeAction(p.name, action, {}, o),
-      { label: `${label}项目 ${p.name}` },
+      (o, e) => api.composeAction(p.name, action, {}, o, e),
+      {
+        label: `${label}项目 ${p.name}`,
+        target: p.name,
+        action,
+        pendingText: `${label}中…`,
+      },
     );
   };
 
@@ -175,7 +180,9 @@ export function Compose({
               <div>服务</div>
               <div />
             </div>
-            {projects.map((p) => (
+            {projects.map((p) => {
+              const pending = quickRun.running && quickRun.target === p.name;
+              return (
               <div
                 key={p.name}
                 onClick={() => onOpen(p.name)}
@@ -185,7 +192,14 @@ export function Compose({
                   <div className="flex items-center gap-2">
                     <StatusDot state={projectState(p)} />
                     <span className="truncate font-medium text-fg">{p.name}</span>
-                    {sourceLabel(p.source) && <Badge>{sourceLabel(p.source)}</Badge>}
+                    {pending ? (
+                      <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-warn/10 px-2 py-0.5 text-[10.5px] font-medium leading-4 text-warn">
+                        <Spinner className="h-2.5 w-2.5" />
+                        {quickRun.pendingText}
+                      </span>
+                    ) : (
+                      sourceLabel(p.source) && <Badge>{sourceLabel(p.source)}</Badge>
+                    )}
                   </div>
                   <div className="mt-0.5 text-[11px] text-fg3">
                     {p.total_count === 0
@@ -210,7 +224,7 @@ export function Compose({
                   </div>
                 </div>
                 <div
-                  className="flex items-center justify-end gap-0.5 opacity-0 transition-opacity duration-150 group-hover:opacity-100"
+                  className={`flex items-center justify-end gap-0.5 transition-opacity duration-150 ${pending ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}
                   onClick={(e) => e.stopPropagation()}
                   data-no-drag
                 >
@@ -220,7 +234,11 @@ export function Compose({
                       disabled={!cliReady || quickRun.running}
                       onClick={() => quickAction(p, "up", "启动")}
                     >
-                      <Play size={14} />
+                      {pending && quickRun.action === "up" ? (
+                        <Spinner className="h-3.5 w-3.5" />
+                      ) : (
+                        <Play size={14} />
+                      )}
                     </IconButton>
                   )}
                   {p.running_count > 0 && (
@@ -229,7 +247,11 @@ export function Compose({
                       disabled={!cliReady || quickRun.running}
                       onClick={() => quickAction(p, "stop", "停止")}
                     >
-                      <Square size={14} />
+                      {pending && quickRun.action === "stop" ? (
+                        <Spinner className="h-3.5 w-3.5" />
+                      ) : (
+                        <Square size={14} />
+                      )}
                     </IconButton>
                   )}
                   {p.total_count === 0 && (
@@ -243,7 +265,8 @@ export function Compose({
                   )}
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}

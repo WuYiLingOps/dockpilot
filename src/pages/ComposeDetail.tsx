@@ -101,7 +101,7 @@ export function ComposeDetail({
   });
 
   const act = (action: string, label: string, opts: ActionOpts = {}) =>
-    run.start((o) => api.composeAction(project, action, opts, o), {
+    run.start((o, e) => api.composeAction(project, action, opts, o, e), {
       label: `${label}项目 ${project}`,
     });
 
