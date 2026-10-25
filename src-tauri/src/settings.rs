@@ -162,6 +162,8 @@ pub struct SshIdentity {
 pub struct AppSettings {
     /// "system" | "light" | "dark"
     pub theme: String,
+    /// 界面语言："system" 跟随系统（后端默认按中文，前端解析后经 set_ui_language 上报）| "zh" | "en"
+    pub language: String,
     /// 旧版自定义 socket 字段：仅用于迁移为 local 连接，迁移后不再使用
     pub docker_socket: String,
     /// 连接配置列表，始终保证至少一个本地连接
@@ -211,6 +213,7 @@ impl Default for AppSettings {
     fn default() -> Self {
         Self {
             theme: "system".into(),
+            language: "system".into(),
             docker_socket: String::new(),
             // 反序列化旧配置时以本 Default 为底：留空让 migrate() 统一补本地连接，
             // 避免旧配置被误判为"已有连接列表"而跳过迁移
@@ -292,6 +295,9 @@ pub fn normalize_conn_host(kind: &str, host: &str) -> String {
 pub fn sanitize(mut s: AppSettings) -> AppSettings {
     if !["system", "light", "dark"].contains(&s.theme.as_str()) {
         s.theme = "system".into();
+    }
+    if !["system", "zh", "en"].contains(&s.language.as_str()) {
+        s.language = "system".into();
     }
     if !["ask", "exit", "minimize"].contains(&s.close_action.as_str()) {
         s.close_action = "ask".into();
@@ -497,7 +503,7 @@ fn config_file(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let dir = app
         .path()
         .app_config_dir()
-        .map_err(|e| format!("获取配置目录失败: {e}"))?;
+        .map_err(|e| crate::i18n::tr("err.config_dir_failed", &[("err", &e.to_string())]))?;
     Ok(dir.join("settings.json"))
 }
 
@@ -527,12 +533,17 @@ pub fn save(app: &tauri::AppHandle, s: &AppSettings) -> Result<(), String> {
     let path = config_file(app)?;
     let dir = path
         .parent()
-        .ok_or_else(|| "配置文件路径异常".to_string())?;
-    std::fs::create_dir_all(dir).map_err(|e| format!("创建配置目录失败: {e}"))?;
-    let text = serde_json::to_string_pretty(s).map_err(|e| format!("序列化设置失败: {e}"))?;
+        .ok_or_else(|| crate::i18n::t("err.config_path_invalid").to_string())?;
+    std::fs::create_dir_all(dir)
+        .map_err(|e| crate::i18n::tr("err.config_mkdir_failed", &[("err", &e.to_string())]))?;
+    let text = serde_json::to_string_pretty(s).map_err(|e| {
+        crate::i18n::tr("err.settings_serialize_failed", &[("err", &e.to_string())])
+    })?;
     let tmp = path.with_extension("json.tmp");
-    std::fs::write(&tmp, text).map_err(|e| format!("写入设置失败: {e}"))?;
-    std::fs::rename(&tmp, &path).map_err(|e| format!("保存设置失败: {e}"))?;
+    std::fs::write(&tmp, text)
+        .map_err(|e| crate::i18n::tr("err.settings_write_failed", &[("err", &e.to_string())]))?;
+    std::fs::rename(&tmp, &path)
+        .map_err(|e| crate::i18n::tr("err.settings_save_failed", &[("err", &e.to_string())]))?;
     Ok(())
 }
 
@@ -558,6 +569,15 @@ pub async fn set_settings(app: tauri::AppHandle, settings: AppSettings) -> CmdRe
     save(&app, &s)?;
     // 保存成功后清理已删除 SSH 连接的孤儿密钥（失败仅记日志，不影响保存结果）
     crate::ssh_secrets::cleanup_removed(&app, &old, &s);
+    // 界面语言显式变化：同步进程级语言并重建托盘菜单。"system" 的具体解析由
+    // 前端经 set_ui_language 上报，此处不处理，避免后端误判系统语言
+    if old.language != s.language {
+        match s.language.as_str() {
+            "zh" | "en" => crate::i18n::set_global(crate::i18n::Lang::from_setting(&s.language)),
+            _ => {}
+        }
+        crate::i18n::rebuild_tray_menu(&app);
+    }
     Ok(s)
 }
 
@@ -576,7 +596,10 @@ fn log_setting_changes(old: &AppSettings, new: &AppSettings) {
         .map(|(k, _)| k.as_str())
         .collect();
     if !changed.is_empty() {
-        log::info!("设置已更新：{}", changed.join(", "));
+        log::info!(
+            "{}",
+            crate::i18n::tr("log.settingsUpdated", &[("keys", &changed.join(", "))])
+        );
     }
 }
 
@@ -603,6 +626,27 @@ mod tests {
         // 旧配置缺字段 → serde default 补默认值
         let old = parse_settings(r#"{"theme":"dark"}"#);
         assert_eq!(old.close_action, "ask");
+    }
+
+    #[test]
+    fn sanitize_language_falls_back_to_system() {
+        // 非法值回落默认
+        let s = sanitize(AppSettings {
+            language: "fr".into(),
+            ..Default::default()
+        });
+        assert_eq!(s.language, "system");
+        // 合法值保留
+        for ok in ["system", "zh", "en"] {
+            let s = sanitize(AppSettings {
+                language: ok.into(),
+                ..Default::default()
+            });
+            assert_eq!(s.language, ok);
+        }
+        // 旧配置缺字段 → serde default 补默认值
+        let old = parse_settings(r#"{"theme":"dark"}"#);
+        assert_eq!(old.language, "system");
     }
 
     #[test]

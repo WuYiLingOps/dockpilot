@@ -4,6 +4,7 @@ mod daemon_config;
 mod diagnostics;
 mod docker;
 mod github_sync;
+mod i18n;
 mod registries;
 mod secret_store;
 mod settings;
@@ -26,7 +27,6 @@ pub(crate) fn format_bytes(n: u64) -> String {
 }
 
 use tauri::{
-    menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     Emitter, Manager,
 };
@@ -47,7 +47,7 @@ fn platform() -> String {
 #[tauri::command]
 fn apply_close_action(app: tauri::AppHandle, action: String, remember: bool) -> Result<(), String> {
     if !["minimize", "exit"].contains(&action.as_str()) {
-        return Err(format!("未知的关闭行为: {action}"));
+        return Err(i18n::tr("err.unknownCloseAction", &[("action", &action)]));
     }
     if remember {
         let mut s = settings::load(&app);
@@ -55,8 +55,21 @@ fn apply_close_action(app: tauri::AppHandle, action: String, remember: bool) -> 
         settings::save(&app, &s)?;
     }
     log::info!(
-        "关闭窗口：{action}{}",
-        if remember { "（记住选择）" } else { "" }
+        "{}",
+        i18n::tr(
+            "log.closeWindow",
+            &[
+                ("action", &action),
+                (
+                    "remember",
+                    if remember {
+                        i18n::t("log.closeWindowRemembered")
+                    } else {
+                        ""
+                    }
+                ),
+            ]
+        )
     );
     match action.as_str() {
         "minimize" => {
@@ -90,7 +103,9 @@ fn apply_window_corner(window: &tauri::WebviewWindow, round: bool) {
     };
     unsafe {
         let _ = DwmSetWindowAttribute(
-            HWND(hwnd.0 as *mut std::ffi::c_void),
+            // HWND 的字段类型随 windows crate 版本曾为 isize / *mut c_void，
+            // 现版本即 *mut c_void，直接透传（clippy: unnecessary_cast）
+            HWND(hwnd.0),
             DWMWA_WINDOW_CORNER_PREFERENCE,
             &pref as *const DWM_WINDOW_CORNER_PREFERENCE as *const std::ffi::c_void,
             std::mem::size_of::<DWM_WINDOW_CORNER_PREFERENCE>() as u32,
@@ -210,13 +225,17 @@ pub fn run() {
                 }
             }
 
+            // 加载设置（含旧配置迁移），初始化活跃连接；连接在首次命令时惰性建立。
+            // 托盘菜单文案随界面语言，需在托盘构建前加载设置并初始化进程级语言
+            let s = settings::load(app.handle());
+            i18n::set_global(i18n::Lang::from_setting(&s.language));
+
             // 系统托盘：后台常驻入口。Linux 上左键单击事件不可靠（appindicator 限制），
-            // 菜单里的「显示 DockPilot」是恢复窗口的兜底途径
+            // 菜单里的「显示 DockPilot」是恢复窗口的兜底途径。菜单文案随界面语言，
+            // 语言变化时经 i18n::rebuild_tray_menu 按 id 整体重建
             if let Some(icon) = app.default_window_icon() {
-                let show = MenuItem::with_id(app, "show", "显示 DockPilot", true, None::<&str>)?;
-                let quit = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
-                let tray_menu = Menu::with_items(app, &[&show, &quit])?;
-                TrayIconBuilder::new()
+                let tray_menu = i18n::build_tray_menu(app.handle())?;
+                TrayIconBuilder::with_id("tray")
                     .icon(icon.clone())
                     .tooltip("DockPilot")
                     .menu(&tray_menu)
@@ -240,15 +259,19 @@ pub fn run() {
                     .build(app)?;
             }
 
-            // 加载设置（含旧配置迁移），初始化活跃连接；连接在首次命令时惰性建立
-            let s = settings::load(app.handle());
+            // （设置已在托盘前加载）初始化调试日志级别与启动横幅
             diagnostics::apply_debug_logging(s.debug_logging);
             log::info!(
-                "DockPilot v{} 启动（{} {}，日志级别 {}）",
-                env!("CARGO_PKG_VERSION"),
-                std::env::consts::OS,
-                std::env::consts::ARCH,
-                if s.debug_logging { "Debug" } else { "Info" }
+                "{}",
+                i18n::tr(
+                    "log.appStarted",
+                    &[
+                        ("version", env!("CARGO_PKG_VERSION")),
+                        ("os", std::env::consts::OS),
+                        ("arch", std::env::consts::ARCH),
+                        ("level", if s.debug_logging { "Debug" } else { "Info" },),
+                    ],
+                )
             );
 
             // 日志定时清理：启动清一次过期归档，之后每 6 小时按最新保留设置复查
@@ -259,22 +282,36 @@ pub fn run() {
                     match diagnostics::cleanup_old_logs(days) {
                         Ok(r) if r.removed > 0 => {
                             log::info!(
-                                "日志定时清理：删除 {} 个过期文件（{}）",
-                                r.removed,
-                                format_bytes(r.bytes)
+                                "{}",
+                                i18n::tr(
+                                    "log.scheduledLogCleanup",
+                                    &[
+                                        ("n", &r.removed.to_string()),
+                                        ("size", &format_bytes(r.bytes)),
+                                    ],
+                                )
                             );
                         }
                         Ok(_) => {}
-                        Err(e) => log::warn!("日志定时清理失败: {e}"),
+                        Err(e) => log::warn!(
+                            "{}",
+                            i18n::tr("log.scheduledLogCleanupFailed", &[("err", &e.to_string())])
+                        ),
                     }
                     tokio::time::sleep(std::time::Duration::from_secs(6 * 3600)).await;
                 }
             });
             if let Some(profile) = settings::find_connection(&s, &s.active_connection_id) {
-                log::info!("初始化连接：{}（{}）", profile.name, profile.kind);
+                log::info!(
+                    "{}",
+                    i18n::tr(
+                        "log.connInit",
+                        &[("name", &profile.name), ("kind", &profile.kind)],
+                    )
+                );
                 docker::conn::init_active(profile.clone());
             } else {
-                log::info!("未找到活跃连接配置，使用默认本地连接");
+                log::info!("{}", i18n::t("log.connInitFallback"));
                 docker::conn::init_active(settings::ConnectionProfile::default_local());
             }
 
@@ -290,7 +327,10 @@ pub fn run() {
             // 老配置的"每连接内嵌私钥"幂等迁移为钥匙串引用（secret_store 判定，无则零成本）
             let migrated = ssh_secrets::migrate_embedded_to_keychain(app.handle());
             if migrated > 0 {
-                log::info!("SSH 钥匙串迁移完成：{migrated} 个连接");
+                log::info!(
+                    "{}",
+                    i18n::tr("log.sshKeychainMigrated", &[("n", &migrated.to_string())])
+                );
             }
             docker::events::start_global_listener(app.handle(), tx);
             Ok(())
@@ -356,6 +396,7 @@ pub fn run() {
             docker::conn::test_connection,
             settings::get_settings,
             settings::set_settings,
+            i18n::set_ui_language,
             app_update::check_update,
             app_update::download_app_update,
             app_update::open_downloaded_update,
@@ -420,7 +461,7 @@ pub fn run() {
             if let tauri::RunEvent::Exit = event {
                 diagnostics::write_shutdown_marker();
                 tauri::async_runtime::block_on(docker::ssh_client::stop_all());
-                log::info!("DockPilot 正常退出");
+                log::info!("{}", i18n::t("log.appExited"));
             }
         });
 }

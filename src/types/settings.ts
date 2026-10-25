@@ -1,6 +1,8 @@
 /** 与 src-tauri/src/settings.rs 的 AppSettings 对应 */
-
+import { t } from "../lib/i18n";
 export type ThemeMode = "system" | "light" | "dark";
+/** 界面语言：system 跟随系统（按 navigator.language 解析），zh 简体中文，en 英文 */
+export type UiLanguage = "system" | "zh" | "en";
 export type TerminalShell = "bash" | "sh" | "ash";
 export type ConnectionKind = "local" | "tcp" | "tls" | "ssh";
 export type CloseAction = "ask" | "minimize" | "exit";
@@ -65,6 +67,8 @@ export interface SshIdentity {
 
 export interface AppSettings {
   theme: ThemeMode;
+  /** 界面语言（不参与云同步：语言偏好与设备环境相关，保持设备独立） */
+  language: UiLanguage;
   docker_socket: string;
   connections: ConnectionProfile[];
   /** SSH 钥匙串：跨连接复用的导入式私钥条目（材料在本机密钥库） */
@@ -160,47 +164,57 @@ export interface RegistryTestResult {
   via_http: boolean;
 }
 
-/** 仓库类型的中文标签 */
+/** 仓库类型（标签文案经 registryKindLabel 取当前语言） */
 export const REGISTRY_KINDS: { key: RegistryKind; label: string }[] = [
-  { key: "aliyun", label: "阿里云 ACR" },
-  { key: "harbor", label: "Harbor" },
-  { key: "generic", label: "通用仓库" },
+  { key: "aliyun", label: "registryKindLabel:aliyun" },
+  { key: "harbor", label: "registryKindLabel:harbor" },
+  { key: "generic", label: "registryKindLabel:generic" },
 ];
 
 export function registryKindLabel(kind: RegistryKind): string {
-  return REGISTRY_KINDS.find((k) => k.key === kind)?.label ?? kind;
+  switch (kind) {
+    case "aliyun":
+      return t("push.kindAliyun");
+    case "harbor":
+      return t("push.kindHarbor");
+    case "generic":
+      return t("push.kindGeneric");
+    default:
+      return kind;
+  }
 }
 
 /** 密钥存储方式的展示文案 */
 export function secretBackendLabel(backend: string): string {
   switch (backend) {
     case "keyring":
-      return "系统钥匙串";
+      return t("reg.backendKeyring");
     case "file":
-      return "加密文件";
+      return t("reg.backendFile");
     default:
       return backend;
   }
 }
 
-/** 连接类型的中文标签与说明 */
+/** 连接类型（标签文案经 connectionKindLabel 取当前语言） */
 export const CONNECTION_KINDS: { key: ConnectionKind; label: string }[] = [
-  { key: "local", label: "本地" },
+  { key: "local", label: "connectionKindLabel:local" },
   { key: "ssh", label: "SSH" },
   { key: "tls", label: "TLS" },
   { key: "tcp", label: "TCP" },
 ];
 
 export function connectionKindLabel(kind: ConnectionKind): string {
+  if (kind === "local") return t("conn.defaultLocal");
   return CONNECTION_KINDS.find((k) => k.key === kind)?.label ?? kind;
 }
 
-/** ssh 认证方式的中文标签 */
+/** ssh 认证方式（标签文案经 connectionAuthLabel 取当前语言） */
 export const CONNECTION_AUTHS: { key: ConnectionAuth; label: string }[] = [
-  { key: "key", label: "私钥" },
-  { key: "password", label: "密码" },
+  { key: "key", label: "connectionAuthLabel:key" },
+  { key: "password", label: "connectionAuthLabel:password" },
 ];
 
 export function connectionAuthLabel(auth: string): string {
-  return CONNECTION_AUTHS.find((a) => a.key === auth)?.label ?? "私钥";
+  return auth === "password" ? t("reg.authPassword") : t("reg.authKey");
 }

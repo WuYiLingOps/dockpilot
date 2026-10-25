@@ -4,14 +4,21 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/tauri.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>DockPilot — Docker 桌面管理</title>
+    <title>DockPilot</title>
     <script>
-      // 首帧前同步主题，避免闪白/闪黑
+      // 首帧前同步主题与界面语言，避免闪白/闪黑与标题、界面语言闪错
+      // （语言缓存存的是解析结果 zh/en，来源见 src/lib/i18n/index.ts）
       (function () {
         try {
           var m = localStorage.getItem("dockpilot.theme") || "system";
           var dark = m === "dark" || (m === "system" && matchMedia("(prefers-color-scheme: dark)").matches);
           if (dark) document.documentElement.classList.add("dark");
+          var lang = localStorage.getItem("dockpilot.lang");
+          if (lang !== "zh" && lang !== "en") {
+            lang = (navigator.language || "").toLowerCase().indexOf("zh") === 0 ? "zh" : "en";
+          }
+          document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
+          document.title = lang === "zh" ? "DockPilot — Docker 桌面管理" : "DockPilot — Docker Desktop Manager";
         } catch (e) {}
       })();
     </script>
