@@ -12,6 +12,11 @@ import {
   timeAgo,
 } from "./format";
 import type { PortDto } from "../types/docker";
+import { setTestLang } from "./i18n";
+
+// 断言文案固定为中文：CI 宿主的 navigator.language 是 en-US，
+// 默认语言会解析成 en，必须显式锁定才能稳定断言
+setTestLang("zh");
 
 describe("firstLine", () => {
   it("多行消息取首行并去除首尾空白", () => {

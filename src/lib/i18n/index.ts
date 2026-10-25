@@ -124,3 +124,14 @@ export function useLang(): Lang {
     () => lang,
   );
 }
+
+/**
+ * 测试专用：绕过 applyLang 的副作用（localStorage/标题/后端上报）直接锁定
+ * 内存语言。生产代码不得调用——文案默认语言以「跟随系统解析结果」为准，
+ * 测试断言的期望文案固定为中文，须显式锁定，避免依赖宿主 navigator.language
+ * （GitHub runner 为 en-US，会让默认语言漂移成 en）。
+ */
+export function setTestLang(next: Lang) {
+  lang = next;
+  emit();
+}

@@ -355,6 +355,7 @@ const MSGS: &[(&str, [&str; 2])] = &[
     ("err.network_create_failed", ["创建网络失败: {err}", "Failed to create network: {err}"]),
     ("log.networkRemoved", ["删除网络：{name}", "Network removed: {name}"]),
     ("err.network_remove_failed", ["删除网络失败: {err}", "Failed to remove network: {err}"]),
+    ("st.builtInNoDelete", ["内置网络不可删除", "Built-in networks cannot be deleted"]),
     ("log.networkConnected", ["网络 {network} 接入容器 {container}", "Container {container} connected to network {network}"]),
     ("err.network_connect_failed", ["连接网络失败: {err}", "Failed to connect to the network: {err}"]),
     ("log.networkDisconnected", ["网络 {network} 断开容器 {container}{force}", "Container {container} disconnected from network {network}{force}"]),

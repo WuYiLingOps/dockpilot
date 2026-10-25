@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { friendlySshError, parseHostKeyChange } from "./ssh";
+import { setTestLang } from "./i18n";
+
+// 断言文案固定为中文（CI 宿主 navigator.language 为 en-US，见 format.test.ts）
+setTestLang("zh");
 
 describe("parseHostKeyChange", () => {
   const payload = {
