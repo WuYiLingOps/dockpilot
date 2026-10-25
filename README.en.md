@@ -32,35 +32,35 @@ DockPilot packs the same capabilities into a desktop app: a Tauri 2 single windo
 
 **System overview**
 
-![System overview](./screenshots/home.png)
+![System overview](./screenshots/home-en.png)
 
 **Containers**
 
-![Containers](./screenshots/containers.png)
+![Containers](./screenshots/containers-en.png)
 
 **Container details**
 
-![Container details](./screenshots/container-detail.png)
+![Container details](./screenshots/container-detail-en.png)
 
 **Images**
 
-![Images](./screenshots/images.png)
+![Images](./screenshots/images-en.png)
 
 **Compose**
 
-![Compose](./screenshots/compose.png)
+![Compose](./screenshots/compose-en.png)
 
 **Storage and networks**
 
-![Storage and networks](./screenshots/storage-networks.png)
+![Storage and networks](./screenshots/storage-networks-en.png)
 
 **Space cleanup**
 
-![Space cleanup](./screenshots/cleanup.png)
+![Space cleanup](./screenshots/cleanup-en.png)
 
 **Settings**
 
-![Settings](./screenshots/settings.png)
+![Settings](./screenshots/settings-en.png)
 
 **Connection manager**
 ![Connection manager](./screenshots/connection.png)
