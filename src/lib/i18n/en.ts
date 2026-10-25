@@ -911,6 +911,7 @@ export const en: Record<MsgKey, string> = {
   "upd.goDownload": "Go to download",
   "upd.downloadingShort": "Downloading…",
   "upd.checkNow": "Check for updates",
+  "about.appIconAlt": "DockPilot icon",
   "about.feedback": "Report an issue",
   "about.feedbackDesc": "Report bugs or suggest features",
   "about.sourceDesc": "Source code — stars are appreciated",

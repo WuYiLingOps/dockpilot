@@ -869,6 +869,7 @@ export const zh = {
   "upd.goDownload": "前往下载",
   "upd.downloadingShort": "下载中…",
   "upd.checkNow": "检查更新",
+  "about.appIconAlt": "DockPilot 图标",
   "about.feedback": "反馈问题",
   "about.feedbackDesc": "报告 Bug 或提出建议",
   "about.sourceDesc": "源代码，欢迎 Star",

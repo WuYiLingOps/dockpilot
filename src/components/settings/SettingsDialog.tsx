@@ -296,7 +296,7 @@ function AboutCard() {
       <div className="flex items-center gap-4 px-3 py-2">
         <img
           src={appIcon}
-          alt="DockPilot 图标"
+          alt={t("about.appIconAlt")}
           draggable={false}
           className="h-14 w-14 rounded-xl shadow-[var(--app-shadow)]"
         />
