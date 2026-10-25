@@ -24,42 +24,45 @@ pub fn compose_target_ref(
 ) -> Result<String, String> {
     let repository = repository.trim().trim_matches('/');
     if repository.is_empty() {
-        return Err("请填写仓库名（如 namespace/myapp）".into());
+        return Err(crate::i18n::t("err.repoNameRequired").into());
     }
     if repository.contains(char::is_whitespace) {
-        return Err(format!("仓库名不能包含空白: {repository}"));
+        return Err(crate::i18n::tr(
+            "err.repoNameWhitespace",
+            &[("repo", repository)],
+        ));
     }
     if repository.starts_with("http://") || repository.starts_with("https://") {
-        return Err("仓库名不需要协议前缀，填 namespace/myapp 即可".into());
+        return Err(crate::i18n::t("err.repoNameNoScheme").into());
     }
     if repository.contains(':') {
-        return Err("仓库名不应包含标签，请把标签填到单独的输入框".into());
+        return Err(crate::i18n::t("err.repoNameNoTag").into());
     }
     if repository != repository.to_lowercase() {
-        return Err("仓库名必须为小写（Docker 规范）".into());
+        return Err(crate::i18n::t("err.repoNameLowercase").into());
     }
     let tag = tag.trim();
     if tag.is_empty() || tag.contains(char::is_whitespace) || tag.contains('/') || tag.contains(':')
     {
-        return Err(format!("标签不合法: {tag}"));
+        return Err(crate::i18n::tr("err.tagInvalid", &[("tag", tag)]));
     }
     if registry_host.is_empty() {
-        return Err("仓库地址为空，请检查凭据配置".into());
+        return Err(crate::i18n::t("err.registryHostEmpty").into());
     }
     Ok(format!("{registry_host}/{repository}:{tag}"))
 }
 
-/// daemon 报错原文 → 中文可操作提示（纯函数，可单测）
+/// daemon 报错原文 → 可操作提示（纯函数，可单测；文案随界面语言）
 pub fn push_error_hint(raw: &str) -> Option<String> {
     let l = raw.to_lowercase();
     if l.contains("unauthorized") || l.contains("authentication required") || l.contains("401") {
-        Some("认证失败：请检查用户名与密码/令牌（Harbor 机器人账户需已启用且未过期；阿里云需使用登录账号或仓库固定密码）".into())
+        Some(crate::i18n::t("hint.pushAuthFailed").into())
     } else if l.contains("denied") || l.contains("requested access") {
-        Some("无推送权限：Harbor 需项目已存在且账号有写权限；阿里云需命名空间已创建".into())
+        Some(crate::i18n::t("hint.pushDenied").into())
     } else if l.contains("server gave http response to https client") {
-        Some("目标仓库为 HTTP 服务：需在 Docker daemon 的 daemon.json 中将仓库地址加入 insecure-registries 并重启 Docker（应用内\"设置-镜像加速\"旁可编辑 daemon.json）".into())
+        Some(crate::i18n::t("hint.pushInsecureRegistry").into())
     } else if l.contains("x509") || l.contains("certificate") || l.contains("tls handshake") {
-        Some("TLS 证书校验失败：自签名证书需在 daemon.json 的 insecure-registries 中加入仓库地址，或向系统导入 CA 证书".into())
+        Some(crate::i18n::t("hint.pushTlsFailed").into())
     } else if l.contains("connection refused")
         || l.contains("timeout")
         || l.contains("deadline exceeded")
@@ -67,7 +70,7 @@ pub fn push_error_hint(raw: &str) -> Option<String> {
         || l.contains("connection reset")
         || l.contains("unreachable")
     {
-        Some("无法连接仓库：检查网络与仓库地址；远程连接时需远端 Docker 宿主机可访问该仓库".into())
+        Some(crate::i18n::t("hint.pushUnreachable").into())
     } else {
         None
     }
@@ -76,8 +79,8 @@ pub fn push_error_hint(raw: &str) -> Option<String> {
 /// 拼装最终错误消息（原文 + 可操作提示）
 fn compose_push_error(raw: &str) -> String {
     match push_error_hint(raw) {
-        Some(hint) => format!("推送失败: {raw}\n提示：{hint}"),
-        None => format!("推送失败: {raw}"),
+        Some(hint) => crate::i18n::tr("log.pushFailedWithHint", &[("raw", raw), ("hint", &hint)]),
+        None => crate::i18n::tr("log.pushFailed", &[("raw", raw)]),
     }
 }
 
@@ -94,7 +97,7 @@ pub async fn push_image(
 ) -> CmdResult<String> {
     let image_ref = image_ref.trim().to_string();
     if image_ref.is_empty() {
-        return Err("请选择要推送的镜像".into());
+        return Err(crate::i18n::t("err.pushSelectionRequired").into());
     }
 
     // 凭据：档案 + 密钥（均在本地，随请求头传给 daemon，不落远端）
@@ -103,16 +106,19 @@ pub async fn push_image(
         .registries
         .iter()
         .find(|r| r.id == registry_id)
-        .ok_or_else(|| "仓库凭据不存在或已被删除".to_string())?
+        .ok_or_else(|| crate::i18n::t("err.pushCredentialMissing").to_string())?
         .clone();
     let dir = secret_store::config_dir(&app)?;
     let backend = SecretBackend::parse(&profile.secret_backend).unwrap_or(SecretBackend::Keyring);
     let password = secret_store::load_secret(&dir, &secret_key(&profile.id), backend)?
-        .ok_or_else(|| "未找到已保存的密码，请到设置中重新编辑该凭据".to_string())?;
+        .ok_or_else(|| crate::i18n::t("err.pushNoSavedPassword").to_string())?;
 
     let target = compose_target_ref(&profile.registry, &repository, &tag)?;
     let (target_repo, target_tag) = parse_image_reference(&target)?;
-    log::info!("推送镜像 {image_ref} → {target}");
+    log::info!(
+        "{}",
+        crate::i18n::tr("log.pushStart", &[("ref", &image_ref), ("target", &target)],)
+    );
 
     let d = docker().await?;
     // 本地引用 ≠ 目标引用时先打标签（同一镜像 ID，无额外存储）
@@ -125,7 +131,7 @@ pub async fn push_image(
             }),
         )
         .await
-        .map_err(|e| format!("自动打标签失败: {e}"))?;
+        .map_err(|e| crate::i18n::tr("err.autotag_failed", &[("err", &e.to_string())]))?;
     }
 
     let (sid, token) = app.state::<Streams>().register();
@@ -188,11 +194,23 @@ pub async fn push_image(
             last_err.as_deref().map(compose_push_error)
         };
         if cancelled {
-            log::info!("推送镜像 {target} 已取消");
+            log::info!(
+                "{}",
+                crate::i18n::tr("log.pushCancelled", &[("target", &target)])
+            );
         } else if let Some(err) = &last_err {
-            log::warn!("推送镜像 {target} 失败: {}", compose_push_error(err));
+            log::warn!(
+                "{}",
+                crate::i18n::tr(
+                    "log.pushFailedLog",
+                    &[("target", &target), ("err", &compose_push_error(err))],
+                )
+            );
         } else {
-            log::info!("推送镜像 {target} 完成");
+            log::info!(
+                "{}",
+                crate::i18n::tr("log.pushDone", &[("target", &target)])
+            );
         }
         let _ = on_progress.send(PushProgress {
             status: None,

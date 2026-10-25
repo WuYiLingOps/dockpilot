@@ -54,7 +54,7 @@ async fn send_with_retry(
         }
         let request = builder
             .try_clone()
-            .ok_or_else(|| format!("{what}: 请求体无法克隆以供重试"))?;
+            .ok_or_else(|| crate::i18n::tr("sync.reqCloneFailed", &[("what", what)]))?;
         match request.send().await {
             Ok(res) => return Ok(res),
             Err(e) => {
@@ -63,12 +63,15 @@ async fn send_with_retry(
         }
     }
     if last_err.contains("timed out") || last_err.contains("timeout") {
-        return Err(format!(
-            "{what}: 连接 github.com 超时（网络不稳定或被间歇性阻断，已自动重试 {attempts} 次）。\
-             可稍后重试；若本机需要代理访问 GitHub，请设置 HTTPS_PROXY 环境变量后重启应用"
+        return Err(crate::i18n::tr(
+            "sync.reqTimeout",
+            &[("what", what), ("attempts", &attempts.to_string())],
         ));
     }
-    Err(format!("{what}: {last_err}"))
+    Err(crate::i18n::tr(
+        "sync.reqFailed",
+        &[("what", what), ("err", &last_err)],
+    ))
 }
 
 /// 检查结果 DTO：字段 snake_case 直出，前端 types/appUpdate.ts 1:1 镜像（同 settings 约定）
@@ -289,7 +292,10 @@ fn version_gt(a: &str, b: &str) -> bool {
 #[tauri::command]
 pub async fn check_update() -> CmdResult<UpdateCheckDto> {
     let current = env!("CARGO_PKG_VERSION").to_string();
-    log::info!("检查应用更新（当前 v{current}）");
+    log::info!(
+        "{}",
+        crate::i18n::tr("log.updateCheckStart", &[("version", &current)])
+    );
 
     let res = send_with_retry(
         http_client()
@@ -298,31 +304,31 @@ pub async fn check_update() -> CmdResult<UpdateCheckDto> {
             .header("User-Agent", format!("dockpilot/{current}"))
             .header("Accept", "application/vnd.github+json"),
         3,
-        "检查应用更新",
+        "sync.whatUpdateCheck",
     )
     .await?;
 
     let status = res.status();
     if !status.is_success() {
         if status.as_u16() == 404 {
-            return Err("检查应用更新: 仓库尚未发布任何版本".into());
+            return Err(crate::i18n::t("err.updateNoReleases").into());
         }
         if status.as_u16() == 403 {
-            return Err(
-                "检查应用更新: 请求被 GitHub 拒绝（403，匿名请求可能已达限流上限，约 1 小时后恢复）"
-                    .into(),
-            );
+            return Err(crate::i18n::t("err.updateRateLimited").into());
         }
-        return Err(format!("检查应用更新: GitHub 返回 {status}"));
+        return Err(crate::i18n::tr(
+            "err.updateBadStatus",
+            &[("status", &status.to_string())],
+        ));
     }
 
     let release: GhRelease = res
         .json()
         .await
-        .map_err(|e| format!("检查应用更新: 解析响应失败: {}", err_chain(&e)))?;
+        .map_err(|e| crate::i18n::tr("err.updateParseFailed", &[("err", &err_chain(&e))]))?;
     let tag = release.tag_name.unwrap_or_default();
     if tag.trim().is_empty() {
-        return Err("检查应用更新: GitHub 返回的 release 缺少版本号".into());
+        return Err(crate::i18n::t("err.updateNoVersion").into());
     }
 
     let latest_version = tag.trim().trim_start_matches('v').to_string();
@@ -362,7 +368,7 @@ fn updates_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
     let dir = app
         .path()
         .app_cache_dir()
-        .map_err(|e| format!("获取缓存目录失败: {e}"))?
+        .map_err(|e| crate::i18n::tr("err.cacheDirFailed", &[("err", &e.to_string())]))?
         .join("updates");
     Ok(dir)
 }
@@ -391,9 +397,24 @@ fn cleanup_old_exe() {
     old.push(".old");
     let old = std::path::PathBuf::from(old);
     match std::fs::remove_file(&old) {
-        Ok(()) => log::info!("已清理便携版替换残留: {}", old.display()),
+        Ok(()) => log::info!(
+            "{}",
+            crate::i18n::tr(
+                "log.portableLeftoverCleaned",
+                &[("path", &old.display().to_string())]
+            )
+        ),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-        Err(e) => log::warn!("清理便携版替换残留失败 {}: {e}", old.display()),
+        Err(e) => log::warn!(
+            "{}",
+            crate::i18n::tr(
+                "log.portableLeftoverCleanFailed",
+                &[
+                    ("path", &old.display().to_string()),
+                    ("err", &e.to_string())
+                ],
+            )
+        ),
     }
 }
 
@@ -411,8 +432,23 @@ fn remove_dir_files(dir: &std::path::Path) {
         let path = entry.path();
         if path.is_file() {
             match std::fs::remove_file(&path) {
-                Ok(()) => log::info!("已清理更新目录残留: {}", path.display()),
-                Err(e) => log::warn!("清理更新目录失败 {}: {e}", path.display()),
+                Ok(()) => log::info!(
+                    "{}",
+                    crate::i18n::tr(
+                        "log.updatesDirCleaned",
+                        &[("path", &path.display().to_string())]
+                    )
+                ),
+                Err(e) => log::warn!(
+                    "{}",
+                    crate::i18n::tr(
+                        "log.updatesDirCleanFailed",
+                        &[
+                            ("path", &path.display().to_string()),
+                            ("err", &e.to_string())
+                        ],
+                    )
+                ),
             }
         }
     }
@@ -422,14 +458,14 @@ fn remove_dir_files(dir: &std::path::Path) {
 async fn clean_updates_dir(dir: &std::path::Path) -> CmdResult<()> {
     tokio::fs::create_dir_all(dir)
         .await
-        .map_err(|e| format!("创建更新目录失败: {e}"))?;
+        .map_err(|e| crate::i18n::tr("err.updatesDirCreateFailed", &[("err", &e.to_string())]))?;
     let mut entries = tokio::fs::read_dir(dir)
         .await
-        .map_err(|e| format!("读取更新目录失败: {e}"))?;
+        .map_err(|e| crate::i18n::tr("err.updatesDirReadFailed", &[("err", &e.to_string())]))?;
     while let Some(entry) = entries
         .next_entry()
         .await
-        .map_err(|e| format!("读取更新目录失败: {e}"))?
+        .map_err(|e| crate::i18n::tr("err.updatesDirReadFailed", &[("err", &e.to_string())]))?
     {
         let path = entry.path();
         if path.is_file() {
@@ -448,34 +484,39 @@ pub async fn download_app_update(
     on_progress: Channel<DownloadProgress>,
 ) -> CmdResult<String> {
     if !url.starts_with(DOWNLOAD_URL_PREFIX) {
-        return Err("下载更新: 非法的下载链接".into());
+        return Err(crate::i18n::t("err.downloadUrlInvalid").into());
     }
     let file_name = url.rsplit('/').next().unwrap_or_default().to_string();
     if file_name.is_empty() || file_name.contains("..") {
-        return Err("下载更新: 非法的安装包文件名".into());
+        return Err(crate::i18n::t("err.downloadFileNameInvalid").into());
     }
-    log::info!("开始下载更新安装包: {file_name}");
+    log::info!(
+        "{}",
+        crate::i18n::tr("log.downloadStart", &[("file", &file_name)])
+    );
 
     let dir = updates_dir(&app)?;
     clean_updates_dir(&dir).await?;
     let dest = dir.join(&file_name);
     let part = dir.join(format!("{file_name}.part"));
 
-    let res = dl_client()
-        .get(&url)
-        .send()
-        .await
-        .map_err(|e| format!("下载更新: {}", err_chain(&e)))?;
+    let res =
+        dl_client().get(&url).send().await.map_err(|e| {
+            crate::i18n::tr("err.downloadNetworkFailed", &[("err", &err_chain(&e))])
+        })?;
     let status = res.status();
     if !status.is_success() {
-        return Err(format!("下载更新: GitHub 返回 {status}"));
+        return Err(crate::i18n::tr(
+            "err.downloadBadStatus",
+            &[("status", &status.to_string())],
+        ));
     }
     let total = res.content_length().unwrap_or(0);
 
     use tokio::io::AsyncWriteExt;
     let mut file = tokio::fs::File::create(&part)
         .await
-        .map_err(|e| format!("下载更新: 创建临时文件失败: {e}"))?;
+        .map_err(|e| crate::i18n::tr("err.downloadTmpCreateFailed", &[("err", &e.to_string())]))?;
     let mut res = res;
     let mut downloaded: u64 = 0;
     let mut last_emit: u64 = 0;
@@ -484,7 +525,7 @@ pub async fn download_app_update(
             Ok(Some(chunk)) => {
                 if file.write_all(&chunk).await.is_err() {
                     let _ = tokio::fs::remove_file(&part).await;
-                    return Err("下载更新: 写入磁盘失败".into());
+                    return Err(crate::i18n::t("err.downloadWriteFailed").into());
                 }
                 downloaded += chunk.len() as u64;
                 // 每 128KB 推一次进度，避免高频 IPC 刷屏
@@ -496,21 +537,27 @@ pub async fn download_app_update(
             Ok(None) => break,
             Err(e) => {
                 let _ = tokio::fs::remove_file(&part).await;
-                return Err(format!("下载更新: {}", err_chain(&e)));
+                return Err(crate::i18n::tr(
+                    "err.downloadNetworkFailed",
+                    &[("err", &err_chain(&e))],
+                ));
             }
         }
     }
     if file.flush().await.is_err() {
         let _ = tokio::fs::remove_file(&part).await;
-        return Err("下载更新: 写入磁盘失败".into());
+        return Err(crate::i18n::t("err.downloadWriteFailed").into());
     }
     drop(file);
     // .part → 正式名：保证 open 命令拿到的必然是完整文件
     tokio::fs::rename(&part, &dest)
         .await
-        .map_err(|e| format!("下载更新: 落盘失败: {e}"))?;
+        .map_err(|e| crate::i18n::tr("err.downloadSaveFailed", &[("err", &e.to_string())]))?;
     let _ = on_progress.send(DownloadProgress { downloaded, total });
-    log::info!("更新安装包下载完成: {}", dest.display());
+    log::info!(
+        "{}",
+        crate::i18n::tr("log.downloadDone", &[("path", &dest.display().to_string())])
+    );
     Ok(dest.to_string_lossy().into_owned())
 }
 
@@ -522,13 +569,13 @@ fn validate_installer_path(
     let dir = updates_dir(app)?;
     let dir = dir
         .canonicalize()
-        .map_err(|e| format!("读取更新目录失败: {e}"))?;
+        .map_err(|e| crate::i18n::tr("err.updatesDirReadFailed", &[("err", &e.to_string())]))?;
     let target = std::path::PathBuf::from(path);
     let target = target
         .canonicalize()
-        .map_err(|_| "安装包不存在，可能已被清理，请重新下载".to_string())?;
+        .map_err(|_| crate::i18n::t("err.installerMissing").to_string())?;
     if !target.starts_with(&dir) {
-        return Err("非法的文件路径".into());
+        return Err(crate::i18n::t("err.invalidFilePath").into());
     }
     Ok(target)
 }
@@ -540,15 +587,21 @@ pub async fn open_downloaded_update(app: tauri::AppHandle, path: String) -> CmdR
     let target = validate_installer_path(&app, &path)?;
     if matches!(detect_distribution_form(), DistributionForm::Portable) {
         // 直接打开 exe 会被单实例机制送回当前进程，没有意义；给出替换指引
-        return Err(format!(
-            "该发行形态无系统安装器：新版本已下载到 {}，请手动用它替换当前程序文件后重新打开应用",
-            target.display()
+        return Err(crate::i18n::tr(
+            "diag.portableManualReplace",
+            &[("path", &target.display().to_string())],
         ));
     }
-    log::info!("拉起更新安装包: {}", target.display());
+    log::info!(
+        "{}",
+        crate::i18n::tr(
+            "log.installerLaunched",
+            &[("path", &target.display().to_string())]
+        )
+    );
     tauri_plugin_opener::OpenerExt::opener(&app)
         .open_path(target.to_string_lossy(), None::<&str>)
-        .map_err(|e| format!("打开安装包失败: {e}"))?;
+        .map_err(|e| crate::i18n::tr("err.openInstallerFailed", &[("err", &e.to_string())]))?;
     Ok(())
 }
 
@@ -561,7 +614,16 @@ pub async fn open_downloaded_update(app: tauri::AppHandle, path: String) -> CmdR
 pub async fn install_app_update(app: tauri::AppHandle, path: String) -> CmdResult<()> {
     let target = validate_installer_path(&app, &path)?;
     let form = detect_distribution_form();
-    log::info!("开始应用更新（{form:?}）: {}", target.display());
+    log::info!(
+        "{}",
+        crate::i18n::tr(
+            "log.installStart",
+            &[
+                ("form", &format!("{form:?}")),
+                ("path", &target.display().to_string()),
+            ],
+        )
+    );
 
     #[cfg(target_os = "windows")]
     {
@@ -572,10 +634,12 @@ pub async fn install_app_update(app: tauri::AppHandle, path: String) -> CmdResul
                     // NSIS 被动模式：只显示进度不询问，自动关闭运行中的应用，装完默认重启
                     .arg("/P")
                     .spawn()
-                    .map_err(|e| format!("启动安装程序失败: {e}"))?;
+                    .map_err(|e| {
+                        crate::i18n::tr("err.startInstallerFailed", &[("err", &e.to_string())])
+                    })?;
                 Ok(())
             }
-            _ => Err("无法识别当前发行形态，请前往下载页手动更新".into()),
+            _ => Err(crate::i18n::t("err.unknownForm").into()),
         }
     }
 
@@ -583,7 +647,7 @@ pub async fn install_app_update(app: tauri::AppHandle, path: String) -> CmdResul
     {
         match form {
             DistributionForm::Deb => install_deb_update(&app, &target).await,
-            _ => Err("发行形态与运行平台不匹配".into()),
+            _ => Err(crate::i18n::t("err.formPlatformMismatch").into()),
         }
     }
 }
@@ -600,31 +664,38 @@ async fn install_deb_update(app: &tauri::AppHandle, target: &std::path::Path) ->
             .output(),
     )
     .await
-    .map_err(|_| "安装超时，请检查 polkit 授权窗口状态".to_string())?
-    .map_err(|e| format!("无法启动 pkexec: {e}（请确认系统安装了 polkit）"))?;
+    .map_err(|_| crate::i18n::t("err.installTimeout").to_string())?
+    .map_err(|e| crate::i18n::tr("err.pkexecStartFailed", &[("err", &e.to_string())]))?;
 
     let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
     if stderr.contains("dismissed") || stderr.contains("cancelled") {
-        return Err("已取消安装授权".into());
+        return Err(crate::i18n::t("err.installAuthCancelled").into());
     }
     if !output.status.success() {
         let code = output.status.code().unwrap_or(-1);
         let line = stderr.lines().last().unwrap_or("").trim();
-        return Err(format!(
-            "安装更新失败: {}",
-            if line.is_empty() {
-                format!("dpkg 退出码 {code}")
-            } else {
-                line.to_string()
-            }
-        ));
+        let detail = if line.is_empty() {
+            crate::i18n::tr("diag.dpkgExitCode", &[("code", &code.to_string())])
+        } else {
+            line.to_string()
+        };
+        return Err(crate::i18n::tr("err.installFailed", &[("err", &detail)]));
     }
     // 安装完成即删更新包（此时文件已不被占用；Windows 侧因安装器锁定文件，
     // 由启动时的 cleanup_updates_dir 兜底）
     if let Err(e) = tokio::fs::remove_file(target).await {
-        log::warn!("清理已安装的更新包失败 {}: {e}", target.display());
+        log::warn!(
+            "{}",
+            crate::i18n::tr(
+                "log.installedPkgCleanFailed",
+                &[
+                    ("path", &target.display().to_string()),
+                    ("err", &e.to_string())
+                ],
+            )
+        );
     }
-    log::info!("更新安装完成，重启应用");
+    log::info!("{}", crate::i18n::t("log.installDone"));
     app.restart()
 }
 
@@ -634,7 +705,8 @@ async fn install_deb_update(app: &tauri::AppHandle, target: &std::path::Path) ->
 /// 改名后 current_exe() 的指向已有歧义。
 #[cfg(target_os = "windows")]
 async fn install_portable_update(target: &std::path::Path) -> CmdResult<()> {
-    let exe = std::env::current_exe().map_err(|e| format!("定位当前程序失败: {e}"))?;
+    let exe = std::env::current_exe()
+        .map_err(|e| crate::i18n::tr("err.currentExeFailed", &[("err", &e.to_string())]))?;
     let mut old = exe.clone().into_os_string();
     old.push(".old");
     let old = std::path::PathBuf::from(old);
@@ -643,13 +715,19 @@ async fn install_portable_update(target: &std::path::Path) -> CmdResult<()> {
 
     tokio::fs::rename(&exe, &old)
         .await
-        .map_err(|e| format!("旧程序改名失败: {e}（可能被安全软件占用，请手动更新）"))?;
+        .map_err(|e| crate::i18n::tr("err.renameOldExeFailed", &[("err", &e.to_string())]))?;
     if let Err(e) = move_into_place(target, &exe).await {
         // 回滚改名，保证旧程序无损
         let _ = tokio::fs::rename(&old, &exe).await;
         return Err(e);
     }
-    log::info!("便携版已替换为 {}，拉起新版本", exe.display());
+    log::info!(
+        "{}",
+        crate::i18n::tr(
+            "log.portableReplaced",
+            &[("path", &exe.display().to_string())]
+        )
+    );
     spawn_replacement(&exe)
 }
 
@@ -663,14 +741,16 @@ async fn move_into_place(src: &std::path::Path, dst: &std::path::Path) -> CmdRes
     }
     let tmp = dst.with_extension("update.tmp");
     if let Err(e) = tokio::fs::copy(src, &tmp).await {
-        return Err(format!(
-            "拷贝新版本失败: {e}（目标目录可能只读，请手动更新）"
+        return Err(crate::i18n::tr(
+            "err.copyNewVersionFailed",
+            &[("err", &e.to_string())],
         ));
     }
     if let Err(e) = tokio::fs::rename(&tmp, dst).await {
         let _ = tokio::fs::remove_file(&tmp).await;
-        return Err(format!(
-            "移入新版本失败: {e}（目标目录可能只读，请手动更新）"
+        return Err(crate::i18n::tr(
+            "err.moveNewVersionFailed",
+            &[("err", &e.to_string())],
         ));
     }
     let _ = tokio::fs::remove_file(src).await;
@@ -683,8 +763,8 @@ async fn move_into_place(src: &std::path::Path, dst: &std::path::Path) -> CmdRes
 fn spawn_replacement(bin: &std::path::Path) -> CmdResult<()> {
     std::process::Command::new(bin)
         .spawn()
-        .map_err(|e| format!("拉起新版本失败: {e}"))?;
-    log::info!("新版本已拉起，退出当前进程");
+        .map_err(|e| crate::i18n::tr("err.launchNewVersionFailed", &[("err", &e.to_string())]))?;
+    log::info!("{}", crate::i18n::t("log.newVersionLaunched"));
     std::process::exit(0)
 }
 

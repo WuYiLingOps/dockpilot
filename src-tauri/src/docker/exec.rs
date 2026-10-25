@@ -11,21 +11,28 @@ use super::conn::{docker, CmdResult};
 use super::state::{ExecSession, ExecSessions, Streams};
 
 /// 终端输出帧（经 Tauri Channel 推给前端 xterm）：
-/// data 为正常输出流；ended 表示会话结束，reason 为面向用户的中文原因
+/// data 为正常输出流；ended 表示会话结束，reason 为面向用户的文案（随界面语言），
+/// code 为稳定的原因代号（"start_failed" | "conn_switched" | "conn_lost" |
+/// "process_exited"），前端逻辑判断一律用 code，不比较 reason 文案
 #[derive(Debug, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ExecFrame {
     Data { text: String },
-    Ended { reason: String },
+    Ended { reason: String, code: &'static str },
 }
 
 /// 在容器内创建 exec 实例，返回 exec_id
 #[tauri::command]
 pub async fn exec_create(id: String, shell: Option<String>) -> CmdResult<String> {
     log::info!(
-        "容器 {} 打开终端（{}）",
-        super::short_id(&id),
-        shell.as_deref().unwrap_or("bash")
+        "{}",
+        crate::i18n::tr(
+            "log.terminalOpen",
+            &[
+                ("id", super::short_id(&id)),
+                ("shell", shell.as_deref().unwrap_or("bash")),
+            ],
+        )
     );
     let d = docker().await?;
     let cfg = CreateExecOptions::<String> {
@@ -46,7 +53,7 @@ pub async fn exec_create(id: String, shell: Option<String>) -> CmdResult<String>
     let res = d
         .create_exec(&id, cfg)
         .await
-        .map_err(|e| format!("创建终端会话失败: {e}"))?;
+        .map_err(|e| crate::i18n::tr("err.terminalCreateFailed", &[("err", &e.to_string())]))?;
     Ok(res.id)
 }
 
@@ -163,7 +170,8 @@ pub async fn exec_attach(
             Ok(r) => r,
             Err(e) => {
                 let _ = on_chunk.send(ExecFrame::Ended {
-                    reason: format!("终端启动失败: {e}"),
+                    reason: crate::i18n::tr("err.terminalStartFailed", &[("err", &e.to_string())]),
+                    code: "start_failed",
                 });
                 app.state::<Streams>().remove(&sid_task);
                 return;
@@ -189,8 +197,10 @@ pub async fn exec_attach(
                         _ = token.cancelled() => {
                             // 前端主动取消（关页/切连接）：补一帧结束通知，
                             // 发往已销毁的 channel 无副作用
-                            let _ = on_chunk
-                                .send(ExecFrame::Ended { reason: "连接已切换".into() });
+                            let _ = on_chunk.send(ExecFrame::Ended {
+                                reason: crate::i18n::t("err.connSwitched").into(),
+                                code: "conn_switched",
+                            });
                             break;
                         }
                         _ = ticker.tick() => {
@@ -216,7 +226,11 @@ pub async fn exec_attach(
                             }
                             Some(Err(e)) => {
                                 let _ = on_chunk.send(ExecFrame::Ended {
-                                    reason: format!("连接中断: {e}"),
+                                    reason: crate::i18n::tr(
+                                        "err.connInterrupted",
+                                        &[("err", &e.to_string())],
+                                    ),
+                                    code: "conn_lost",
                                 });
                                 break;
                             }
@@ -230,7 +244,8 @@ pub async fn exec_attach(
                                         on_chunk.send(ExecFrame::Data { text: pending });
                                 }
                                 let _ = on_chunk.send(ExecFrame::Ended {
-                                    reason: "进程已退出".into(),
+                                    reason: crate::i18n::t("err.processExited").into(),
+                                    code: "process_exited",
                                 });
                                 break;
                             }
@@ -262,12 +277,12 @@ pub async fn exec_input(
     let mut map = sessions.0.lock().await;
     let session = map
         .get_mut(&exec_id)
-        .ok_or_else(|| "终端会话不存在或已关闭".to_string())?;
+        .ok_or_else(|| crate::i18n::t("err.terminalSessionGone").to_string())?;
     session
         .input
         .write_all(data.as_bytes())
         .await
-        .map_err(|e| format!("写入终端失败: {e}"))?;
+        .map_err(|e| crate::i18n::tr("err.terminalWriteFailed", &[("err", &e.to_string())]))?;
     let _ = session.input.flush().await;
     Ok(())
 }
@@ -278,7 +293,7 @@ pub async fn exec_resize(exec_id: String, width: u16, height: u16) -> CmdResult<
     let d = docker().await?;
     d.resize_exec(&exec_id, ResizeExecOptions { width, height })
         .await
-        .map_err(|e| format!("调整终端尺寸失败: {e}"))
+        .map_err(|e| crate::i18n::tr("err.terminalResizeFailed", &[("err", &e.to_string())]))
 }
 
 #[cfg(test)]
@@ -367,8 +382,12 @@ mod tests {
         assert_eq!(data, r#"{"type":"data","text":"hi"}"#);
         let ended = serde_json::to_string(&ExecFrame::Ended {
             reason: "进程已退出".into(),
+            code: "process_exited",
         })
         .unwrap();
-        assert_eq!(ended, r#"{"type":"ended","reason":"进程已退出"}"#);
+        assert_eq!(
+            ended,
+            r#"{"type":"ended","reason":"进程已退出","code":"process_exited"}"#
+        );
     }
 }

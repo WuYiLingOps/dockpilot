@@ -52,7 +52,7 @@ pub fn install_panic_hook() {
         } else if let Some(s) = payload.downcast_ref::<String>() {
             s.clone()
         } else {
-            "未知 panic（payload 非字符串）".to_string()
+            crate::i18n::t("diag.unknownPanicPayload").to_string()
         };
         let report = PanicReport {
             version: env!("CARGO_PKG_VERSION").to_string(),
@@ -136,9 +136,15 @@ pub fn check_last_exit() {
     if let Some(crash) = &info {
         let summary = match (&crash.location, &crash.message) {
             (Some(loc), Some(msg)) => format!("{loc}: {msg}"),
-            _ => "未捕获到原因".to_string(),
+            _ => crate::i18n::t("diag.noCauseCaptured").to_string(),
         };
-        log::warn!("上次会话异常退出（{}）：{}", crash.kind, summary);
+        log::warn!(
+            "{}",
+            crate::i18n::tr(
+                "log.lastExitAbnormal",
+                &[("kind", &crash.kind), ("summary", &summary)],
+            )
+        );
     }
     if let Ok(mut guard) = LAST_CRASH.lock() {
         *guard = info;
@@ -200,7 +206,7 @@ pub fn get_log_dir() -> Result<String, String> {
     LOG_DIR
         .get()
         .map(|d| d.to_string_lossy().into_owned())
-        .ok_or_else(|| "日志目录未初始化".to_string())
+        .ok_or_else(|| crate::i18n::t("err.logDirNotInit").to_string())
 }
 
 /// setup 中调用：与日志插件 TargetKind::LogDir 指向同一目录
@@ -223,7 +229,9 @@ pub struct LogFileMeta {
 /// 当前会话文件 + 归档会话文件（Rotate 策略生成 dockpilot_<时间>.log），当前在前
 #[tauri::command]
 pub fn list_log_files() -> Result<Vec<LogFileMeta>, String> {
-    let dir = LOG_DIR.get().ok_or("日志目录未初始化")?;
+    let dir = LOG_DIR
+        .get()
+        .ok_or_else(|| crate::i18n::t("err.logDirNotInit").to_string())?;
     let mut current = None;
     let mut archived = Vec::new();
     for (path, name) in list_log_file_paths(dir) {
@@ -301,13 +309,15 @@ pub fn read_app_log(
     offset: Option<u64>,
     limit: Option<usize>,
 ) -> Result<LogPage, String> {
-    let dir = LOG_DIR.get().ok_or("日志目录未初始化")?;
+    let dir = LOG_DIR
+        .get()
+        .ok_or_else(|| crate::i18n::t("err.logDirNotInit").to_string())?;
     let name = file.unwrap_or_else(|| format!("{LOG_BASE}.log"));
     validate_log_name(&name)?;
     let path = dir.join(&name);
     let size = path
         .metadata()
-        .map_err(|e| format!("读取日志失败: {e}"))?
+        .map_err(|e| crate::i18n::tr("err.readLogFailed", &[("err", &e.to_string())]))?
         .len();
 
     let start = match offset {
@@ -344,7 +354,7 @@ fn validate_log_name(name: &str) -> Result<(), String> {
     if ok {
         Ok(())
     } else {
-        Err(format!("非法的日志文件名: {name}"))
+        Err(crate::i18n::tr("err.logFileNameInvalid", &[("name", name)]))
     }
 }
 
@@ -352,12 +362,13 @@ fn validate_log_name(name: &str) -> Result<(), String> {
 /// 以最后一个换行为界，半行留给下次）
 fn parse_log_range(path: &std::path::Path, start: u64) -> Result<(Vec<LogEntry>, u64), String> {
     use std::io::{Read, Seek, SeekFrom};
-    let mut file = std::fs::File::open(path).map_err(|e| format!("打开日志失败: {e}"))?;
+    let mut file = std::fs::File::open(path)
+        .map_err(|e| crate::i18n::tr("err.openLogFailed", &[("err", &e.to_string())]))?;
     file.seek(SeekFrom::Start(start))
-        .map_err(|e| format!("定位日志失败: {e}"))?;
+        .map_err(|e| crate::i18n::tr("err.seekLogFailed", &[("err", &e.to_string())]))?;
     let mut buf = Vec::new();
     file.read_to_end(&mut buf)
-        .map_err(|e| format!("读取日志失败: {e}"))?;
+        .map_err(|e| crate::i18n::tr("err.readLogFailed", &[("err", &e.to_string())]))?;
 
     let boundary = match buf.iter().rposition(|&b| b == b'\n') {
         Some(pos) => pos + 1,
@@ -462,7 +473,20 @@ pub fn set_debug_logging(app: tauri::AppHandle, enabled: bool) -> Result<(), Str
     s.debug_logging = enabled;
     crate::settings::save(&app, &s)?;
     apply_debug_logging(enabled);
-    log::info!("调试日志已{}", if enabled { "开启" } else { "关闭" });
+    log::info!(
+        "{}",
+        crate::i18n::tr(
+            "log.debugLoggingToggled",
+            &[(
+                "state",
+                if enabled {
+                    crate::i18n::t("diag.debugOn2")
+                } else {
+                    crate::i18n::t("diag.debugOff2")
+                },
+            )],
+        )
+    );
     Ok(())
 }
 
@@ -474,7 +498,9 @@ pub fn set_debug_logging(app: tauri::AppHandle, enabled: bool) -> Result<(), Str
 /// path 来自前端保存对话框的完整路径。
 #[tauri::command]
 pub fn export_diagnostics(path: String) -> Result<String, String> {
-    let dir = LOG_DIR.get().ok_or("日志目录未初始化")?;
+    let dir = LOG_DIR
+        .get()
+        .ok_or_else(|| crate::i18n::t("err.logDirNotInit").to_string())?;
     let path = if path.ends_with(".tar") {
         path
     } else {
@@ -490,7 +516,9 @@ pub fn export_diagnostics(path: String) -> Result<String, String> {
         "arch": std::env::consts::ARCH,
         "exported_at": iso8601_utc_now(),
         "log_dir": dir.to_string_lossy(),
-        "last_crash": *LAST_CRASH.lock().map_err(|_| "诊断状态读取失败".to_string())?,
+        "last_crash": *LAST_CRASH
+            .lock()
+            .map_err(|_| crate::i18n::t("err.diagStateReadFailed").to_string())?,
     });
     append_tar_entry(
         &mut builder,
@@ -502,8 +530,12 @@ pub fn export_diagnostics(path: String) -> Result<String, String> {
     let mut files = list_log_files()?;
     files.sort_by_key(|f| std::cmp::Reverse(f.modified.unwrap_or(0)));
     for file in files.iter().take(3) {
-        let bytes = std::fs::read(dir.join(&file.name))
-            .map_err(|e| format!("读取日志 {} 失败: {e}", file.name))?;
+        let bytes = std::fs::read(dir.join(&file.name)).map_err(|e| {
+            crate::i18n::tr(
+                "err.readLogFailed",
+                &[("err", &format!("{}: {}", file.name, e))],
+            )
+        })?;
         append_tar_entry(&mut builder, &format!("logs/{}", file.name), &bytes)?;
     }
 
@@ -513,9 +545,13 @@ pub fn export_diagnostics(path: String) -> Result<String, String> {
 
     let buf = builder
         .into_inner()
-        .map_err(|e| format!("打包诊断数据失败: {e}"))?;
-    std::fs::write(&path, buf).map_err(|e| format!("写入诊断包失败: {e}"))?;
-    log::info!("诊断包已导出: {path}");
+        .map_err(|e| crate::i18n::tr("err.logPackFailed", &[("err", &e.to_string())]))?;
+    std::fs::write(&path, buf)
+        .map_err(|e| crate::i18n::tr("err.diagWriteFailed", &[("err", &e.to_string())]))?;
+    log::info!(
+        "{}",
+        crate::i18n::tr("log.diagExported", &[("path", &path)])
+    );
     Ok(path)
 }
 
@@ -530,16 +566,25 @@ fn append_tar_entry(
     header.set_cksum();
     builder
         .append_data(&mut header, name, bytes)
-        .map_err(|e| format!("打包诊断数据失败: {e}"))
+        .map_err(|e| crate::i18n::tr("err.logPackFailed", &[("err", &e.to_string())]))
 }
 
 /// 查看器"导出"：把某个日志文件复制到用户选择的路径，返回字节数
 #[tauri::command]
 pub fn copy_log_file(file: String, dest: String) -> Result<u64, String> {
     validate_log_name(&file)?;
-    let dir = LOG_DIR.get().ok_or("日志目录未初始化")?;
-    let n = std::fs::copy(dir.join(&file), &dest).map_err(|e| format!("导出日志失败: {e}"))?;
-    log::info!("日志 {file} 已导出到 {dest}（{n} 字节）");
+    let dir = LOG_DIR
+        .get()
+        .ok_or_else(|| crate::i18n::t("err.logDirNotInit").to_string())?;
+    let n = std::fs::copy(dir.join(&file), &dest)
+        .map_err(|e| crate::i18n::tr("err.logCopyFailed", &[("err", &e.to_string())]))?;
+    log::info!(
+        "{}",
+        crate::i18n::tr(
+            "log.logCopied",
+            &[("file", &file), ("dest", &dest), ("n", &n.to_string())],
+        )
+    );
     Ok(n)
 }
 
@@ -563,7 +608,9 @@ pub fn cleanup_old_logs(keep_days: u32) -> Result<LogCleanupResult, String> {
     if keep_days == 0 {
         return Ok(result);
     }
-    let dir = LOG_DIR.get().ok_or("日志目录未初始化")?;
+    let dir = LOG_DIR
+        .get()
+        .ok_or_else(|| crate::i18n::t("err.logDirNotInit").to_string())?;
     let cutoff = std::time::SystemTime::now()
         - std::time::Duration::from_secs(u64::from(keep_days) * 86_400);
     for (path, name) in list_log_file_paths(dir) {
@@ -589,9 +636,14 @@ pub fn cleanup_app_logs(app: tauri::AppHandle) -> Result<LogCleanupResult, Strin
     let result = cleanup_old_logs(days)?;
     if result.removed > 0 {
         log::info!(
-            "日志清理：删除 {} 个过期日志文件（{}）",
-            result.removed,
-            crate::format_bytes(result.bytes)
+            "{}",
+            crate::i18n::tr(
+                "log.logCleanupDone",
+                &[
+                    ("n", &result.removed.to_string()),
+                    ("size", &crate::format_bytes(result.bytes)),
+                ],
+            )
         );
     }
     Ok(result)

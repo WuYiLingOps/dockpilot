@@ -23,13 +23,13 @@ const MAX_TRANSFER_BYTES: usize = 512 * 1024 * 1024;
 fn validate_container_path(p: &str) -> Result<(), String> {
     let p = p.trim();
     if p.is_empty() {
-        return Err("路径不能为空".into());
+        return Err(crate::i18n::t("err.pathEmpty").into());
     }
     if !p.starts_with('/') {
-        return Err(format!("请使用绝对路径（以 / 开头）：{p}"));
+        return Err(crate::i18n::tr("err.pathMustBeAbsolute", &[("path", p)]));
     }
     if p.split('/').any(|seg| seg == "..") {
-        return Err("路径不能包含 .. 分量".into());
+        return Err(crate::i18n::t("err.pathParentDir").into());
     }
     Ok(())
 }
@@ -87,11 +87,11 @@ async fn exec_collect(container: &str, argv: &[&str]) -> CmdResult<(i64, String)
     let created = d
         .create_exec(container, cfg)
         .await
-        .map_err(|e| format!("在容器内创建命令失败: {e}"))?;
+        .map_err(|e| crate::i18n::tr("err.containerCmdCreateFailed", &[("err", &e.to_string())]))?;
     let started = d
         .start_exec(&created.id, None)
         .await
-        .map_err(|e| format!("在容器内执行命令失败: {e}"))?;
+        .map_err(|e| crate::i18n::tr("err.containerCmdExecFailed", &[("err", &e.to_string())]))?;
     let mut out = String::new();
     if let StartExecResults::Attached { mut output, .. } = started {
         while let Some(item) = output.next().await {
@@ -102,14 +102,19 @@ async fn exec_collect(container: &str, argv: &[&str]) -> CmdResult<(i64, String)
                     | LogOutput::Console { message },
                 ) => out.push_str(&String::from_utf8_lossy(&message)),
                 Ok(LogOutput::StdIn { .. }) => {}
-                Err(e) => return Err(format!("容器内命令输出流出错: {e}")),
+                Err(e) => {
+                    return Err(crate::i18n::tr(
+                        "err.containerCmdStreamError",
+                        &[("err", &e.to_string())],
+                    ))
+                }
             }
         }
     }
     let inspect = d
         .inspect_exec(&created.id)
         .await
-        .map_err(|e| format!("查询容器内命令结果失败: {e}"))?;
+        .map_err(|e| crate::i18n::tr("err.containerCmdResultFailed", &[("err", &e.to_string())]))?;
     Ok((inspect.exit_code.unwrap_or(-1), out))
 }
 
@@ -125,19 +130,24 @@ pub async fn container_list_files(id: String, path: String) -> CmdResult<Vec<Fil
     };
     let (code, out) = exec_collect(&id, &["ls", "-la", &arg]).await?;
     if code != 0 {
-        return Err(format!("列目录失败（容器需在运行中）: {}", out.trim()));
+        return Err(crate::i18n::tr("err.listDirFailed", &[("err", out.trim())]));
     }
     Ok(parse_ls_la(&out))
 }
 
 /// 归档条目目标路径校验：拒绝绝对路径与 .. 分量（防解包穿越）
 fn safe_join(dest: &std::path::Path, rel: &std::path::Path) -> Result<std::path::PathBuf, String> {
-    let unsafe_path = rel.is_absolute()
+    // is_absolute 在 Windows 上对 "/etc/passwd"（无盘符）为 false，但 join 会产生
+    // 根锚定路径（当前盘符根）——同样是逃逸，须用 has_root() 一并拒绝
+    let unsafe_path = rel.has_root()
         || rel
             .components()
             .any(|c| matches!(c, std::path::Component::ParentDir));
     if unsafe_path {
-        return Err(format!("归档内出现不安全路径: {}", rel.display()));
+        return Err(crate::i18n::tr(
+            "err.unsafeArchivePath",
+            &[("path", &rel.display().to_string())],
+        ));
     }
     Ok(dest.join(rel))
 }
@@ -155,9 +165,15 @@ pub async fn container_download_file<R: tauri::Runtime>(
 ) -> CmdResult<String> {
     validate_container_path(&src)?;
     if dest.trim().is_empty() {
-        return Err("请先选择保存位置".into());
+        return Err(crate::i18n::t("err.chooseSaveLocation").into());
     }
-    log::info!("容器 {} 下载文件：{} → {}", super::short_id(&id), src, dest);
+    log::info!(
+        "{}",
+        crate::i18n::tr(
+            "log.fileDownloadStart",
+            &[("id", super::short_id(&id)), ("src", &src), ("dest", &dest),],
+        )
+    );
     let d = docker().await?;
     let (sid, token) = app.state::<Streams>().register();
     let sid_task = sid.clone();
@@ -189,7 +205,11 @@ pub async fn container_download_file<R: tauri::Runtime>(
                 item = stream.next() => match item {
                     Some(Ok(chunk)) => {
                         if buf.len() + chunk.len() > MAX_TRANSFER_BYTES {
-                            finish(Some("文件超过 512MB，暂不支持在应用内传输（可在终端中操作）".into()), false, buf.len());
+                            finish(
+                                Some(crate::i18n::t("err.fileTooLargeTransfer").into()),
+                                false,
+                                buf.len(),
+                            );
                             return;
                         }
                         buf.extend_from_slice(&chunk);
@@ -201,7 +221,11 @@ pub async fn container_download_file<R: tauri::Runtime>(
                         });
                     }
                     Some(Err(e)) => {
-                        finish(Some(format!("下载容器文件失败: {e}")), false, buf.len());
+                        finish(
+                            Some(crate::i18n::tr("err.downloadContainerFileFailed", &[("err", &e.to_string())])),
+                            false,
+                            buf.len(),
+                        );
                         return;
                     }
                     None => break,
@@ -215,7 +239,14 @@ pub async fn container_download_file<R: tauri::Runtime>(
         let entries = match archive.entries() {
             Ok(e) => e,
             Err(e) => {
-                finish(Some(format!("解析归档失败: {e}")), false, buf.len());
+                finish(
+                    Some(crate::i18n::tr(
+                        "err.archiveParseFailed",
+                        &[("err", &e.to_string())],
+                    )),
+                    false,
+                    buf.len(),
+                );
                 return;
             }
         };
@@ -224,14 +255,28 @@ pub async fn container_download_file<R: tauri::Runtime>(
             let mut entry = match entry {
                 Ok(e) => e,
                 Err(e) => {
-                    finish(Some(format!("解析归档失败: {e}")), false, buf.len());
+                    finish(
+                        Some(crate::i18n::tr(
+                            "err.archiveParseFailed",
+                            &[("err", &e.to_string())],
+                        )),
+                        false,
+                        buf.len(),
+                    );
                     return;
                 }
             };
             let rel = match entry.path() {
                 Ok(p) => p.into_owned(),
                 Err(e) => {
-                    finish(Some(format!("解析归档条目失败: {e}")), false, buf.len());
+                    finish(
+                        Some(crate::i18n::tr(
+                            "err.archiveEntryParseFailed",
+                            &[("err", &e.to_string())],
+                        )),
+                        false,
+                        buf.len(),
+                    );
                     return;
                 }
             };
@@ -251,7 +296,13 @@ pub async fn container_download_file<R: tauri::Runtime>(
             if entry.header().entry_type().is_dir() {
                 if let Err(e) = std::fs::create_dir_all(&target) {
                     finish(
-                        Some(format!("创建目录失败（{}）: {e}", target.display())),
+                        Some(crate::i18n::tr(
+                            "err.mkdirFailedAt",
+                            &[
+                                ("path", &target.display().to_string()),
+                                ("err", &e.to_string()),
+                            ],
+                        )),
                         false,
                         buf.len(),
                     );
@@ -260,7 +311,14 @@ pub async fn container_download_file<R: tauri::Runtime>(
             } else {
                 if let Some(parent) = target.parent() {
                     if let Err(e) = std::fs::create_dir_all(parent) {
-                        finish(Some(format!("创建目录失败: {e}")), false, buf.len());
+                        finish(
+                            Some(crate::i18n::tr(
+                                "err.mkdirFailed",
+                                &[("err", &e.to_string())],
+                            )),
+                            false,
+                            buf.len(),
+                        );
                         return;
                     }
                 }
@@ -268,7 +326,13 @@ pub async fn container_download_file<R: tauri::Runtime>(
                     Ok(mut file) => {
                         if let Err(e) = std::io::copy(&mut entry, &mut file) {
                             finish(
-                                Some(format!("写出文件失败（{}）: {e}", target.display())),
+                                Some(crate::i18n::tr(
+                                    "err.writeFileFailedAt",
+                                    &[
+                                        ("path", &target.display().to_string()),
+                                        ("err", &e.to_string()),
+                                    ],
+                                )),
                                 false,
                                 buf.len(),
                             );
@@ -277,7 +341,13 @@ pub async fn container_download_file<R: tauri::Runtime>(
                     }
                     Err(e) => {
                         finish(
-                            Some(format!("写入文件失败（{}）: {e}", target.display())),
+                            Some(crate::i18n::tr(
+                                "err.writeFileFailedAt2",
+                                &[
+                                    ("path", &target.display().to_string()),
+                                    ("err", &e.to_string()),
+                                ],
+                            )),
                             false,
                             buf.len(),
                         );
@@ -304,13 +374,18 @@ pub async fn container_upload_file<R: tauri::Runtime>(
 ) -> CmdResult<String> {
     validate_container_path(&container_dir)?;
     if local_paths.is_empty() {
-        return Err("请选择要上传的文件".into());
+        return Err(crate::i18n::t("err.chooseFilesToUpload").into());
     }
     log::info!(
-        "容器 {} 上传 {} 个文件到 {}",
-        super::short_id(&id),
-        local_paths.len(),
-        container_dir
+        "{}",
+        crate::i18n::tr(
+            "log.fileUploadStart",
+            &[
+                ("id", super::short_id(&id)),
+                ("n", &local_paths.len().to_string()),
+                ("dir", &container_dir),
+            ],
+        )
     );
 
     // 同步打包（本地磁盘 IO）；打包失败直接报错
@@ -321,28 +396,31 @@ pub async fn container_upload_file<R: tauri::Runtime>(
             let base = path
                 .file_name()
                 .map(|n| n.to_string_lossy().into_owned())
-                .ok_or_else(|| format!("路径缺少文件名: {p}"))?;
+                .ok_or_else(|| crate::i18n::tr("err.pathMissingFileName", &[("path", p)]))?;
             if path.is_dir() {
-                builder
-                    .append_dir_all(&base, path)
-                    .map_err(|e| format!("打包目录失败（{p}）: {e}"))?;
+                builder.append_dir_all(&base, path).map_err(|e| {
+                    crate::i18n::tr("err.packDirFailed", &[("path", p), ("err", &e.to_string())])
+                })?;
             } else if path.is_file() {
-                builder
-                    .append_path_with_name(path, &base)
-                    .map_err(|e| format!("打包文件失败（{p}）: {e}"))?;
+                builder.append_path_with_name(path, &base).map_err(|e| {
+                    crate::i18n::tr(
+                        "err.packFileFailed",
+                        &[("path", p), ("err", &e.to_string())],
+                    )
+                })?;
             } else {
-                return Err(format!("路径不存在: {p}"));
+                return Err(crate::i18n::tr("err.pathNotFound", &[("path", p)]));
             }
         }
         builder
             .into_inner()
-            .map_err(|e| format!("生成上传归档失败: {e}"))
+            .map_err(|e| crate::i18n::tr("err.uploadArchiveFailed", &[("err", &e.to_string())]))
     })
     .await
-    .map_err(|e| format!("打包任务失败: {e}"))??;
+    .map_err(|e| crate::i18n::tr("err.packTaskFailed", &[("err", &e.to_string())]))??;
 
     if packed.len() > MAX_TRANSFER_BYTES {
-        return Err("上传内容超过 512MB，暂不支持在应用内传输（可在终端中操作）".into());
+        return Err(crate::i18n::t("err.uploadTooLarge").into());
     }
 
     let d = docker().await?;
@@ -373,7 +451,13 @@ pub async fn container_upload_file<R: tauri::Runtime>(
                 bollard::body_full(packed.into()),
             ) => match res {
                 Ok(()) => finish(None, false),
-                Err(e) => finish(Some(format!("上传到容器失败: {e}")), false),
+                Err(e) => finish(
+                    Some(crate::i18n::tr(
+                        "err.uploadToContainerFailed",
+                        &[("err", &e.to_string())],
+                    )),
+                    false,
+                ),
             }
         }
     });
@@ -386,13 +470,25 @@ pub async fn container_upload_file<R: tauri::Runtime>(
 pub async fn container_delete_file(id: String, path: String, recursive: bool) -> CmdResult<()> {
     validate_container_path(&path)?;
     if path.trim() == "/" {
-        return Err("不能删除根目录".into());
+        return Err(crate::i18n::t("err.cannotDeleteRoot").into());
     }
     log::info!(
-        "容器 {} 删除文件：{}{}",
-        super::short_id(&id),
-        path,
-        if recursive { "（递归）" } else { "" }
+        "{}",
+        crate::i18n::tr(
+            "log.fileDelete",
+            &[
+                ("id", super::short_id(&id)),
+                ("path", &path),
+                (
+                    "recursive",
+                    if recursive {
+                        crate::i18n::t("log.recursiveSuffix")
+                    } else {
+                        ""
+                    }
+                ),
+            ]
+        )
     );
     // 以 - 开头的路径会被当成 rm 的选项，补 ./ 前缀规避
     let arg = if path.starts_with('-') {
@@ -407,7 +503,7 @@ pub async fn container_delete_file(id: String, path: String, recursive: bool) ->
     };
     let (code, out) = exec_collect(&id, &argv).await?;
     if code != 0 {
-        return Err(format!("删除失败: {}", out.trim()));
+        return Err(crate::i18n::tr("err.deleteFailed", &[("err", out.trim())]));
     }
     Ok(())
 }

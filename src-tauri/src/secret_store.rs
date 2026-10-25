@@ -55,7 +55,7 @@ const KEYRING_SERVICE: &str = "com.dockpilot.app";
 pub fn config_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     app.path()
         .app_config_dir()
-        .map_err(|e| format!("获取配置目录失败: {e}"))
+        .map_err(|e| crate::i18n::tr("err.config_dir_failed", &[("err", &e.to_string())]))
 }
 
 /// 保存密钥：优先钥匙串，失败自动落加密文件，返回实际落点
@@ -154,20 +154,24 @@ fn others(prefer: SecretBackend) -> (SecretBackend, SecretBackend) {
 // ---------------------------------------------------------------------------
 
 fn keyring_entry(key_id: &str) -> Result<keyring::Entry, String> {
-    keyring::Entry::new(KEYRING_SERVICE, key_id).map_err(|e| format!("创建钥匙串条目失败: {e}"))
+    keyring::Entry::new(KEYRING_SERVICE, key_id)
+        .map_err(|e| crate::i18n::tr("err.keyringEntryCreateFailed", &[("err", &e.to_string())]))
 }
 
 fn save_keyring(key_id: &str, secret: &str) -> Result<(), String> {
     keyring_entry(key_id)?
         .set_password(secret)
-        .map_err(|e| format!("写入钥匙串失败: {e}"))
+        .map_err(|e| crate::i18n::tr("err.keyringWriteFailed", &[("err", &e.to_string())]))
 }
 
 fn load_keyring(key_id: &str) -> Result<Option<String>, String> {
     match keyring_entry(key_id)?.get_password() {
         Ok(p) => Ok(Some(p)),
         Err(keyring::Error::NoEntry) => Ok(None),
-        Err(e) => Err(format!("读取钥匙串失败: {e}")),
+        Err(e) => Err(crate::i18n::tr(
+            "err.keyringReadFailed",
+            &[("err", &e.to_string())],
+        )),
     }
 }
 
@@ -177,7 +181,10 @@ fn delete_keyring(key_id: &str) -> Result<(), String> {
         // 条目不存在视为删除成功（Display 是平台相关英文文案，
         // 必须按类型匹配，delete_secret 的字符串兜底拦不住它）
         Err(keyring::Error::NoEntry) => Ok(()),
-        Err(e) => Err(format!("删除钥匙串条目失败: {e}")),
+        Err(e) => Err(crate::i18n::tr(
+            "err.keyringDeleteFailed",
+            &[("err", &e.to_string())],
+        )),
     }
 }
 
@@ -205,7 +212,8 @@ fn vault_path(dir: &Path) -> PathBuf {
 
 /// 密钥派生：machine-id + 固定盐 → SHA-256（32 字节 AES-256 key）
 fn derive_key() -> Result<[u8; 32], String> {
-    let uid = machine_uid::get().map_err(|e| format!("获取机器标识失败: {e}"))?;
+    let uid = machine_uid::get()
+        .map_err(|e| crate::i18n::tr("err.machineUidFailed", &[("err", &e.to_string())]))?;
     let mut hasher = Sha256::new();
     hasher.update(b"dockpilot-v1:secret-store:");
     hasher.update(uid.as_bytes());
@@ -215,23 +223,31 @@ fn derive_key() -> Result<[u8; 32], String> {
 fn load_vault(dir: &Path) -> Result<VaultFile, String> {
     let path = vault_path(dir);
     match std::fs::read(&path) {
-        Ok(bytes) => serde_json::from_slice(&bytes).map_err(|e| format!("解析密钥文件失败: {e}")),
+        Ok(bytes) => serde_json::from_slice(&bytes)
+            .map_err(|e| crate::i18n::tr("err.keyFileParseFailed", &[("err", &e.to_string())])),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(VaultFile {
             version: 1,
             entries: HashMap::new(),
         }),
-        Err(e) => Err(format!("读取密钥文件失败: {e}")),
+        Err(e) => Err(crate::i18n::tr(
+            "err.keyFileReadFailed",
+            &[("err", &e.to_string())],
+        )),
     }
 }
 
 /// tmp + rename 原子写（与 settings.json 同策略）
 fn save_vault(dir: &Path, vault: &VaultFile) -> Result<(), String> {
-    std::fs::create_dir_all(dir).map_err(|e| format!("创建配置目录失败: {e}"))?;
+    std::fs::create_dir_all(dir)
+        .map_err(|e| crate::i18n::tr("err.config_mkdir_failed", &[("err", &e.to_string())]))?;
     let path = vault_path(dir);
-    let text = serde_json::to_vec_pretty(vault).map_err(|e| format!("序列化密钥文件失败: {e}"))?;
+    let text = serde_json::to_vec_pretty(vault)
+        .map_err(|e| crate::i18n::tr("err.keyFileSerializeFailed", &[("err", &e.to_string())]))?;
     let tmp = path.with_extension("bin.tmp");
-    std::fs::write(&tmp, text).map_err(|e| format!("写入密钥文件失败: {e}"))?;
-    std::fs::rename(&tmp, &path).map_err(|e| format!("保存密钥文件失败: {e}"))?;
+    std::fs::write(&tmp, text)
+        .map_err(|e| crate::i18n::tr("err.keyFileWriteFailed", &[("err", &e.to_string())]))?;
+    std::fs::rename(&tmp, &path)
+        .map_err(|e| crate::i18n::tr("err.keyFileSaveFailed", &[("err", &e.to_string())]))?;
     Ok(())
 }
 
@@ -241,7 +257,7 @@ fn encrypt(secret: &str) -> Result<(String, String), String> {
     let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
     let ct = cipher
         .encrypt(&nonce, secret.as_bytes())
-        .map_err(|e| format!("加密失败: {e}"))?;
+        .map_err(|e| crate::i18n::tr("err.encryptFailed", &[("err", &e.to_string())]))?;
     Ok((B64.encode(nonce), B64.encode(ct)))
 }
 
@@ -250,15 +266,16 @@ fn decrypt(nonce_b64: &str, cipher_b64: &str) -> Result<String, String> {
     let cipher = Aes256Gcm::new((&key).into());
     let nonce_bytes = B64
         .decode(nonce_b64)
-        .map_err(|e| format!("解码 nonce 失败: {e}"))?;
+        .map_err(|e| crate::i18n::tr("err.nonceDecodeFailed", &[("err", &e.to_string())]))?;
     let nonce = Nonce::from_slice(&nonce_bytes);
     let ct = B64
         .decode(cipher_b64)
-        .map_err(|e| format!("解码密文失败: {e}"))?;
+        .map_err(|e| crate::i18n::tr("err.ciphertextDecodeFailed", &[("err", &e.to_string())]))?;
     let pt = cipher
         .decrypt(nonce, ct.as_ref())
-        .map_err(|_| "解密失败：密钥文件可能来自其他机器或系统重装，请重新录入密码".to_string())?;
-    String::from_utf8(pt).map_err(|e| format!("解密结果异常: {e}"))
+        .map_err(|_| crate::i18n::t("err.decryptWrongMachine").to_string())?;
+    String::from_utf8(pt)
+        .map_err(|e| crate::i18n::tr("err.decryptMalformed", &[("err", &e.to_string())]))
 }
 
 pub(crate) fn save_file(dir: &Path, key_id: &str, secret: &str) -> Result<(), String> {

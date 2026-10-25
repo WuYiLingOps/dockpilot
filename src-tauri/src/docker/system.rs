@@ -17,11 +17,11 @@ pub async fn docker_info() -> CmdResult<DockerInfoDto> {
     let v = d
         .version()
         .await
-        .map_err(|e| format!("获取 Docker 版本失败: {e}"))?;
+        .map_err(|e| crate::i18n::tr("err.dockerVersionFailed", &[("err", &e.to_string())]))?;
     let info = d
         .info()
         .await
-        .map_err(|e| format!("获取 Docker 信息失败: {e}"))?;
+        .map_err(|e| crate::i18n::tr("err.dockerInfoFailed", &[("err", &e.to_string())]))?;
 
     Ok(DockerInfoDto {
         version: v.version.unwrap_or_default(),
@@ -62,14 +62,14 @@ pub async fn host_stats() -> CmdResult<HostStatsDto> {
     let info = d
         .info()
         .await
-        .map_err(|e| format!("获取 Docker 信息失败: {e}"))?;
+        .map_err(|e| crate::i18n::tr("err.dockerInfoFailed", &[("err", &e.to_string())]))?;
     let list = d
         .list_containers(Some(ListContainersOptions::<String> {
             all: false,
             ..Default::default()
         }))
         .await
-        .map_err(|e| format!("获取运行中容器失败: {e}"))?;
+        .map_err(|e| crate::i18n::tr("err.runningContainersFailed", &[("err", &e.to_string())]))?;
 
     let samples = join_all(list.iter().map(|c| {
         let d = d.clone();
@@ -120,7 +120,7 @@ pub async fn system_df() -> CmdResult<SystemDfDto> {
     let df = d
         .df(None::<DataUsageOptions>)
         .await
-        .map_err(|e| format!("获取磁盘占用失败: {e}"))?;
+        .map_err(|e| crate::i18n::tr("err.disk_usage_generic", &[("err", &e.to_string())]))?;
 
     let mut out = SystemDfDto::default();
 
@@ -204,24 +204,29 @@ pub async fn inspect_docker(kind: String, id: String) -> CmdResult<serde_json::V
         "container" => d
             .inspect_container(&id, None::<bollard::container::InspectContainerOptions>)
             .await
-            .map_err(|e| format!("查看容器详情失败: {e}"))
+            .map_err(|e| crate::i18n::tr("err.inspectContainerFailed", &[("err", &e.to_string())]))
             .map(to_json)?,
         "image" => d
             .inspect_image(&id)
             .await
-            .map_err(|e| format!("查看镜像详情失败: {e}"))
+            .map_err(|e| crate::i18n::tr("err.inspectImageFailed", &[("err", &e.to_string())]))
             .map(to_json)?,
         "network" => d
             .inspect_network(&id, None::<bollard::network::InspectNetworkOptions<String>>)
             .await
-            .map_err(|e| format!("查看网络详情失败: {e}"))
+            .map_err(|e| crate::i18n::tr("err.inspectNetworkFailed", &[("err", &e.to_string())]))
             .map(to_json)?,
         "volume" => d
             .inspect_volume(&id)
             .await
-            .map_err(|e| format!("查看卷详情失败: {e}"))
+            .map_err(|e| crate::i18n::tr("err.inspectVolumeFailed", &[("err", &e.to_string())]))
             .map(to_json)?,
-        other => return Err(format!("未知 inspect 类型: {other}")),
+        other => {
+            return Err(crate::i18n::tr(
+                "err.unknownInspectKind",
+                &[("kind", other)],
+            ))
+        }
     };
     Ok(value)
 }

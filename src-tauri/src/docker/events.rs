@@ -122,21 +122,24 @@ fn notify_if_abnormal(
                 return;
             }
             (
-                "容器异常退出",
-                format!("容器 {name} 已退出（exit code {code}）"),
+                crate::i18n::t("notify.containerDied"),
+                crate::i18n::tr(
+                    "notify.containerDiedBody",
+                    &[("name", name), ("code", code)],
+                ),
             )
         }
         "oom" => (
-            "容器内存不足（OOM）",
-            format!("容器 {name} 因内存不足被终止，可尝试调大内存限制"),
+            crate::i18n::t("notify.containerOom"),
+            crate::i18n::tr("notify.containerOomBody", &[("name", name)]),
         ),
         "health_status" => {
             if attrs.get("health_status").map(|s| s.as_str()) != Some("unhealthy") {
                 return;
             }
             (
-                "容器健康检查失败",
-                format!("容器 {name} 连续未通过健康检查，已标记为 unhealthy"),
+                crate::i18n::t("notify.containerUnhealthy"),
+                crate::i18n::tr("notify.containerUnhealthyBody", &[("name", name)]),
             )
         }
         _ => return,

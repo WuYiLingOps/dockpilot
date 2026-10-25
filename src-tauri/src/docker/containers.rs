@@ -90,7 +90,7 @@ pub async fn list_containers(all: bool) -> CmdResult<Vec<ContainerDto>> {
             ..Default::default()
         }))
         .await
-        .map_err(|e| format!("获取容器列表失败: {e}"))?;
+        .map_err(|e| crate::i18n::tr("err.list_containers_failed", &[("err", &e.to_string())]))?;
     let mut dtos: Vec<ContainerDto> = list.iter().map(map_container).collect();
     sort_containers(&mut dtos);
     Ok(dtos)
@@ -103,7 +103,7 @@ pub async fn container_health(id: String) -> CmdResult<ContainerHealthDto> {
     let inspect = d
         .inspect_container(&id, None::<bollard::container::InspectContainerOptions>)
         .await
-        .map_err(|e| format!("查看容器失败: {e}"))?;
+        .map_err(|e| crate::i18n::tr("err.inspect_container_failed", &[("err", &e.to_string())]))?;
     let state_info = inspect.state.unwrap_or_default();
     let health = state_info.health.clone().unwrap_or_default();
     Ok(ContainerHealthDto {
@@ -147,7 +147,7 @@ pub async fn container_top(id: String, ps_args: Option<String>) -> CmdResult<Con
     let top = d
         .top_processes(&id, Some(TopOptions { ps_args: args }))
         .await
-        .map_err(|e| format!("查看容器进程失败: {e}"))?;
+        .map_err(|e| crate::i18n::tr("err.container_top_failed", &[("err", &e.to_string())]))?;
     Ok(ContainerTopDto {
         titles: top.titles.unwrap_or_default(),
         processes: top.processes.unwrap_or_default(),
@@ -158,10 +158,22 @@ pub async fn container_top(id: String, ps_args: Option<String>) -> CmdResult<Con
 #[tauri::command]
 pub async fn container_action(id: String, action: String, force: bool) -> CmdResult<()> {
     log::info!(
-        "容器 {} 执行 {}{}",
-        super::short_id(&id),
-        action,
-        if force { "（force）" } else { "" }
+        "{}",
+        crate::i18n::tr(
+            "log.containerAction",
+            &[
+                ("id", super::short_id(&id)),
+                ("action", &action),
+                (
+                    "force",
+                    if force {
+                        crate::i18n::t("log.forceSuffix")
+                    } else {
+                        ""
+                    }
+                ),
+            ]
+        )
     );
     let d = docker().await?;
     match action.as_str() {
@@ -193,11 +205,24 @@ pub async fn container_action(id: String, action: String, force: bool) -> CmdRes
             )
             .await
         }
-        _ => return Err(format!("未知操作: {action}")),
+        _ => return Err(crate::i18n::tr("err.unknownAction", &[("action", &action)])),
     }
     .map_err(|e| {
-        log::warn!("容器 {} {} 失败: {e}", super::short_id(&id), action);
-        format!("容器执行 {action} 失败: {e}")
+        log::warn!(
+            "{}",
+            crate::i18n::tr(
+                "log.containerActionFailed",
+                &[
+                    ("id", super::short_id(&id)),
+                    ("action", &action),
+                    ("err", &e.to_string()),
+                ],
+            )
+        );
+        crate::i18n::tr(
+            "err.containerActionFailed",
+            &[("action", &action), ("err", &e.to_string())],
+        )
     })
 }
 
@@ -206,7 +231,10 @@ pub async fn container_action(id: String, action: String, force: bool) -> CmdRes
 /// 已设置的 memory-swap，daemon 会报错原文透出。
 #[tauri::command]
 pub async fn update_container_config(id: String, spec: ContainerUpdateSpec) -> CmdResult<()> {
-    log::info!("容器 {} 更新配置", super::short_id(&id));
+    log::info!(
+        "{}",
+        crate::i18n::tr("log.containerUpdateConfig", &[("id", super::short_id(&id))])
+    );
     let (memory, nano_cpus) = match (spec.memory_mb, spec.cpus) {
         (None, None) => (None, None),
         (mb, cpu) => {
@@ -238,8 +266,14 @@ pub async fn update_container_config(id: String, spec: ContainerUpdateSpec) -> C
     )
     .await
     .map_err(|e| {
-        log::warn!("容器 {} 更新配置失败: {e}", super::short_id(&id));
-        format!("更新容器配置失败: {e}")
+        log::warn!(
+            "{}",
+            crate::i18n::tr(
+                "log.containerUpdateConfigFailed",
+                &[("id", super::short_id(&id)), ("err", &e.to_string())]
+            )
+        );
+        crate::i18n::tr("err.update_config_failed", &[("err", &e.to_string())])
     })
 }
 
@@ -254,7 +288,12 @@ fn map_restart_policy(s: &str) -> Result<Option<RestartPolicy>, String> {
         "always" => Some(RestartPolicyNameEnum::ALWAYS),
         "unless-stopped" => Some(RestartPolicyNameEnum::UNLESS_STOPPED),
         "on-failure" => Some(RestartPolicyNameEnum::ON_FAILURE),
-        other => return Err(format!("未知重启策略: {other}")),
+        other => {
+            return Err(crate::i18n::tr(
+                "err.unknownRestartPolicy",
+                &[("policy", other)],
+            ))
+        }
     };
     Ok(name.map(|name| RestartPolicy {
         name: Some(name),
@@ -311,7 +350,7 @@ fn parse_command(cmd: Option<&str>) -> Result<Option<Vec<String>>, String> {
     match cmd.map(str::trim) {
         Some(s) if !s.is_empty() => shell_words::split(s)
             .map(Some)
-            .map_err(|e| format!("命令解析失败: {e}")),
+            .map_err(|e| crate::i18n::tr("err.cmdParseFailed", &[("err", &e.to_string())])),
         _ => Ok(None),
     }
 }
@@ -324,12 +363,22 @@ fn build_resources(
     let memory = match memory_mb {
         None => None,
         Some(mb) if mb > 0 => Some(mb * 1024 * 1024),
-        Some(mb) => return Err(format!("内存上限必须是正数（收到 {mb} MB）")),
+        Some(mb) => {
+            return Err(crate::i18n::tr(
+                "err.memPositiveWith",
+                &[("v", &mb.to_string())],
+            ))
+        }
     };
     let nano = match cpus {
         None => None,
         Some(c) if c > 0.0 => Some((c * 1_000_000_000.0) as i64),
-        Some(c) => return Err(format!("CPU 核数必须是正数（收到 {c}）")),
+        Some(c) => {
+            return Err(crate::i18n::tr(
+                "err.cpuPositiveWith",
+                &[("v", &c.to_string())],
+            ))
+        }
     };
     Ok((memory, nano))
 }
@@ -338,21 +387,26 @@ fn build_resources(
 #[tauri::command]
 pub async fn create_container(spec: ContainerCreateSpec) -> CmdResult<String> {
     if spec.image.trim().is_empty() {
-        return Err("镜像不能为空".into());
+        return Err(crate::i18n::t("err.imageRequired").to_string());
     }
+    let name_display = spec
+        .name
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| crate::i18n::t("log.autoName").to_string());
     log::info!(
-        "创建容器：{}（镜像 {}）",
-        spec.name
-            .as_deref()
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .unwrap_or("<自动命名>"),
-        spec.image.trim()
+        "{}",
+        crate::i18n::tr(
+            "log.createContainer",
+            &[("name", &name_display), ("image", spec.image.trim())]
+        )
     );
     let policy = map_restart_policy(spec.restart_policy.as_deref().unwrap_or("no"))?;
     // daemon 会拒绝二者并存，这里提前给出可读错误
     if spec.auto_remove && policy.is_some() {
-        return Err("自动移除与重启策略不能同时启用".into());
+        return Err(crate::i18n::t("err.autoRemoveConflict").to_string());
     }
     let cmd = parse_command(spec.command.as_deref())?;
 
@@ -408,12 +462,12 @@ pub async fn create_container(spec: ContainerCreateSpec) -> CmdResult<String> {
             config,
         )
         .await
-        .map_err(|e| format!("创建容器失败: {e}"))?;
+        .map_err(|e| crate::i18n::tr("err.create_container_failed", &[("err", &e.to_string())]))?;
     let id = created.id;
 
     d.start_container(&id, None::<StartContainerOptions<String>>)
         .await
-        .map_err(|e| format!("容器已创建但启动失败（可在容器列表查看或删除）: {e}"))?;
+        .map_err(|e| crate::i18n::tr("err.create_start_failed", &[("err", &e.to_string())]))?;
     Ok(id)
 }
 
@@ -450,7 +504,7 @@ fn argv_to_command(args: &[String]) -> String {
 fn parse_memory_mb(s: &str) -> Result<i64, String> {
     let s = s.trim();
     if s.is_empty() {
-        return Err("内存值不能为空".into());
+        return Err(crate::i18n::t("err.memEmpty").to_string());
     }
     let (num, mult): (&str, i64) = match s.chars().last().map(|c| c.to_ascii_lowercase()) {
         Some('g') => (&s[..s.len() - 1], 1024),
@@ -469,7 +523,9 @@ fn parse_memory_mb(s: &str) -> Result<i64, String> {
     };
     if mult == 0 {
         // 字节 / KB：换算为 MB
-        let bytes: f64 = num.parse().map_err(|_| format!("内存值不合法: {s}"))?;
+        let bytes: f64 = num
+            .parse()
+            .map_err(|_| crate::i18n::tr("err.memInvalid", &[("v", s)]))?;
         let scale = if num.to_ascii_lowercase().ends_with('k') {
             1024.0
         } else {
@@ -477,14 +533,16 @@ fn parse_memory_mb(s: &str) -> Result<i64, String> {
         };
         let mb = (bytes * scale / (1024.0 * 1024.0)).ceil() as i64;
         if mb <= 0 {
-            return Err(format!("内存值太小（至少 1MB）: {s}"));
+            return Err(crate::i18n::tr("err.memTooSmall", &[("v", s)]));
         }
         return Ok(mb);
     }
-    let v: f64 = num.parse().map_err(|_| format!("内存值不合法: {s}"))?;
+    let v: f64 = num
+        .parse()
+        .map_err(|_| crate::i18n::tr("err.memInvalid", &[("v", s)]))?;
     let mb = (v * mult as f64).ceil() as i64;
     if mb <= 0 {
-        return Err(format!("内存值必须为正: {s}"));
+        return Err(crate::i18n::tr("err.memPositive", &[("v", s)]));
     }
     Ok(mb)
 }
@@ -500,19 +558,18 @@ fn parse_port_spec(s: &str) -> Result<PortMappingSpec, String> {
     let (host, container) = match parts.as_slice() {
         [h, c] => (*h, *c),
         [_ip, h, c] => (*h, *c),
-        [_c] => {
-            return Err(format!(
-                "端口映射 {s} 未指定宿主端口（DockPilot 需要显式端口，如 -p 8080:80）"
-            ))
-        }
-        _ => return Err(format!("端口映射不合法: {s}")),
+        [_c] => return Err(crate::i18n::tr("err.portMissingHost", &[("v", s)])),
+        _ => return Err(crate::i18n::tr("err.portInvalid", &[("v", s)])),
     };
     let host: u16 = host
         .parse()
-        .map_err(|_| format!("宿主端口不合法: {host}（{s}）"))?;
-    let container: u16 = container
-        .parse()
-        .map_err(|_| format!("容器端口不合法: {container}（{s}）"))?;
+        .map_err(|_| crate::i18n::tr("err.hostPortInvalid", &[("host", host), ("v", s)]))?;
+    let container: u16 = container.parse().map_err(|_| {
+        crate::i18n::tr(
+            "err.containerPortInvalid",
+            &[("container", container), ("v", s)],
+        )
+    })?;
     Ok(PortMappingSpec {
         host,
         container,
@@ -534,9 +591,7 @@ fn parse_volume_spec(s: &str) -> Result<VolumeMountSpec, String> {
             container: container.to_string(),
             read_only: mode.contains('r') && mode.contains('o'),
         }),
-        _ => Err(format!(
-            "卷挂载 {s} 缺少容器路径（DockPilot 需要 host:container 形式）"
-        )),
+        _ => Err(crate::i18n::tr("err.bindMissingContainer", &[("v", s)])),
     }
 }
 
@@ -547,9 +602,7 @@ fn parse_kv_spec(s: &str) -> Result<KeyValueSpec, String> {
             key: k.to_string(),
             value: v.to_string(),
         }),
-        None => Err(format!(
-            "环境变量/标签 {s} 缺少值（请写成 KEY=VALUE 形式，无法从当前环境透传）"
-        )),
+        None => Err(crate::i18n::tr("err.envMissingValue", &[("v", s)])),
     }
 }
 
@@ -599,9 +652,9 @@ fn parse_docker_run_tokens(tokens: &[String]) -> Result<ContainerCreateSpec, Str
             ($flag:expr) => {{
                 match inline_value.take() {
                     Some(v) => v,
-                    None => pending
-                        .pop_front()
-                        .ok_or_else(|| format!("选项 {} 缺少值", $flag))?,
+                    None => pending.pop_front().ok_or_else(|| {
+                        crate::i18n::tr("err.flagMissingValue", &[("flag", $flag)])
+                    })?,
                 }
             }};
         }
@@ -655,7 +708,9 @@ fn parse_docker_run_tokens(tokens: &[String]) -> Result<ContainerCreateSpec, Str
             }
             "--cpus" => {
                 let v = take_value!(&name);
-                let c: f64 = v.parse().map_err(|_| format!("CPU 核数不合法: {v}"))?;
+                let c: f64 = v
+                    .parse()
+                    .map_err(|_| crate::i18n::tr("err.cpuInvalid", &[("v", &v)]))?;
                 spec.cpus = Some(c);
             }
             "-w" | "--workdir" => spec.workdir = Some(take_value!(&name)),
@@ -666,16 +721,12 @@ fn parse_docker_run_tokens(tokens: &[String]) -> Result<ContainerCreateSpec, Str
             "-t" | "--tty" => spec.tty = true,
             "-i" | "--interactive" => spec.open_stdin = true,
             "-d" | "--detach" => {}
-            other => {
-                return Err(format!(
-                    "暂不支持的 docker run 选项: {other}（可手动删除后重新导入）"
-                ))
-            }
+            other => return Err(crate::i18n::tr("err.unsupportedFlag", &[("flag", other)])),
         }
     }
 
     if spec.image.is_empty() {
-        return Err("命令中未找到镜像名".into());
+        return Err(crate::i18n::t("err.imageNotFoundInCmd").to_string());
     }
     if !command_args.is_empty() {
         spec.command = Some(argv_to_command(&command_args));
@@ -686,9 +737,10 @@ fn parse_docker_run_tokens(tokens: &[String]) -> Result<ContainerCreateSpec, Str
 /// 解析 `docker run ...` 命令为创建规格，供前端回填创建弹窗
 #[tauri::command]
 pub fn parse_docker_run(cmd: String) -> CmdResult<ContainerCreateSpec> {
-    let tokens = shell_words::split(cmd.trim()).map_err(|e| format!("命令解析失败: {e}"))?;
+    let tokens = shell_words::split(cmd.trim())
+        .map_err(|e| crate::i18n::tr("err.cmdParseFailed", &[("err", &e.to_string())]))?;
     if tokens.is_empty() {
-        return Err("命令为空".into());
+        return Err(crate::i18n::t("err.emptyCommand").to_string());
     }
     // 允许整条粘贴（带 "docker run" 前缀）
     let tokens: Vec<String> = if tokens.len() >= 2 && tokens[0] == "docker" && tokens[1] == "run" {
@@ -740,7 +792,7 @@ pub async fn container_spec(id: String) -> CmdResult<ContainerCreateSpec> {
     let inspect = d
         .inspect_container(&id, None::<bollard::container::InspectContainerOptions>)
         .await
-        .map_err(|e| format!("查看容器失败: {e}"))?;
+        .map_err(|e| crate::i18n::tr("err.inspect_container_failed", &[("err", &e.to_string())]))?;
 
     let config = inspect.config.clone().unwrap_or_default();
     let host_config = inspect.host_config.clone().unwrap_or_default();

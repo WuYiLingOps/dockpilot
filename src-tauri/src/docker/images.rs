@@ -41,13 +41,13 @@ pub fn same_registry(a: &str, b: &str) -> bool {
     a == b
 }
 
-/// 拉取报错原文 → 中文可操作提示（纯函数，可单测）
+/// 拉取报错原文 → 可操作提示（纯函数，可单测；文案随界面语言）
 pub fn pull_error_hint(raw: &str) -> Option<String> {
     let l = raw.to_lowercase();
     if l.contains("toomanyrequests") || l.contains("pull rate limit") {
-        Some("Docker Hub 匿名拉取额度已用尽：可稍后再试，或在 daemon 侧登录账号提升额度（docker login）".into())
+        Some(crate::i18n::t("hint.pullRateLimit").into())
     } else if l.contains("unauthorized") || l.contains("authentication required") {
-        Some("需要认证：私有仓库镜像请在设置中添加对应仓库凭据（保存后拉取会自动匹配使用）".into())
+        Some(crate::i18n::t("hint.pullAuthRequired").into())
     } else {
         None
     }
@@ -78,9 +78,15 @@ async fn resolve_pull_credentials(
         .ok()
         .flatten()?;
     log::info!(
-        "拉取镜像 {image_ref} 使用凭据「{}」（{}）",
-        profile.name,
-        profile.registry
+        "{}",
+        crate::i18n::tr(
+            "log.pullWithCredential",
+            &[
+                ("ref", image_ref),
+                ("name", &profile.name),
+                ("registry", &profile.registry),
+            ],
+        )
     );
     Some(DockerCredentials {
         username: Some(profile.username),
@@ -100,7 +106,7 @@ pub async fn list_images() -> CmdResult<Vec<ImageDto>> {
             filters: HashMap::new(),
         }))
         .await
-        .map_err(|e| format!("获取镜像列表失败: {e}"))?;
+        .map_err(|e| crate::i18n::tr("err.list_images_failed", &[("err", &e.to_string())]))?;
     Ok(list
         .into_iter()
         .map(|i| ImageDto {
@@ -114,7 +120,23 @@ pub async fn list_images() -> CmdResult<Vec<ImageDto>> {
 
 #[tauri::command]
 pub async fn remove_image(id: String, force: bool) -> CmdResult<()> {
-    log::info!("删除镜像 {id}{}", if force { "（force）" } else { "" });
+    log::info!(
+        "{}",
+        crate::i18n::tr(
+            "log.imageRemoved",
+            &[
+                ("id", &id),
+                (
+                    "force",
+                    if force {
+                        crate::i18n::t("log.forceSuffix")
+                    } else {
+                        ""
+                    }
+                ),
+            ]
+        )
+    );
     let d = docker().await?;
     d.remove_image(
         &id,
@@ -125,7 +147,7 @@ pub async fn remove_image(id: String, force: bool) -> CmdResult<()> {
         None,
     )
     .await
-    .map_err(|e| format!("删除镜像失败: {e}"))?;
+    .map_err(|e| crate::i18n::tr("err.image_remove_failed", &[("err", &e.to_string())]))?;
     Ok(())
 }
 
@@ -134,7 +156,7 @@ pub async fn remove_image(id: String, force: bool) -> CmdResult<()> {
 fn normalize_pull_reference(image: &str) -> Result<String, String> {
     let image = image.trim();
     if image.is_empty() {
-        return Err("请填写镜像名称".into());
+        return Err(crate::i18n::t("err.imageNameRequired").into());
     }
     if image.contains('@') {
         return Ok(image.to_string());
@@ -151,7 +173,10 @@ pub async fn pull_image(
     on_progress: Channel<PullProgress>,
 ) -> CmdResult<String> {
     let image = normalize_pull_reference(&image)?;
-    log::info!("拉取镜像 {image}");
+    log::info!(
+        "{}",
+        crate::i18n::tr("log.imagePullStart", &[("ref", &image)])
+    );
     let d = docker().await?;
     // 私有仓库凭据：按镜像引用的 registry 域名自动匹配已保存凭据（无匹配则匿名拉取）
     let credentials = resolve_pull_credentials(&app, &image).await;
@@ -182,6 +207,7 @@ pub async fn pull_image(
                             id: info.id.clone(),
                             progress: info.progress.clone(),
                             error: None,
+                            cancelled: false,
                             done: false,
                         };
                         if on_progress.send(msg).is_err() {
@@ -199,15 +225,30 @@ pub async fn pull_image(
         }
 
         if let Some(err) = &last_err {
-            log::warn!("拉取镜像 {image_label} 失败: {err}");
+            log::warn!(
+                "{}",
+                crate::i18n::tr(
+                    "log.imagePullFailed",
+                    &[("ref", &image_label), ("err", err)],
+                )
+            );
         } else if cancelled {
-            log::info!("拉取镜像 {image_label} 已取消");
+            log::info!(
+                "{}",
+                crate::i18n::tr("log.imagePullCancelled", &[("ref", &image_label)])
+            );
         } else {
-            log::info!("拉取镜像 {image_label} 完成");
+            log::info!(
+                "{}",
+                crate::i18n::tr("log.imagePullDone", &[("ref", &image_label)])
+            );
         }
 
         let final_err = last_err.map(|e| match pull_error_hint(&e) {
-            Some(hint) => format!("{e}\n提示：{hint}"),
+            Some(hint) => format!(
+                "{e}{}",
+                crate::i18n::tr("log.hintPrefix", &[("hint", &hint)])
+            ),
             None => e,
         });
         let _ = on_progress.send(PullProgress {
@@ -215,6 +256,7 @@ pub async fn pull_image(
             id: None,
             progress: None,
             error: final_err,
+            cancelled,
             done: true,
         });
         app.state::<Streams>().remove(&sid_task);
@@ -234,7 +276,7 @@ pub async fn export_images(
 ) -> CmdResult<String> {
     let path = path.trim().to_string();
     if path.is_empty() {
-        return Err("导出路径不能为空".into());
+        return Err(crate::i18n::t("err.exportPathRequired").into());
     }
     let names: Vec<String> = refs
         .iter()
@@ -242,7 +284,7 @@ pub async fn export_images(
         .filter(|r| !r.is_empty())
         .collect();
     if names.is_empty() {
-        return Err("请选择要导出的镜像".into());
+        return Err(crate::i18n::t("err.exportSelectionRequired").into());
     }
 
     let d = docker().await?;
@@ -250,7 +292,13 @@ pub async fn export_images(
     let sid_task = sid.clone();
     let app = app.clone();
 
-    log::info!("导出镜像 ×{} → {path}", names.len());
+    log::info!(
+        "{}",
+        crate::i18n::tr(
+            "log.imageExportStart",
+            &[("n", &names.len().to_string()), ("path", &path),],
+        )
+    );
     tauri::async_runtime::spawn(async move {
         use tokio::io::AsyncWriteExt;
 
@@ -273,7 +321,10 @@ pub async fn export_images(
                         item = stream.next() => match item {
                             Some(Ok(chunk)) => {
                                 if let Err(e) = file.write_all(&chunk).await {
-                                    error = Some(format!("写入文件失败: {e}"));
+                                    error = Some(crate::i18n::tr(
+                                        "err.exportWriteFailed",
+                                        &[("err", &e.to_string())],
+                                    ));
                                     break;
                                 }
                                 written += chunk.len() as u64;
@@ -289,7 +340,10 @@ pub async fn export_images(
                                 }
                             }
                             Some(Err(e)) => {
-                                error = Some(format!("导出镜像失败: {e}"));
+                                error = Some(crate::i18n::tr(
+                                    "err.imageExportFailed",
+                                    &[("err", &e.to_string())],
+                                ));
                                 break;
                             }
                             None => break,
@@ -298,7 +352,12 @@ pub async fn export_images(
                 }
                 let _ = file.flush().await;
             }
-            Err(e) => error = Some(format!("创建文件失败: {e}")),
+            Err(e) => {
+                error = Some(crate::i18n::tr(
+                    "err.exportFileCreateFailed",
+                    &[("err", &e.to_string())],
+                ))
+            }
         }
 
         if error.is_some() || cancelled {
@@ -306,14 +365,26 @@ pub async fn export_images(
             let _ = tokio::fs::remove_file(&path).await;
         }
         if let Some(err) = &error {
-            log::warn!("导出镜像失败（{path}）: {err}");
+            log::warn!(
+                "{}",
+                crate::i18n::tr("log.imageExportFailed", &[("path", &path), ("err", err)],)
+            );
         } else if cancelled {
-            log::info!("导出镜像已取消（{path}）");
+            log::info!(
+                "{}",
+                crate::i18n::tr("log.imageExportCancelled", &[("path", &path)])
+            );
         } else {
             log::info!(
-                "导出镜像完成：{} 个镜像，{} → {path}",
-                names.len(),
-                crate::format_bytes(written)
+                "{}",
+                crate::i18n::tr(
+                    "log.imageExportDone",
+                    &[
+                        ("n", &names.len().to_string()),
+                        ("size", &crate::format_bytes(written)),
+                        ("path", &path),
+                    ],
+                )
             );
         }
         let _ = on_progress.send(ExportProgress {
@@ -337,9 +408,12 @@ pub async fn import_image(
 ) -> CmdResult<String> {
     let path = path.trim().to_string();
     if path.is_empty() {
-        return Err("导入路径不能为空".into());
+        return Err(crate::i18n::t("err.importPathRequired").into());
     }
-    log::info!("导入镜像：{path}");
+    log::info!(
+        "{}",
+        crate::i18n::tr("log.imageImportStart", &[("path", &path)])
+    );
 
     let d = docker().await?;
     let (sid, token) = app.state::<Streams>().register();
@@ -373,6 +447,7 @@ pub async fn import_image(
                                     id: info.id.clone(),
                                     progress: info.progress.clone(),
                                     error: None,
+                                    cancelled: false,
                                     done: false,
                                 };
                                 if on_progress.send(msg).is_err() {
@@ -380,7 +455,10 @@ pub async fn import_image(
                                 }
                             }
                             Some(Err(e)) => {
-                                error = Some(format!("导入镜像失败: {e}"));
+                                error = Some(crate::i18n::tr(
+                                    "err.imageImportFailed",
+                                    &[("err", &e.to_string())],
+                                ));
                                 break;
                             }
                             None => break,
@@ -388,26 +466,37 @@ pub async fn import_image(
                     }
                 }
             }
-            Err(e) => error = Some(format!("读取文件失败: {e}")),
+            Err(e) => {
+                error = Some(crate::i18n::tr(
+                    "err.importFileReadFailed",
+                    &[("err", &e.to_string())],
+                ))
+            }
         }
 
         if cancelled {
-            log::info!("导入镜像已取消（{path}）");
+            log::info!(
+                "{}",
+                crate::i18n::tr("log.imageImportCancelled", &[("path", &path)])
+            );
         } else if let Some(err) = &error {
-            log::warn!("导入镜像失败（{path}）: {err}");
+            log::warn!(
+                "{}",
+                crate::i18n::tr("log.imageImportFailed", &[("path", &path), ("err", err)],)
+            );
         } else {
-            log::info!("导入镜像完成：{path}");
+            log::info!(
+                "{}",
+                crate::i18n::tr("log.imageImportDone", &[("path", &path)])
+            );
         }
 
         let _ = on_progress.send(PullProgress {
             status: None,
             id: None,
             progress: None,
-            error: if cancelled {
-                Some("已取消".into())
-            } else {
-                error
-            },
+            error,
+            cancelled,
             done: true,
         });
         app.state::<Streams>().remove(&sid_task);
@@ -421,25 +510,25 @@ pub async fn import_image(
 pub(crate) fn parse_image_reference(reference: &str) -> Result<(String, String), String> {
     let r = reference.trim();
     if r.is_empty() {
-        return Err("请填写镜像引用".into());
+        return Err(crate::i18n::t("err.imageRefRequired").into());
     }
     if r.contains(char::is_whitespace) {
-        return Err(format!("镜像引用不能包含空白: {r}"));
+        return Err(crate::i18n::tr("err.imageRefWhitespace", &[("ref", r)]));
     }
     if r.contains('@') {
-        return Err("暂不支持以 digest（@sha256:…）引用打标签，请使用名称:标签".into());
+        return Err(crate::i18n::t("err.digestTagUnsupported").into());
     }
     let (repo, tag) = match r.rsplit_once(':') {
         Some((repo, tag)) if !tag.contains('/') => {
             if repo.is_empty() || tag.is_empty() {
-                return Err(format!("镜像引用不合法: {r}"));
+                return Err(crate::i18n::tr("err.imageRefInvalid", &[("ref", r)]));
             }
             (repo, tag)
         }
         _ => (r, "latest"),
     };
     if repo.is_empty() || tag.is_empty() {
-        return Err(format!("镜像引用不合法: {r}"));
+        return Err(crate::i18n::tr("err.imageRefInvalid", &[("ref", r)]));
     }
     Ok((repo.to_string(), tag.to_string()))
 }
@@ -447,12 +536,15 @@ pub(crate) fn parse_image_reference(reference: &str) -> Result<(String, String),
 /// 为镜像打新标签（docker tag），新旧标签指向同一镜像 ID
 #[tauri::command]
 pub async fn tag_image(id: String, reference: String) -> CmdResult<()> {
-    log::info!("镜像打标签：{id} → {reference}");
+    log::info!(
+        "{}",
+        crate::i18n::tr("log.imageTagged", &[("id", &id), ("ref", &reference)],)
+    );
     let (repo, tag) = parse_image_reference(&reference)?;
     let d = docker().await?;
     d.tag_image(&id, Some(TagImageOptions { repo, tag }))
         .await
-        .map_err(|e| format!("打标签失败: {e}"))?;
+        .map_err(|e| crate::i18n::tr("err.tag_failed", &[("err", &e.to_string())]))?;
     Ok(())
 }
 
@@ -460,10 +552,13 @@ pub async fn tag_image(id: String, reference: String) -> CmdResult<()> {
 /// 返回值表示镜像本体是否已被删除
 #[tauri::command]
 pub async fn untag_image(reference: String) -> CmdResult<bool> {
-    log::info!("移除镜像标签：{reference}");
+    log::info!(
+        "{}",
+        crate::i18n::tr("log.imageUntagged", &[("ref", &reference)])
+    );
     let reference = reference.trim();
     if reference.is_empty() {
-        return Err("镜像引用不能为空".into());
+        return Err(crate::i18n::t("err.untagRefRequired").into());
     }
     let d = docker().await?;
     let items = d
@@ -476,7 +571,7 @@ pub async fn untag_image(reference: String) -> CmdResult<bool> {
             None,
         )
         .await
-        .map_err(|e| format!("移除标签失败: {e}"))?;
+        .map_err(|e| crate::i18n::tr("err.untag_failed", &[("err", &e.to_string())]))?;
     Ok(items.iter().any(|i| i.deleted.is_some()))
 }
 

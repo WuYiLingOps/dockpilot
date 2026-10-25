@@ -56,7 +56,7 @@ async fn send_with_retry(
         }
         let request = builder
             .try_clone()
-            .ok_or_else(|| format!("{what}: 请求体无法克隆以供重试"))?;
+            .ok_or_else(|| crate::i18n::tr("sync.reqCloneFailed", &[("what", what)]))?;
         match request.send().await {
             Ok(res) => return Ok(res),
             Err(e) => {
@@ -65,12 +65,15 @@ async fn send_with_retry(
         }
     }
     if last_err.contains("timed out") || last_err.contains("timeout") {
-        return Err(format!(
-            "{what}: 连接 github.com 超时（网络不稳定或被间歇性阻断，已自动重试 {attempts} 次）。\
-             可稍后重试；若本机需要代理访问 GitHub，请设置 HTTPS_PROXY 环境变量后重启应用"
+        return Err(crate::i18n::tr(
+            "sync.reqTimeout",
+            &[("what", what), ("attempts", &attempts.to_string())],
         ));
     }
-    Err(format!("{what}: {last_err}"))
+    Err(crate::i18n::tr(
+        "sync.reqFailed",
+        &[("what", what), ("err", &last_err)],
+    ))
 }
 
 // ---------------------------------------------------------------------------
@@ -96,11 +99,9 @@ pub async fn github_device_flow_start(
     scope: Option<String>,
 ) -> Result<DeviceFlowStart, String> {
     if client_id.trim().is_empty() {
-        return Err(
-            "缺少 GitHub OAuth App 的 client_id（构建期 VITE_SYNC_GITHUB_CLIENT_ID）".into(),
-        );
+        return Err(crate::i18n::t("err.noClientId").into());
     }
-    log::info!("开始 GitHub 设备码授权");
+    log::info!("{}", crate::i18n::t("log.deviceFlowStart"));
 
     let res = send_with_retry(
         http_client()
@@ -113,14 +114,20 @@ pub async fn github_device_flow_start(
                 urlencode(scope.as_deref().unwrap_or(DEFAULT_SCOPE))
             )),
         3,
-        "请求 GitHub device code",
+        "sync.whatDeviceCodeReq",
     )
     .await?;
 
     let status = res.status();
-    let text = res.text().await.map_err(|e| format!("读取响应失败: {e}"))?;
+    let text = res
+        .text()
+        .await
+        .map_err(|e| crate::i18n::tr("err.responseReadFailed", &[("err", &e.to_string())]))?;
     if !status.is_success() {
-        return Err(format!("GitHub device flow 失败: {status} - {text}"));
+        return Err(crate::i18n::tr(
+            "err.deviceFlowFailed",
+            &[("status", &status.to_string()), ("text", &text)],
+        ));
     }
 
     #[derive(serde::Deserialize)]
@@ -132,9 +139,9 @@ pub async fn github_device_flow_start(
         interval: Option<u64>,
     }
     let raw: Raw = serde_json::from_str(&text).map_err(|_| {
-        format!(
-            "GitHub device flow 响应不是合法 JSON: {}",
-            &text[..text.len().min(200)]
+        crate::i18n::tr(
+            "err.deviceFlowBadJson",
+            &[("status", ""), ("text", &text[..text.len().min(200)])],
         )
     })?;
 
@@ -156,7 +163,7 @@ pub async fn github_device_flow_poll(
     device_code: String,
 ) -> Result<serde_json::Value, String> {
     if client_id.trim().is_empty() || device_code.trim().is_empty() {
-        return Err("缺少 client_id 或 device_code".into());
+        return Err(crate::i18n::t("err.deviceFlowParamsMissing").into());
     }
 
     let res = send_with_retry(
@@ -171,16 +178,22 @@ pub async fn github_device_flow_poll(
                 urlencode("urn:ietf:params:oauth:grant-type:device_code"),
             )),
         2,
-        "请求 GitHub token",
+        "sync.whatTokenReq",
     )
     .await?;
 
     let status = res.status();
-    let text = res.text().await.map_err(|e| format!("读取响应失败: {e}"))?;
+    let text = res
+        .text()
+        .await
+        .map_err(|e| crate::i18n::tr("err.responseReadFailed", &[("err", &e.to_string())]))?;
     let value: serde_json::Value = serde_json::from_str(&text).map_err(|_| {
-        format!(
-            "GitHub token 轮询响应不是合法 JSON: {status} - {}",
-            &text[..text.len().min(200)]
+        crate::i18n::tr(
+            "err.tokenPollBadJson",
+            &[
+                ("status", &status.to_string()),
+                ("text", &text[..text.len().min(200)]),
+            ],
         )
     })?;
 
@@ -189,7 +202,10 @@ pub async fn github_device_flow_poll(
         return Ok(value);
     }
     if !status.is_success() {
-        return Err(format!("GitHub token 轮询失败: {status} - {text}"));
+        return Err(crate::i18n::tr(
+            "err.tokenPollFailed",
+            &[("status", &status.to_string()), ("text", &text)],
+        ));
     }
     Ok(value)
 }
@@ -203,7 +219,7 @@ pub async fn github_device_flow_poll(
 fn normalize_gist_raw_url(raw_url: &str) -> Result<String, String> {
     const PREFIX: &str = "https://gist.githubusercontent.com/";
     if !raw_url.starts_with(PREFIX) {
-        return Err("Gist raw URL 必须是 https://gist.githubusercontent.com/ 前缀".into());
+        return Err(crate::i18n::t("err.gistRawUrlInvalid").into());
     }
     Ok(raw_url.to_string())
 }
@@ -220,16 +236,22 @@ pub async fn github_gist_raw_content(
             .header("Authorization", format!("Bearer {access_token}"))
             .header("Accept", "application/vnd.github.raw"),
         3,
-        "下载 Gist 完整内容",
+        "sync.whatGistDownload",
     )
     .await?;
 
     let status = res.status();
-    let text = res.text().await.map_err(|e| format!("读取响应失败: {e}"))?;
+    let text = res
+        .text()
+        .await
+        .map_err(|e| crate::i18n::tr("err.responseReadFailed", &[("err", &e.to_string())]))?;
     if !status.is_success() {
-        return Err(format!(
-            "下载 Gist 完整内容失败: {status} - {}",
-            &text[..text.len().min(200)]
+        return Err(crate::i18n::tr(
+            "err.gistDownloadFailed",
+            &[
+                ("status", &status.to_string()),
+                ("text", &text[..text.len().min(200)]),
+            ],
         ));
     }
     Ok(text)
@@ -242,7 +264,7 @@ pub async fn github_gist_raw_content(
 fn token_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
     app.path()
         .app_config_dir()
-        .map_err(|e| format!("获取配置目录失败: {e}"))
+        .map_err(|e| crate::i18n::tr("err.config_dir_failed", &[("err", &e.to_string())]))
 }
 
 /// 保存 token：优先钥匙串，失败自动落加密文件，返回实际落点（"keyring" | "file"）
@@ -250,7 +272,10 @@ fn token_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
 pub fn sync_save_github_token(app: tauri::AppHandle, token: String) -> Result<String, String> {
     let dir = token_dir(&app)?;
     let backend = secret_store::save_secret(&dir, TOKEN_KEY_ID, &token)?;
-    log::info!("GitHub 令牌已保存（{}）", backend.as_str());
+    log::info!(
+        "{}",
+        crate::i18n::tr("log.tokenSaved", &[("backend", backend.as_str())])
+    );
     Ok(backend.as_str().to_string())
 }
 
@@ -261,8 +286,8 @@ pub fn sync_load_github_token(
     backend: String,
 ) -> Result<Option<String>, String> {
     let dir = token_dir(&app)?;
-    let parsed =
-        SecretBackend::parse(&backend).ok_or_else(|| format!("未知的密钥存储位置: {backend}"))?;
+    let parsed = SecretBackend::parse(&backend)
+        .ok_or_else(|| crate::i18n::tr("err.unknownSecretBackend", &[("backend", &backend)]))?;
     secret_store::load_secret(&dir, TOKEN_KEY_ID, parsed)
 }
 
@@ -270,10 +295,10 @@ pub fn sync_load_github_token(
 #[tauri::command]
 pub fn sync_delete_github_token(app: tauri::AppHandle, backend: String) -> Result<(), String> {
     let dir = token_dir(&app)?;
-    let parsed =
-        SecretBackend::parse(&backend).ok_or_else(|| format!("未知的密钥存储位置: {backend}"))?;
+    let parsed = SecretBackend::parse(&backend)
+        .ok_or_else(|| crate::i18n::tr("err.unknownSecretBackend", &[("backend", &backend)]))?;
     secret_store::delete_secret(&dir, TOKEN_KEY_ID, parsed)?;
-    log::info!("GitHub 令牌已删除（断开云同步）");
+    log::info!("{}", crate::i18n::t("log.tokenDeleted"));
     Ok(())
 }
 
@@ -289,9 +314,11 @@ const SYNC_PASSWORD_KEY_ID: &str = "sync/sync_password";
 pub fn sync_save_sync_password(app: tauri::AppHandle, password: String) -> Result<String, String> {
     let dir = token_dir(&app)?;
     let backend =
-        secret_store::save_secret(&dir, SYNC_PASSWORD_KEY_ID, &password).map_err(|e| {
-            log::warn!("保存同步密码失败，本次解锁仅内存持有: {e}");
-            e
+        secret_store::save_secret(&dir, SYNC_PASSWORD_KEY_ID, &password).inspect_err(|e| {
+            log::warn!(
+                "{}",
+                crate::i18n::tr("log.syncPasswordSaveFailed", &[("err", &e.to_string())])
+            );
         })?;
     Ok(backend.as_str().to_string())
 }
@@ -303,11 +330,13 @@ pub fn sync_load_sync_password(
     backend: String,
 ) -> Result<Option<String>, String> {
     let dir = token_dir(&app)?;
-    let parsed =
-        SecretBackend::parse(&backend).ok_or_else(|| format!("未知的密钥存储位置: {backend}"))?;
-    secret_store::load_secret(&dir, SYNC_PASSWORD_KEY_ID, parsed).map_err(|e| {
-        log::warn!("读取记住的同步密码失败: {e}");
-        e
+    let parsed = SecretBackend::parse(&backend)
+        .ok_or_else(|| crate::i18n::tr("err.unknownSecretBackend", &[("backend", &backend)]))?;
+    secret_store::load_secret(&dir, SYNC_PASSWORD_KEY_ID, parsed).inspect_err(|e| {
+        log::warn!(
+            "{}",
+            crate::i18n::tr("log.syncPasswordReadFailed", &[("err", &e.to_string())])
+        );
     })
 }
 
@@ -315,10 +344,10 @@ pub fn sync_load_sync_password(
 #[tauri::command]
 pub fn sync_delete_sync_password(app: tauri::AppHandle, backend: String) -> Result<(), String> {
     let dir = token_dir(&app)?;
-    let parsed =
-        SecretBackend::parse(&backend).ok_or_else(|| format!("未知的密钥存储位置: {backend}"))?;
+    let parsed = SecretBackend::parse(&backend)
+        .ok_or_else(|| crate::i18n::tr("err.unknownSecretBackend", &[("backend", &backend)]))?;
     secret_store::delete_secret(&dir, SYNC_PASSWORD_KEY_ID, parsed)?;
-    log::info!("已清除记住的同步密码");
+    log::info!("{}", crate::i18n::t("log.syncPasswordCleared"));
     Ok(())
 }
 

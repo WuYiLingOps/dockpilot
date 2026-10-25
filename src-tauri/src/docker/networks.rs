@@ -24,7 +24,7 @@ pub async fn list_networks() -> CmdResult<Vec<NetworkDto>> {
     let list = d
         .list_networks(None::<ListNetworksOptions<String>>)
         .await
-        .map_err(|e| format!("获取网络列表失败: {e}"))?;
+        .map_err(|e| crate::i18n::tr("err.list_networks_failed", &[("err", &e.to_string())]))?;
 
     let mut networks: Vec<NetworkDto> = join_all(list.iter().map(|n| {
         let d = d.clone();
@@ -91,7 +91,7 @@ pub async fn list_networks() -> CmdResult<Vec<NetworkDto>> {
 #[tauri::command]
 pub async fn create_network(spec: NetworkCreateSpec) -> CmdResult<String> {
     let name = spec.name.trim();
-    validate_resource_name(name, "网络")?;
+    validate_resource_name(name, crate::i18n::t("label.network"))?;
 
     let driver = spec
         .driver
@@ -129,7 +129,10 @@ pub async fn create_network(spec: NetworkCreateSpec) -> CmdResult<String> {
         }]),
         options: None,
     });
-    log::info!("创建网络：{name}（驱动 {driver}）");
+    log::info!(
+        "{}",
+        crate::i18n::tr("log.networkCreated", &[("name", name), ("driver", &driver)])
+    );
 
     let d = docker().await?;
     let created = d
@@ -144,7 +147,7 @@ pub async fn create_network(spec: NetworkCreateSpec) -> CmdResult<String> {
             ..Default::default()
         })
         .await
-        .map_err(|e| format!("创建网络失败: {e}"))?;
+        .map_err(|e| crate::i18n::tr("err.network_create_failed", &[("err", &e.to_string())]))?;
     Ok(created.id)
 }
 
@@ -152,20 +155,29 @@ pub async fn create_network(spec: NetworkCreateSpec) -> CmdResult<String> {
 #[tauri::command]
 pub async fn remove_network(name: String) -> CmdResult<()> {
     if is_builtin(&name) {
-        return Err("内置网络不可删除".into());
+        return Err(crate::i18n::t("st.builtInNoDelete").into());
     }
-    log::info!("删除网络：{name}");
+    log::info!(
+        "{}",
+        crate::i18n::tr("log.networkRemoved", &[("name", &name)])
+    );
     let d = docker().await?;
     d.remove_network(&name)
         .await
-        .map_err(|e| format!("删除网络失败: {e}"))?;
+        .map_err(|e| crate::i18n::tr("err.network_remove_failed", &[("err", &e.to_string())]))?;
     Ok(())
 }
 
 /// 将容器接入网络（容器须存在；运行状态等由 daemon 校验）
 #[tauri::command]
 pub async fn connect_network(network: String, container: String) -> CmdResult<()> {
-    log::info!("网络 {network} 接入容器 {container}");
+    log::info!(
+        "{}",
+        crate::i18n::tr(
+            "log.networkConnected",
+            &[("network", &network), ("container", &container)]
+        )
+    );
     let d = docker().await?;
     d.connect_network(
         &network,
@@ -175,7 +187,7 @@ pub async fn connect_network(network: String, container: String) -> CmdResult<()
         },
     )
     .await
-    .map_err(|e| format!("连接网络失败: {e}"))?;
+    .map_err(|e| crate::i18n::tr("err.network_connect_failed", &[("err", &e.to_string())]))?;
     Ok(())
 }
 
@@ -183,8 +195,22 @@ pub async fn connect_network(network: String, container: String) -> CmdResult<()
 #[tauri::command]
 pub async fn disconnect_network(network: String, container: String, force: bool) -> CmdResult<()> {
     log::info!(
-        "网络 {network} 断开容器 {container}{}",
-        if force { "（force）" } else { "" }
+        "{}",
+        crate::i18n::tr(
+            "log.networkDisconnected",
+            &[
+                ("network", &network),
+                ("container", &container),
+                (
+                    "force",
+                    if force {
+                        crate::i18n::t("log.forceSuffix")
+                    } else {
+                        ""
+                    }
+                ),
+            ]
+        )
     );
     let d = docker().await?;
     d.disconnect_network(
@@ -195,6 +221,6 @@ pub async fn disconnect_network(network: String, container: String, force: bool)
         },
     )
     .await
-    .map_err(|e| format!("断开网络失败: {e}"))?;
+    .map_err(|e| crate::i18n::tr("err.network_disconnect_failed", &[("err", &e.to_string())]))?;
     Ok(())
 }

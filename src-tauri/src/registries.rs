@@ -92,7 +92,7 @@ fn find_profile<'a>(s: &'a AppSettings, id: &str) -> Result<&'a RegistryProfile,
     s.registries
         .iter()
         .find(|r| r.id == id)
-        .ok_or_else(|| "仓库凭据不存在或已被删除".to_string())
+        .ok_or_else(|| crate::i18n::t("err.registryNotFound").to_string())
 }
 
 #[tauri::command]
@@ -107,14 +107,14 @@ pub async fn save_registry(app: tauri::AppHandle, spec: RegistrySpec) -> CmdResu
     let kind = spec.kind.trim().to_string();
     let registry = settings::normalize_registry_host(&spec.registry);
     if registry.is_empty() {
-        return Err("请填写仓库地址".into());
+        return Err(crate::i18n::t("err.registryAddrRequired").into());
     }
     if registry.contains(char::is_whitespace) || registry.contains('/') {
-        return Err("仓库地址应为域名[:端口]，如 registry.cn-hangzhou.aliyuncs.com".into());
+        return Err(crate::i18n::t("err.registryAddrFormat").into());
     }
     let username = spec.username.trim().to_string();
     if username.is_empty() {
-        return Err("请填写用户名".into());
+        return Err(crate::i18n::t("err.registryUserRequired").into());
     }
 
     let mut s = settings::load(&app);
@@ -123,13 +123,22 @@ pub async fn save_registry(app: tauri::AppHandle, spec: RegistrySpec) -> CmdResu
         .as_deref()
         .and_then(|id| s.registries.iter().find(|r| r.id == id).cloned());
     log::info!(
-        "{}镜像仓库凭据：{}（{registry}）",
-        if existing.is_some() {
-            "更新"
-        } else {
-            "添加"
-        },
-        spec.name.trim()
+        "{}",
+        crate::i18n::tr(
+            "log.registrySaved",
+            &[
+                (
+                    "op",
+                    if existing.is_some() {
+                        crate::i18n::t("log.registryUpdate")
+                    } else {
+                        crate::i18n::t("log.registryAdd")
+                    }
+                ),
+                ("name", spec.name.trim()),
+                ("registry", &registry),
+            ]
+        )
     );
 
     let (mut profile, is_new) = match existing {
@@ -160,7 +169,7 @@ pub async fn save_registry(app: tauri::AppHandle, spec: RegistrySpec) -> CmdResu
         let backend = secret_store::save_secret(&dir, &secret_key(&profile.id), &password)?;
         profile.secret_backend = backend.as_str().to_string();
     } else if is_new {
-        return Err("请填写密码或访问令牌".into());
+        return Err(crate::i18n::t("err.registryPasswordRequired").into());
     }
 
     s.registries.retain(|r| r.id != profile.id);
@@ -174,14 +183,20 @@ pub async fn save_registry(app: tauri::AppHandle, spec: RegistrySpec) -> CmdResu
 pub async fn remove_registry(app: tauri::AppHandle, id: String) -> CmdResult<()> {
     let mut s = settings::load(&app);
     let profile = find_profile(&s, &id)?.clone();
-    log::info!("删除镜像仓库凭据：{}", profile.name);
+    log::info!(
+        "{}",
+        crate::i18n::tr("log.registryDeleted", &[("name", &profile.name)])
+    );
     s.registries.retain(|r| r.id != id);
     settings::save(&app, &s)?;
 
     let dir = secret_store::config_dir(&app)?;
     let backend = SecretBackend::parse(&profile.secret_backend).unwrap_or(SecretBackend::Keyring);
     if let Err(e) = secret_store::delete_secret(&dir, &secret_key(&id), backend) {
-        return Err(format!("已删除仓库配置，但清理密钥失败: {e}"));
+        return Err(crate::i18n::tr(
+            "err.registryKeyCleanupFailed",
+            &[("err", &e.to_string())],
+        ));
     }
     Ok(())
 }
@@ -199,27 +214,46 @@ pub async fn test_registry(
     let dir = secret_store::config_dir(&app)?;
     let backend = SecretBackend::parse(&profile.secret_backend).unwrap_or(SecretBackend::Keyring);
     let password = secret_store::load_secret(&dir, &secret_key(&id), backend)?
-        .ok_or_else(|| "未找到已保存的密码，请重新编辑并保存凭据".to_string())?;
+        .ok_or_else(|| crate::i18n::t("err.registryNoSavedPassword").to_string())?;
 
     // 未显式指定时使用凭据档案中保存的开关
     let skip_tls = skip_tls_verify.unwrap_or(profile.skip_tls_verify);
     let result = probe_registry(&profile.registry, &profile.username, &password, skip_tls).await;
     if result.ok {
         log::info!(
-            "测试仓库「{}」成功：{} ms{}",
-            profile.name,
-            result.latency_ms,
-            if result.via_http {
-                "（HTTP 回退）"
-            } else {
-                ""
-            }
+            "{}",
+            crate::i18n::tr(
+                "log.registryTestOk",
+                &[
+                    ("name", &profile.name),
+                    ("ms", &result.latency_ms.to_string()),
+                    (
+                        "http",
+                        if result.via_http {
+                            crate::i18n::t("log.registryHttpFallback")
+                        } else {
+                            ""
+                        }
+                    ),
+                ]
+            )
         );
     } else {
         log::warn!(
-            "测试仓库「{}」失败：{}",
-            profile.name,
-            result.error.as_deref().unwrap_or("未知错误")
+            "{}",
+            crate::i18n::tr(
+                "log.registryTestFailed",
+                &[
+                    ("name", &profile.name),
+                    (
+                        "err",
+                        result
+                            .error
+                            .as_deref()
+                            .unwrap_or_else(|| crate::i18n::t("err.unknown"))
+                    ),
+                ]
+            )
         );
     }
     Ok(result)
@@ -241,7 +275,10 @@ async fn probe_registry(
         latency_ms: start.elapsed().as_millis() as u64,
         error: result.err().map(|e| {
             if let Some(hint) = crate::docker::push::push_error_hint(&e) {
-                format!("{e}\n提示：{hint}")
+                format!(
+                    "{e}{}",
+                    crate::i18n::tr("log.hintPrefix", &[("hint", &hint)])
+                )
             } else {
                 e
             }
@@ -251,14 +288,16 @@ async fn probe_registry(
 }
 
 /// 传输层失败（连接不上/TLS 异常）错误的前缀；据此决定是否回退 HTTP 重试
-const TRANSPORT_ERR_PREFIX: &str = "连接仓库失败";
+fn transport_err_prefix() -> String {
+    crate::i18n::t("err.registryTransport").to_string()
+}
 
 fn build_client(skip_tls_verify: bool) -> Result<reqwest::Client, String> {
     reqwest::Client::builder()
         .danger_accept_invalid_certs(skip_tls_verify)
         .timeout(std::time::Duration::from_secs(8))
         .build()
-        .map_err(|e| format!("创建 HTTP 客户端失败: {e}"))
+        .map_err(|e| crate::i18n::tr("err.httpClientCreateFailed", &[("err", &e.to_string())]))
 }
 
 async fn for_https_then_http(
@@ -276,7 +315,7 @@ async fn for_https_then_http(
             Err(e) => {
                 last_err = e;
                 // 仅传输层错误才值得再试 HTTP；认证失败等应用层错误直接返回
-                if !last_err.starts_with(TRANSPORT_ERR_PREFIX) {
+                if !last_err.starts_with(&transport_err_prefix()) {
                     return (Err(last_err), false);
                 }
             }
@@ -296,7 +335,7 @@ async fn probe_base(
         .get(format!("{base}/v2/"))
         .send()
         .await
-        .map_err(|e| format!("连接仓库失败: {e}"))?;
+        .map_err(|e| crate::i18n::tr("err.registryProbeFailed", &[("err", &e.to_string())]))?;
 
     match resp.status() {
         reqwest::StatusCode::OK => Ok(()),
@@ -309,7 +348,10 @@ async fn probe_base(
                 .to_string();
             verify_with_challenge(&client, base, username, password, &www_auth).await
         }
-        status => Err(format!("仓库响应异常: HTTP {status}")),
+        status => Err(crate::i18n::tr(
+            "err.registryBadStatus",
+            &[("status", &status.to_string())],
+        )),
     }
 }
 
@@ -323,7 +365,8 @@ async fn verify_with_challenge(
 ) -> Result<(), String> {
     if let Some(realm) = parse_challenge_param(www_auth, "realm") {
         // Bearer token 流（阿里云 ACR / Harbor / distribution 均此流程）
-        let mut url = reqwest::Url::parse(&realm).map_err(|e| format!("认证服务地址异常: {e}"))?;
+        let mut url = reqwest::Url::parse(&realm)
+            .map_err(|e| crate::i18n::tr("err.authRealmInvalid", &[("err", &e.to_string())]))?;
         if let Some(service) = parse_challenge_param(www_auth, "service") {
             url.query_pairs_mut().append_pair("service", &service);
         }
@@ -334,13 +377,16 @@ async fn verify_with_challenge(
             .basic_auth(username, Some(password))
             .send()
             .await
-            .map_err(|e| format!("请求认证服务失败: {e}"))?;
+            .map_err(|e| crate::i18n::tr("err.authRequestFailed", &[("err", &e.to_string())]))?;
 
         if token_resp.status() == reqwest::StatusCode::UNAUTHORIZED {
-            return Err("认证失败：用户名或密码不正确（HTTP 401）".into());
+            return Err(crate::i18n::t("err.authUnauthorized401").into());
         }
         if !token_resp.status().is_success() {
-            return Err(format!("认证服务响应异常: HTTP {}", token_resp.status()));
+            return Err(crate::i18n::tr(
+                "err.authBadStatus",
+                &[("status", &token_resp.status().to_string())],
+            ));
         }
         #[derive(Deserialize)]
         struct TokenResp {
@@ -352,24 +398,24 @@ async fn verify_with_challenge(
         let tr: TokenResp = token_resp
             .json()
             .await
-            .map_err(|e| format!("解析认证响应失败: {e}"))?;
+            .map_err(|e| crate::i18n::tr("err.authParseFailed", &[("err", &e.to_string())]))?;
         let token = tr
             .token
             .or(tr.access_token)
-            .ok_or_else(|| "认证服务未返回令牌".to_string())?;
+            .ok_or_else(|| crate::i18n::t("err.authNoToken").to_string())?;
 
         let ping = client
             .get(format!("{base}/v2/"))
             .bearer_auth(&token)
             .send()
             .await
-            .map_err(|e| format!("连接仓库失败: {e}"))?;
+            .map_err(|e| crate::i18n::tr("err.registryProbeFailed", &[("err", &e.to_string())]))?;
         if ping.status() == reqwest::StatusCode::OK {
             return Ok(());
         }
-        return Err(format!(
-            "认证未通过（HTTP {}）：请检查用户名与密码/令牌",
-            ping.status()
+        return Err(crate::i18n::tr(
+            "err.registryAuthRejected",
+            &[("status", &ping.status().to_string())],
         ));
     }
 
@@ -379,11 +425,14 @@ async fn verify_with_challenge(
         .basic_auth(username, Some(password))
         .send()
         .await
-        .map_err(|e| format!("连接仓库失败: {e}"))?;
+        .map_err(|e| crate::i18n::tr("err.registryProbeFailed", &[("err", &e.to_string())]))?;
     match resp.status() {
         reqwest::StatusCode::OK => Ok(()),
-        reqwest::StatusCode::UNAUTHORIZED => Err("认证失败：用户名或密码不正确（HTTP 401）".into()),
-        status => Err(format!("仓库响应异常: HTTP {status}")),
+        reqwest::StatusCode::UNAUTHORIZED => Err(crate::i18n::t("err.authUnauthorized401").into()),
+        status => Err(crate::i18n::tr(
+            "err.registryBadStatus",
+            &[("status", &status.to_string())],
+        )),
     }
 }
 

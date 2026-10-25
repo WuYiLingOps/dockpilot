@@ -109,7 +109,7 @@ async fn detect_cli() -> CmdResult<Cli> {
     {
         return Ok(cli);
     }
-    Err("未检测到 Docker Compose CLI，请先安装（Debian/Ubuntu：sudo apt install docker-compose-plugin）".into())
+    Err(crate::i18n::t("err.composeCliMissing").into())
 }
 
 async fn detect_cli_remote(p: &ConnectionProfile) -> CmdResult<Cli> {
@@ -131,7 +131,7 @@ async fn detect_cli_remote(p: &ConnectionProfile) -> CmdResult<Cli> {
     {
         return Ok(cli);
     }
-    Err("远程服务器未检测到 Docker Compose CLI，请在服务器上安装（Debian/Ubuntu：sudo apt install docker-compose-plugin）".into())
+    Err(crate::i18n::t("err.composeCliMissingRemote").into())
 }
 
 /// Windows GUI 进程（windows_subsystem = "windows"）spawn 控制台类子进程（docker /
@@ -221,9 +221,9 @@ async fn ssh_write_remote(
     if !out.success() {
         let detail = out.stderr.trim();
         return Err(if detail.is_empty() {
-            "写入远程文件失败".into()
+            crate::i18n::t("err.remoteFileWriteFailed").into()
         } else {
-            format!("写入远程文件失败: {detail}")
+            crate::i18n::tr("err.remoteFileWriteFailedDetail", &[("detail", detail)])
         });
     }
     Ok(())
@@ -323,7 +323,7 @@ fn build_action_args(
         }
         "build" => vec!["build".into()],
         "pull" => vec!["pull".into()],
-        other => return Err(format!("未知操作: {other}")),
+        other => return Err(crate::i18n::tr("err.unknownAction", &[("action", other)])),
     };
     args.extend(services.iter().cloned());
     Ok(args)
@@ -498,7 +498,7 @@ async fn project_config(app: &tauri::AppHandle, project: &str) -> CmdResult<(Str
             ..Default::default()
         }))
         .await
-        .map_err(|e| format!("获取容器列表失败: {e}"))?;
+        .map_err(|e| crate::i18n::tr("err.list_containers_generic2", &[("err", &e.to_string())]))?;
     for c in &list {
         let Some(labels) = c.labels.as_ref() else {
             continue;
@@ -526,8 +526,9 @@ async fn project_config(app: &tauri::AppHandle, project: &str) -> CmdResult<(Str
     {
         return Ok((t.working_dir.clone(), t.config_files.clone()));
     }
-    Err(format!(
-        "未找到项目 {project} 的容器，无法确定 compose 配置"
+    Err(crate::i18n::tr(
+        "err.composeProjectContainersNotFound",
+        &[("project", project)],
     ))
 }
 
@@ -592,9 +593,18 @@ fn spawn_local_stream(
                     status = child.wait() => {
                         let code = status.ok().and_then(|s| s.code()).unwrap_or(-1);
                         if code == 0 {
-                            log::info!("compose {label} 完成");
+                            log::info!(
+                                "{}",
+                                crate::i18n::tr("log.composeDone", &[("label", &label)])
+                            );
                         } else {
-                            log::warn!("compose {label} 失败（退出码 {code}）");
+                            log::warn!(
+                                "{}",
+                                crate::i18n::tr(
+                                    "log.composeFailedExit",
+                                    &[("label", &label), ("code", &code.to_string())],
+                                )
+                            );
                         }
                         let _ = on_output.send(ComposeOutput {
                             stream: "exit".into(),
@@ -606,12 +616,15 @@ fn spawn_local_stream(
                     _ = token.cancelled() => {
                         let _ = child.kill().await;
                         let _ = child.wait().await;
-                        log::info!("compose {label} 已取消");
+                        log::info!(
+                            "{}",
+                            crate::i18n::tr("log.composeCancelled", &[("label", &label)])
+                        );
                         let _ = on_output.send(ComposeOutput {
                             stream: "exit".into(),
                             data: String::new(),
                             code: None,
-                            error: Some("操作已取消".into()),
+                            error: Some(crate::i18n::t("err.operationCancelled").into()),
                         });
                     }
                 }
@@ -620,12 +633,21 @@ fn spawn_local_stream(
                 }
             }
             Err(e) => {
-                log::warn!("compose {label} 启动失败: {e}");
+                log::warn!(
+                    "{}",
+                    crate::i18n::tr(
+                        "log.composeStartFailed",
+                        &[("label", &label), ("err", &e.to_string())],
+                    )
+                );
                 let _ = on_output.send(ComposeOutput {
                     stream: "exit".into(),
                     data: String::new(),
                     code: None,
-                    error: Some(format!("启动 compose 命令失败: {e}")),
+                    error: Some(crate::i18n::tr(
+                        "err.composeStartFailed",
+                        &[("err", &e.to_string())],
+                    )),
                 });
             }
         }
@@ -665,14 +687,12 @@ fn spawn_remote_stream(
 
     tauri::async_runtime::spawn(async move {
         let opened = async {
-            let channel = handle
-                .channel_open_session()
-                .await
-                .map_err(|e| format!("打开远程会话通道失败: {e}"))?;
-            channel
-                .exec(true, remote.as_str())
-                .await
-                .map_err(|e| format!("启动远程 compose 失败: {e}"))?;
+            let channel = handle.channel_open_session().await.map_err(|e| {
+                crate::i18n::tr("err.sshOpenChannelFailed2", &[("err", &e.to_string())])
+            })?;
+            channel.exec(true, remote.as_str()).await.map_err(|e| {
+                crate::i18n::tr("err.composeRemoteStartFailed", &[("err", &e.to_string())])
+            })?;
             Ok::<_, String>(channel)
         };
         match opened.await {
@@ -720,12 +740,15 @@ fn spawn_remote_stream(
                     }
                 }
                 if cancelled {
-                    log::info!("compose {label} 已取消");
+                    log::info!(
+                        "{}",
+                        crate::i18n::tr("log.composeCancelled", &[("label", &label)])
+                    );
                     let _ = on_output.send(ComposeOutput {
                         stream: "exit".into(),
                         data: String::new(),
                         code: None,
-                        error: Some("操作已取消".into()),
+                        error: Some(crate::i18n::t("err.operationCancelled").into()),
                     });
                 } else {
                     // 刷出未换行的残余输出
@@ -747,9 +770,18 @@ fn spawn_remote_stream(
                     }
                     let code = code.unwrap_or(-1);
                     if code == 0 {
-                        log::info!("compose {label} 完成");
+                        log::info!(
+                            "{}",
+                            crate::i18n::tr("log.composeDone", &[("label", &label)])
+                        );
                     } else {
-                        log::warn!("compose {label} 失败（退出码 {code}）");
+                        log::warn!(
+                            "{}",
+                            crate::i18n::tr(
+                                "log.composeFailedExit",
+                                &[("label", &label), ("code", &code.to_string())],
+                            )
+                        );
                     }
                     let _ = on_output.send(ComposeOutput {
                         stream: "exit".into(),
@@ -760,12 +792,21 @@ fn spawn_remote_stream(
                 }
             }
             Err(e) => {
-                log::warn!("compose {label} 启动失败: {e}");
+                log::warn!(
+                    "{}",
+                    crate::i18n::tr(
+                        "log.composeStartFailed",
+                        &[("label", &label), ("err", &e.to_string())],
+                    )
+                );
                 let _ = on_output.send(ComposeOutput {
                     stream: "exit".into(),
                     data: String::new(),
                     code: None,
-                    error: Some(format!("启动 compose 命令失败: {e}")),
+                    error: Some(crate::i18n::tr(
+                        "err.composeStartFailed",
+                        &[("err", &e.to_string())],
+                    )),
                 });
             }
         }
@@ -790,7 +831,7 @@ pub async fn list_compose_projects(app: tauri::AppHandle) -> CmdResult<Vec<Compo
             ..Default::default()
         }))
         .await
-        .map_err(|e| format!("获取容器列表失败: {e}"))?;
+        .map_err(|e| crate::i18n::tr("err.list_containers_generic2", &[("err", &e.to_string())]))?;
     let grouped = group_projects(list.iter().map(snapshot).collect());
 
     let conn_id = active_connection_id();
@@ -808,7 +849,12 @@ pub async fn list_compose_projects(app: tauri::AppHandle) -> CmdResult<Vec<Compo
     }
     if changed {
         // 写盘失败不影响列表返回（下次刷新会再尝试）
-        settings::save(&app, &s).unwrap_or_else(|e| log::warn!("保存编排跟踪记录失败: {e}"));
+        settings::save(&app, &s).unwrap_or_else(|e| {
+            log::warn!(
+                "{}",
+                crate::i18n::tr("log.trackedSaveFailed", &[("err", &e)])
+            )
+        });
     }
     Ok(merge_projects(grouped, &s.compose_projects, &conn_id))
 }
@@ -849,17 +895,26 @@ pub async fn compose_action(
     let cli = detect_cli().await?;
     let (working_dir, config_files) = project_config(&app, &project).await?;
     if config_files.is_empty() {
-        return Err(format!(
-            "项目 {project} 缺少 compose 配置文件标签，无法执行 CLI 操作"
+        return Err(crate::i18n::tr(
+            "err.composeConfigLabelMissing",
+            &[("project", &project)],
         ));
     }
+    let services_label = if services.is_empty() {
+        crate::i18n::t("diag.allServices").to_string()
+    } else {
+        services.join(", ")
+    };
     log::info!(
-        "compose 项目 {project} 执行 {action}（服务：{}）",
-        if services.is_empty() {
-            "全部".to_string()
-        } else {
-            services.join(", ")
-        }
+        "{}",
+        crate::i18n::tr(
+            "log.composeActionStart",
+            &[
+                ("project", &project),
+                ("action", &action),
+                ("services", &services_label),
+            ],
+        )
     );
     let args = build_action_args(&action, remove_volumes, remove_images, &services)?;
     let label = format!("{project} {action}");
@@ -914,13 +969,13 @@ pub async fn add_tracked_compose_project(
 ) -> CmdResult<()> {
     let path = path.trim().to_string();
     if path.is_empty() {
-        return Err("请填写 compose 文件路径".into());
+        return Err(crate::i18n::t("err.composePathRequired").into());
     }
     if !matches!(
         Path::new(&path).extension().and_then(|e| e.to_str()),
         Some("yml") | Some("yaml")
     ) {
-        return Err("请选择 .yml / .yaml 编排文件".into());
+        return Err(crate::i18n::t("err.composeExtRequired").into());
     }
     let content = read_compose_file(path.clone()).await?;
     let project = name
@@ -928,14 +983,20 @@ pub async fn add_tracked_compose_project(
         .filter(|n| !n.is_empty())
         .unwrap_or_else(|| compose_project_name(&content, &path));
     if project.is_empty() {
-        return Err("无法从文件推导项目名，请手动填写".into());
+        return Err(crate::i18n::t("err.composeNameDeriveFailed").into());
     }
     let working_dir = Path::new(&path)
         .parent()
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_default();
 
-    log::info!("手动注册编排项目 {project}（{path}）");
+    log::info!(
+        "{}",
+        crate::i18n::tr(
+            "log.composeRegistered",
+            &[("project", &project), ("path", &path)],
+        )
+    );
     let conn_id = active_connection_id();
     let mut s = settings::load(&app);
     upsert_tracked(
@@ -959,7 +1020,7 @@ pub async fn remove_tracked_compose_project(app: tauri::AppHandle, name: String)
     s.compose_projects
         .retain(|t| !(t.connection_id == conn_id && t.name == name));
     if s.compose_projects.len() == before {
-        return Err(format!("项目 {name} 没有本地跟踪记录"));
+        return Err(crate::i18n::tr("err.composeNotTracked", &[("name", &name)]));
     }
     settings::save(&app, &s)?;
     Ok(())
@@ -1025,7 +1086,7 @@ pub async fn scan_compose_dirs(app: tauri::AppHandle) -> CmdResult<ScanComposeRe
         .map(|d| d.path.clone())
         .collect();
     if dirs.is_empty() {
-        return Err("当前连接尚未配置扫描目录".into());
+        return Err(crate::i18n::t("err.noScanDirsConfigured").into());
     }
 
     let mut files: Vec<String> = Vec::new();
@@ -1070,11 +1131,18 @@ pub async fn scan_compose_dirs(app: tauri::AppHandle) -> CmdResult<ScanComposeRe
         .count();
     if discovered > 0 {
         s.compose_projects = tracked;
-        settings::save(&app, &s).map_err(|e| format!("保存扫描结果失败: {e}"))?;
+        settings::save(&app, &s)
+            .map_err(|e| crate::i18n::tr("err.scanResultSaveFailed", &[("err", &e)]))?;
     }
     log::info!(
-        "编排扫描完成：发现 {discovered} 个新项目（共 {} 个文件）",
-        files.len()
+        "{}",
+        crate::i18n::tr(
+            "log.scanDone",
+            &[
+                ("discovered", &discovered.to_string()),
+                ("found", &files.len().to_string()),
+            ],
+        )
     );
     Ok(ScanComposeResultDto {
         found: files.len(),
@@ -1091,30 +1159,31 @@ pub async fn read_compose_file(path: String) -> CmdResult<String> {
         p.extension().and_then(|e| e.to_str()),
         Some("yml") | Some("yaml")
     ) {
-        return Err("仅支持查看 .yml / .yaml 文件".into());
+        return Err(crate::i18n::t("err.composeViewExtRequired").into());
     }
     if let Some(prof) = ssh_profile() {
         let out = ssh_check(
             &prof,
             &format!("cat {}", sh_path(&path)),
             15,
-            "读取文件失败",
+            crate::i18n::t("err.fileReadFailed"),
         )
         .await?;
         if out.stdout.len() > 2 * 1024 * 1024 {
-            return Err("文件超过 2MB，不予显示".into());
+            return Err(crate::i18n::t("err.fileTooLarge").into());
         }
-        return String::from_utf8(out.stdout).map_err(|_| "文件不是有效的 UTF-8 文本".to_string());
+        return String::from_utf8(out.stdout)
+            .map_err(|_| crate::i18n::t("err.notUtf8").to_string());
     }
     let meta = tokio::fs::metadata(p)
         .await
-        .map_err(|e| format!("读取文件失败: {e}"))?;
+        .map_err(|e| crate::i18n::tr("err.fileReadFailedDetail", &[("err", &e.to_string())]))?;
     if meta.len() > 2 * 1024 * 1024 {
-        return Err("文件超过 2MB，不予显示".into());
+        return Err(crate::i18n::t("err.fileTooLarge").into());
     }
     tokio::fs::read_to_string(p)
         .await
-        .map_err(|e| format!("读取文件失败: {e}"))
+        .map_err(|e| crate::i18n::tr("err.fileReadFailedDetail", &[("err", &e.to_string())]))
 }
 
 /// 保存 compose 文件：CLI 可用时先用 `docker compose config` 预检语法，
@@ -1127,14 +1196,17 @@ pub async fn write_compose_file(path: String, content: String) -> CmdResult<()> 
         p.extension().and_then(|e| e.to_str()),
         Some("yml") | Some("yaml")
     ) {
-        return Err("仅支持编辑 .yml / .yaml 文件".into());
+        return Err(crate::i18n::t("err.composeEditExtRequired").into());
     }
     if content.trim().is_empty() {
-        return Err("文件内容不能为空".into());
+        return Err(crate::i18n::t("err.fileContentEmpty").into());
     }
-    log::info!("保存 compose 文件：{path}");
+    log::info!(
+        "{}",
+        crate::i18n::tr("log.composeFileSaving", &[("path", &path)])
+    );
     if content.len() > 2 * 1024 * 1024 {
-        return Err("文件超过 2MB，不予保存".into());
+        return Err(crate::i18n::t("err.fileTooLargeSave").into());
     }
     if let Some(prof) = ssh_profile() {
         let cli = detect_cli().await?;
@@ -1163,7 +1235,7 @@ async fn write_compose_file_remote(
             std::slice::from_ref(&tmp),
             &["config".into(), "--quiet".into()],
         );
-        if let Err(e) = ssh_check(p, &remote, 30, "compose 文件校验未通过").await {
+        if let Err(e) = ssh_check(p, &remote, 30, "diag.composeCheckFailed").await {
             let _ = ssh_output(p, &format!("rm -f {}", sh_path(&tmp)), 15).await;
             return Err(e);
         }
@@ -1175,7 +1247,7 @@ async fn write_compose_file_remote(
         bak = sh_path(&format!("{path}.bak")),
         t = sh_path(&tmp),
     );
-    ssh_check(p, &swap, 15, "保存远程文件失败").await?;
+    ssh_check(p, &swap, 15, "diag.saveRemoteFailed").await?;
     Ok(())
 }
 
@@ -1186,7 +1258,7 @@ async fn write_compose_file_local(path: &str, content: &str) -> CmdResult<()> {
     let tmp = PathBuf::from(format!("{path}.dockpilot-tmp"));
     tokio::fs::write(&tmp, content)
         .await
-        .map_err(|e| format!("写入临时文件失败: {e}"))?;
+        .map_err(|e| crate::i18n::tr("err.tmpFileWriteFailed", &[("err", &e.to_string())]))?;
     // 语法预检：仅 plugin 版 CLI 支持 config --quiet；未装 CLI 时跳过（保存文件本身不依赖 CLI）
     if let Ok(cli) = detect_cli().await {
         if cli.kind == CliKind::Plugin {
@@ -1203,12 +1275,17 @@ async fn write_compose_file_local(path: &str, content: &str) -> CmdResult<()> {
             )?;
             let out = tokio::time::timeout(Duration::from_secs(30), cmd.output())
                 .await
-                .map_err(|_| "语法预检超时".to_string())?
-                .map_err(|e| format!("语法预检执行失败: {e}"))?;
+                .map_err(|_| crate::i18n::t("err.syntaxCheckTimeout").to_string())?
+                .map_err(|e| {
+                    crate::i18n::tr("err.syntaxCheckFailed", &[("err", &e.to_string())])
+                })?;
             if !out.status.success() {
                 let _ = tokio::fs::remove_file(&tmp).await;
                 let err = String::from_utf8_lossy(&out.stderr);
-                return Err(format!("compose 文件校验未通过：{}", err.trim()));
+                return Err(crate::i18n::tr(
+                    "err.composeValidateFailed",
+                    &[("err", err.trim())],
+                ));
             }
         }
     }
@@ -1217,11 +1294,11 @@ async fn write_compose_file_local(path: &str, content: &str) -> CmdResult<()> {
         let backup = PathBuf::from(format!("{path}.bak"));
         tokio::fs::copy(p, &backup)
             .await
-            .map_err(|e| format!("备份原文件失败: {e}"))?;
+            .map_err(|e| crate::i18n::tr("err.backupOriginalFailed", &[("err", &e.to_string())]))?;
     }
     tokio::fs::rename(&tmp, p)
         .await
-        .map_err(|e| format!("保存文件失败: {e}"))?;
+        .map_err(|e| crate::i18n::tr("err.fileSaveFailed", &[("err", &e.to_string())]))?;
     Ok(())
 }
 

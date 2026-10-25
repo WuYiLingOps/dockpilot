@@ -74,11 +74,18 @@ pub async fn export_container_logs(
     path: String,
 ) -> CmdResult<u64> {
     if path.trim().is_empty() {
-        return Err("导出路径不能为空".into());
+        return Err(crate::i18n::t("err.exportPathRequired2").into());
     }
     log::info!(
-        "容器 {} 导出日志（tail {tail}）→ {path}",
-        super::short_id(&id)
+        "{}",
+        crate::i18n::tr(
+            "log.containerLogExportStart",
+            &[
+                ("id", super::short_id(&id)),
+                ("tail", &tail),
+                ("path", &path)
+            ],
+        )
     );
     let d = docker().await?;
     let opts = LogsOptions::<String> {
@@ -102,12 +109,17 @@ pub async fn export_container_logs(
                 };
                 buf.push_str(&String::from_utf8_lossy(&bytes));
             }
-            Err(e) => return Err(format!("读取容器日志失败: {e}")),
+            Err(e) => {
+                return Err(crate::i18n::tr(
+                    "err.readContainerLogsFailed",
+                    &[("err", &e.to_string())],
+                ))
+            }
         }
     }
     let size = buf.len() as u64;
     tokio::fs::write(&path, buf)
         .await
-        .map_err(|e| format!("写入文件失败: {e}"))?;
+        .map_err(|e| crate::i18n::tr("err.writeFileFailed", &[("err", &e.to_string())]))?;
     Ok(size)
 }

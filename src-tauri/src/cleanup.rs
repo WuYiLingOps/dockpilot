@@ -36,7 +36,7 @@ pub async fn disk_usage() -> CmdResult<DiskUsageDto> {
     let df = d
         .df(None::<DataUsageOptions>)
         .await
-        .map_err(|e| format!("获取磁盘占用失败: {e}"))?;
+        .map_err(|e| crate::i18n::tr("err.disk_usage_failed", &[("err", &e.to_string())]))?;
 
     // 被容器引用的镜像 id
     let used_image_ids: HashSet<String> = df
@@ -135,11 +135,11 @@ fn filters(kv: &[(&str, &str)]) -> Option<HashMap<String, Vec<String>>> {
 /// 清理类别的日志展示名
 fn kind_label(kind: &str) -> &str {
     match kind {
-        "dangling_images" => "悬空镜像",
-        "unused_images" => "未使用镜像",
-        "stopped_containers" => "已停止容器",
-        "unused_volumes" => "未使用卷",
-        "build_cache" => "构建缓存",
+        "dangling_images" => crate::i18n::t("cleanup.dangling_images"),
+        "unused_images" => crate::i18n::t("cleanup.unused_images"),
+        "stopped_containers" => crate::i18n::t("cleanup.stopped_containers"),
+        "unused_volumes" => crate::i18n::t("cleanup.unused_volumes"),
+        "build_cache" => crate::i18n::t("cleanup.build_cache"),
         other => other,
     }
 }
@@ -149,7 +149,10 @@ fn kind_label(kind: &str) -> &str {
 pub async fn cleanup(kinds: Vec<String>) -> CmdResult<CleanupResultDto> {
     let d = docker().await?;
     let labels: Vec<&str> = kinds.iter().map(|k| kind_label(k)).collect();
-    log::info!("空间清理：{}", labels.join("、"));
+    log::info!(
+        "{}",
+        crate::i18n::tr("cleanup.start", &[("kinds", &labels.join("、"))])
+    );
     let mut items = Vec::new();
     let mut total_reclaimed = 0u64;
 
@@ -217,10 +220,15 @@ pub async fn cleanup(kinds: Vec<String>) -> CmdResult<CleanupResultDto> {
             Ok((removed, space)) => {
                 total_reclaimed += space.max(0) as u64;
                 log::info!(
-                    "空间清理 {}：删除 {} 项，回收 {}",
-                    kind_label(&kind),
-                    removed,
-                    crate::format_bytes(space.max(0) as u64)
+                    "{}",
+                    crate::i18n::tr(
+                        "cleanup.kindDone",
+                        &[
+                            ("kind", kind_label(&kind)),
+                            ("removed", &removed.to_string()),
+                            ("space", &crate::format_bytes(space.max(0) as u64)),
+                        ]
+                    )
                 );
                 items.push(CleanupItemResult {
                     kind,
@@ -230,7 +238,13 @@ pub async fn cleanup(kinds: Vec<String>) -> CmdResult<CleanupResultDto> {
                 });
             }
             Err(e) => {
-                log::warn!("空间清理 {} 失败: {e}", kind_label(&kind));
+                log::warn!(
+                    "{}",
+                    crate::i18n::tr(
+                        "cleanup.kindFailed",
+                        &[("kind", kind_label(&kind)), ("err", &e)]
+                    )
+                );
                 items.push(CleanupItemResult {
                     kind,
                     removed: 0,
@@ -242,8 +256,11 @@ pub async fn cleanup(kinds: Vec<String>) -> CmdResult<CleanupResultDto> {
     }
 
     log::info!(
-        "空间清理完成：共回收 {}",
-        crate::format_bytes(total_reclaimed)
+        "{}",
+        crate::i18n::tr(
+            "cleanup.done",
+            &[("space", &crate::format_bytes(total_reclaimed))]
+        )
     );
     Ok(CleanupResultDto {
         items,

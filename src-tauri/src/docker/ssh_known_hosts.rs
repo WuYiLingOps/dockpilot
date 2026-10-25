@@ -60,13 +60,16 @@ pub fn load(dir: &Path) -> Vec<KnownHost> {
 
 /// tmp + rename 原子写入（对齐 settings.rs 做法）
 fn save(dir: &Path, hosts: &[KnownHost]) -> Result<(), String> {
-    std::fs::create_dir_all(dir).map_err(|e| format!("创建配置目录失败: {e}"))?;
-    let text =
-        serde_json::to_string_pretty(hosts).map_err(|e| format!("序列化主机指纹失败: {e}"))?;
+    std::fs::create_dir_all(dir)
+        .map_err(|e| crate::i18n::tr("err.config_mkdir_failed", &[("err", &e.to_string())]))?;
+    let text = serde_json::to_string_pretty(hosts)
+        .map_err(|e| crate::i18n::tr("err.hostKeysSerializeFailed", &[("err", &e.to_string())]))?;
     let path = file_path(dir);
     let tmp = path.with_extension("json.tmp");
-    std::fs::write(&tmp, text).map_err(|e| format!("写入主机指纹失败: {e}"))?;
-    std::fs::rename(&tmp, &path).map_err(|e| format!("保存主机指纹失败: {e}"))?;
+    std::fs::write(&tmp, text)
+        .map_err(|e| crate::i18n::tr("err.hostKeysWriteFailed", &[("err", &e.to_string())]))?;
+    std::fs::rename(&tmp, &path)
+        .map_err(|e| crate::i18n::tr("err.hostKeysSaveFailed", &[("err", &e.to_string())]))?;
     Ok(())
 }
 
@@ -114,9 +117,15 @@ pub async fn accept_host_key(
     let dir = app
         .path()
         .app_config_dir()
-        .map_err(|e| format!("获取配置目录失败: {e}"))?;
+        .map_err(|e| crate::i18n::tr("err.config_dir_failed", &[("err", &e.to_string())]))?;
     record(&dir, &dest, &fingerprint, &algo)?;
-    log::info!("已接受主机 {dest}（{algo}）的指纹 {fingerprint}");
+    log::info!(
+        "{}",
+        crate::i18n::tr(
+            "log.hostKeyAccepted",
+            &[("dest", &dest), ("algo", &algo), ("fp", &fingerprint)],
+        )
+    );
     Ok(())
 }
 

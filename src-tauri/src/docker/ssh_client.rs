@@ -53,8 +53,10 @@ pub fn init_config_dir(app: &tauri::AppHandle) {
     }
 }
 
-/// 测试专用：测试进程无 AppHandle，直接指定配置目录（进程内仅首次设置生效）
-#[cfg(test)]
+/// 测试专用：测试进程无 AppHandle，直接指定配置目录（进程内仅首次设置生效）。
+/// 唯一调用方是 docker/mod.rs 的 unix 门控集成测试，随其一同门控，
+/// 否则 Windows 测试目标下成为死代码（clippy -D warnings 报错）
+#[cfg(all(test, unix))]
 pub(crate) fn init_config_dir_for_test(dir: PathBuf) {
     let _ = CONFIG_DIR.set(dir);
 }
@@ -62,7 +64,7 @@ pub(crate) fn init_config_dir_for_test(dir: PathBuf) {
 fn config_dir() -> Result<&'static PathBuf, String> {
     CONFIG_DIR
         .get()
-        .ok_or_else(|| "配置目录尚未初始化".to_string())
+        .ok_or_else(|| crate::i18n::t("err.configDirNotInit").to_string())
 }
 
 // ---------------------------------------------------------------------------
@@ -102,10 +104,18 @@ impl std::fmt::Display for SshError {
                 });
                 write!(f, "[HOST_KEY_CHANGED]{payload}")
             }
-            SshError::Connect(e) => write!(f, "SSH 连接失败: {e}"),
-            SshError::Auth(e) => write!(f, "SSH 认证失败: {e}"),
-            SshError::Channel(e) => write!(f, "SSH 通道失败: {e}"),
-            SshError::Protocol(e) => write!(f, "SSH 协议错误: {e}"),
+            SshError::Connect(e) => {
+                write!(f, "{}", crate::i18n::tr("err.sshConnect", &[("err", e)]))
+            }
+            SshError::Auth(e) => write!(f, "{}", crate::i18n::tr("err.sshAuth", &[("err", e)])),
+            SshError::Channel(e) => {
+                write!(f, "{}", crate::i18n::tr("err.sshChannel", &[("err", e)]))
+            }
+            SshError::Protocol(e) => write!(
+                f,
+                "{}",
+                crate::i18n::tr("err.sshProtocol", &[("err", &e.to_string())])
+            ),
         }
     }
 }
@@ -161,7 +171,13 @@ impl client::Handler for ClientHandler {
             Ok(Decision::New) => {
                 ssh_known_hosts::record(&self.dir, &self.dest, &fingerprint, &algo)
                     .map_err(SshError::Channel)?;
-                log::info!("已记录主机 {}（{algo}）的指纹 {fingerprint}", self.dest);
+                log::info!(
+                    "{}",
+                    crate::i18n::tr(
+                        "log.sshFingerprintSaved",
+                        &[("dest", &self.dest), ("algo", &algo), ("fp", &fingerprint)],
+                    )
+                );
                 Ok(true)
             }
             Ok(Decision::Mismatch { stored }) => Err(SshError::HostKeyChanged {
@@ -217,14 +233,16 @@ fn parse_dest_with(host: &str, fallback_user: &str) -> Result<(String, String, u
         None => (fallback_user.to_string(), host.trim().to_string()),
     };
     if user.is_empty() {
-        return Err("缺少 SSH 用户名，请使用 user@host 形式".into());
+        return Err(crate::i18n::t("err.sshUserMissing").into());
     }
     let (host_part, port_str) = split_dest_port(&rest);
     if host_part.is_empty() {
-        return Err("缺少 SSH 主机地址".into());
+        return Err(crate::i18n::t("err.sshHostMissing").into());
     }
     let port = match port_str {
-        Some(p) => p.parse::<u16>().map_err(|_| format!("SSH 端口无效: {p}"))?,
+        Some(p) => p
+            .parse::<u16>()
+            .map_err(|_| crate::i18n::tr("err.sshPortInvalid", &[("port", p)]))?,
         None => 22,
     };
     Ok((user, host_part.to_string(), port))
@@ -265,15 +283,14 @@ fn resolve_auth(
             .password
             .clone()
             .or_else(|| ssh_secrets::load(dir, p, "password"))
-            .ok_or_else(|| SshError::Auth("尚未保存密码，请编辑连接并填写".into()))?;
+            .ok_or_else(|| SshError::Auth(crate::i18n::t("err.sshNoSavedPassword").into()))?;
         return Ok(AuthMethod::Password(pass));
     }
     // 钥匙串私钥优先：PEM 存 secret_store 的 sshkeypem/{key_id}（随云同步跨设备
     // 落地本机），内存解码、不读文件路径，也无需临时文件；口令随条目（sshkeypass/）
     if !p.key_id.is_empty() {
-        let pem = ssh_secrets::load_keychain(dir, p, &p.key_id, "pem").ok_or_else(|| {
-            SshError::Auth("钥匙串私钥不存在，请到「SSH 凭证」重新导入或改用文件路径".into())
-        })?;
+        let pem = ssh_secrets::load_keychain(dir, p, &p.key_id, "pem")
+            .ok_or_else(|| SshError::Auth(crate::i18n::t("err.sshKeychainKeyMissing").into()))?;
         let passphrase = ssh_secrets::load_keychain(dir, p, &p.key_id, "passphrase");
         return Ok(AuthMethod::KeyPem { pem, passphrase });
     }
@@ -281,8 +298,7 @@ fn resolve_auth(
     if !key_path.is_empty() {
         if key_path.to_ascii_lowercase().ends_with(".pub") {
             return Err(SshError::Auth(
-                "私钥路径指向了 .pub 公钥文件，请改用对应的私钥（例如 id_rsa，而不是 id_rsa.pub）"
-                    .into(),
+                crate::i18n::t("err.sshPubKeySelected").into(),
             ));
         }
         let passphrase = secrets
@@ -313,9 +329,8 @@ fn resolve_identity_auth(
     secrets: &TransientSecrets,
 ) -> Result<AuthMethod, SshError> {
     if !identity.key_id.is_empty() {
-        let pem = ssh_secrets::load_keychain(dir, p, &identity.key_id, "pem").ok_or_else(|| {
-            SshError::Auth("身份关联的钥匙串私钥不存在，请到「SSH 凭证」检查".into())
-        })?;
+        let pem = ssh_secrets::load_keychain(dir, p, &identity.key_id, "pem")
+            .ok_or_else(|| SshError::Auth(crate::i18n::t("err.sshIdentityKeyMissing").into()))?;
         let passphrase = ssh_secrets::load_keychain(dir, p, &identity.key_id, "passphrase");
         return Ok(AuthMethod::KeyPem { pem, passphrase });
     }
@@ -324,7 +339,7 @@ fn resolve_identity_auth(
         .clone()
         .filter(|s| !s.is_empty())
         .or_else(|| secrets.password.clone())
-        .ok_or_else(|| SshError::Auth("身份未设置密码，请到「SSH 凭证」补全".into()))?;
+        .ok_or_else(|| SshError::Auth(crate::i18n::t("err.sshIdentityNoPassword").into()))?;
     Ok(AuthMethod::Password(pass))
 }
 
@@ -366,7 +381,12 @@ async fn connect_and_auth(
         client::connect(config, (host.as_str(), port), handler),
     )
     .await
-    .map_err(|_| SshError::Connect(format!("连接 {host}:{port} 超时（10s 内未完成握手）")))??;
+    .map_err(|_| {
+        SshError::Connect(crate::i18n::tr(
+            "err.sshConnectTimeout",
+            &[("host", &host), ("port", &port.to_string())],
+        ))
+    })??;
     let method = match &identity {
         Some(id) => resolve_identity_auth(dir, p, id, secrets)?,
         None => resolve_auth(p, secrets, dir)?,
@@ -396,22 +416,32 @@ async fn authenticate(
         AuthMethod::Key { path, passphrase } => {
             let key = load_secret_key(&path, passphrase.as_deref()).map_err(|e| {
                 let hint = if passphrase.is_none() {
-                    "（若私钥有口令，请在连接设置中填写并保存）"
+                    crate::i18n::t("err.sshKeyPassphraseHint")
                 } else {
-                    "（口令可能不正确）"
+                    crate::i18n::t("err.sshKeyWrongPassphraseHint")
                 };
-                SshError::Auth(format!("加载私钥 {} 失败: {e}{hint}", path.display()))
+                SshError::Auth(crate::i18n::tr(
+                    "err.sshKeyFileLoadFailed",
+                    &[
+                        ("path", &path.display().to_string()),
+                        ("err", &e.to_string()),
+                        ("hint", hint),
+                    ],
+                ))
             })?;
             pubkey_auth(handle, user, key).await
         }
         AuthMethod::KeyPem { pem, passphrase } => {
             let key = decode_secret_key(&pem, passphrase.as_deref()).map_err(|e| {
                 let hint = if passphrase.is_none() {
-                    "（若私钥有口令，请在连接设置中填写并保存）"
+                    crate::i18n::t("err.sshKeyPassphraseHint")
                 } else {
-                    "（口令可能不正确）"
+                    crate::i18n::t("err.sshKeyWrongPassphraseHint")
                 };
-                SshError::Auth(format!("解析导入的私钥失败: {e}{hint}"))
+                SshError::Auth(crate::i18n::tr(
+                    "err.sshKeyPemParseFailed",
+                    &[("err", &e.to_string()), ("hint", hint)],
+                ))
             })?;
             pubkey_auth(handle, user, key).await
         }
@@ -422,25 +452,30 @@ async fn authenticate(
 
 /// 未找到默认私钥时的报错文案：Windows 上 HOME 通常未设（实际读 %USERPROFILE%\.ssh），
 /// 且无 ssh-agent 支持，需引导显式配置
-#[cfg(unix)]
-const NO_DEFAULT_KEY_MSG: &str =
-    "未配置私钥且未找到 ~/.ssh 下的默认私钥（id_ed25519 / id_ecdsa / id_rsa）";
-#[cfg(not(unix))]
-const NO_DEFAULT_KEY_MSG: &str =
-    "未配置私钥且未找到 .ssh 目录下的默认私钥（id_ed25519 / id_ecdsa / id_rsa）；Windows 版不支持 ssh-agent，请在连接设置中配置私钥路径或改用密码认证";
+fn no_default_key_msg() -> String {
+    crate::i18n::t(if cfg!(unix) {
+        "err.sshDefaultKeyMissingUnix"
+    } else {
+        "err.sshDefaultKeyMissingWindows"
+    })
+    .to_string()
+}
 
 /// 默认私钥均被服务器拒绝时的补充指引：unix 可经 agent 加载加密私钥，Windows 无 agent 支持
-#[cfg(unix)]
-const DEFAULT_KEY_REJECTED_HINT: &str = "（若私钥有口令请通过 agent 加载，或在连接设置中显式指定）";
-#[cfg(not(unix))]
-const DEFAULT_KEY_REJECTED_HINT: &str =
-    "（若私钥有口令，请在连接设置中指定私钥并填写保存口令，或改用密码认证；Windows 版不支持 ssh-agent）";
+fn default_key_rejected_hint() -> String {
+    crate::i18n::t(if cfg!(unix) {
+        "err.sshDefaultKeyRejectedHint"
+    } else {
+        "err.sshDefaultKeyRejectedHintWin"
+    })
+    .to_string()
+}
 
 /// 依次尝试 ~/.ssh 下的默认私钥（无口令；加密私钥由 agent 或显式配置覆盖）
 async fn try_default_keys(handle: &mut Handle<ClientHandler>, user: &str) -> Result<(), SshError> {
     let paths = default_key_paths();
     if paths.is_empty() {
-        return Err(SshError::Auth(NO_DEFAULT_KEY_MSG.into()));
+        return Err(SshError::Auth(no_default_key_msg()));
     }
     for path in paths {
         let Ok(key) = load_secret_key(&path, None) else {
@@ -450,8 +485,9 @@ async fn try_default_keys(handle: &mut Handle<ClientHandler>, user: &str) -> Res
             return Ok(());
         }
     }
-    Err(SshError::Auth(format!(
-        "默认私钥均未被服务器接受{DEFAULT_KEY_REJECTED_HINT}"
+    Err(SshError::Auth(crate::i18n::tr(
+        "err.sshDefaultKeysRejected",
+        &[("hint", &default_key_rejected_hint())],
     )))
 }
 
@@ -460,17 +496,20 @@ async fn try_default_keys(handle: &mut Handle<ClientHandler>, user: &str) -> Res
 /// Windows 无此端点形态（OpenSSH agent 为命名管道），按已知限制直接走默认私钥
 #[cfg(unix)]
 async fn try_agent_auth(handle: &mut Handle<ClientHandler>, user: &str) -> Result<(), SshError> {
-    let mut agent = AgentClient::connect_env()
-        .await
-        .map_err(|e| SshError::Auth(format!("连接 ssh-agent 失败: {e}")))?;
-    let identities = agent
-        .request_identities()
-        .await
-        .map_err(|e| SshError::Auth(format!("读取 agent 密钥失败: {e}")))?;
+    let mut agent = AgentClient::connect_env().await.map_err(|e| {
+        SshError::Auth(crate::i18n::tr(
+            "err.sshAgentConnectFailed",
+            &[("err", &e.to_string())],
+        ))
+    })?;
+    let identities = agent.request_identities().await.map_err(|e| {
+        SshError::Auth(crate::i18n::tr(
+            "err.sshAgentListFailed",
+            &[("err", &e.to_string())],
+        ))
+    })?;
     if identities.is_empty() {
-        return Err(SshError::Auth(
-            "ssh-agent 中没有已加载的密钥（请先 ssh-add，或在连接设置中指定私钥路径）".into(),
-        ));
+        return Err(SshError::Auth(crate::i18n::t("err.sshAgentNoKeys").into()));
     }
     for id in identities {
         let pk = id.public_key().into_owned();
@@ -483,7 +522,9 @@ async fn try_agent_auth(handle: &mut Handle<ClientHandler>, user: &str) -> Resul
             }
         }
     }
-    Err(SshError::Auth("服务器拒绝了 agent 中的全部密钥".into()))
+    Err(SshError::Auth(
+        crate::i18n::t("err.sshAgentKeysRejected").into(),
+    ))
 }
 
 /// Agent 认证的统一入口：agent 已配置但不可用/无密钥时回退默认私钥，而不是直接报错。
@@ -523,7 +564,7 @@ async fn pubkey_auth(
     if r.success() {
         return Ok(());
     }
-    Err(SshError::Auth("服务器拒绝了该私钥".into()))
+    Err(SshError::Auth(crate::i18n::t("err.sshKeyRejected").into()))
 }
 
 /// keyboard-interactive：把密码作为非回显提示的回答（典型 PAM 场景）
@@ -559,7 +600,7 @@ async fn ki_authenticate(
         }
     }
     Err(SshError::Auth(
-        "密码未被服务器接受（密码认证与 keyboard-interactive 均已尝试）".into(),
+        crate::i18n::t("err.sshPasswordRejected").into(),
     ))
 }
 
@@ -614,7 +655,13 @@ pub async fn ensure_with(
     let (endpoint, listener) = bind_local(p).await?;
     let remote = remote_socket(p).to_string();
     let listener_task = tokio::spawn(accept_loop(listener, handle.clone(), remote));
-    log::info!("SSH 会话已建立（russh）：{} → 本地端点 {endpoint}", p.host);
+    log::info!(
+        "{}",
+        crate::i18n::tr(
+            "log.sshSessionEstablished",
+            &[("host", &p.host), ("endpoint", &endpoint)]
+        )
+    );
     tunnels().await.insert(
         p.id.clone(),
         SshTunnel {
@@ -638,7 +685,7 @@ pub(crate) async fn session_handle(
         .await
         .get(&p.id)
         .map(|t| t.handle.clone())
-        .ok_or_else(|| SshError::Channel("SSH 会话意外丢失".into()))
+        .ok_or_else(|| SshError::Channel(crate::i18n::t("err.sshSessionLost").into()))
 }
 
 // ---------------------------------------------------------------------------
@@ -666,14 +713,18 @@ async fn exec_channel(
     remote_cmd: &str,
 ) -> Result<russh::Channel<client::Msg>, SshError> {
     let handle = session_handle(p).await?;
-    let channel = handle
-        .channel_open_session()
-        .await
-        .map_err(|e| SshError::Channel(format!("打开远程会话通道失败: {e}")))?;
-    channel
-        .exec(true, remote_cmd)
-        .await
-        .map_err(|e| SshError::Channel(format!("远程命令启动失败: {e}")))?;
+    let channel = handle.channel_open_session().await.map_err(|e| {
+        SshError::Channel(crate::i18n::tr(
+            "err.sshOpenChannelFailed",
+            &[("err", &e.to_string())],
+        ))
+    })?;
+    channel.exec(true, remote_cmd).await.map_err(|e| {
+        SshError::Channel(crate::i18n::tr(
+            "err.sshCommandStartFailed",
+            &[("err", &e.to_string())],
+        ))
+    })?;
     Ok(channel)
 }
 
@@ -707,9 +758,12 @@ pub(crate) async fn exec(
 ) -> Result<ExecOutput, SshError> {
     let channel = exec_channel(p, remote_cmd).await?;
     let fut = drain_channel(channel);
-    let (stdout, stderr, code) = tokio::time::timeout(timeout, fut)
-        .await
-        .map_err(|_| SshError::Channel(format!("远程命令超时（超过 {timeout:?}）")))?;
+    let (stdout, stderr, code) = tokio::time::timeout(timeout, fut).await.map_err(|_| {
+        SshError::Channel(crate::i18n::tr(
+            "err.sshCommandTimeout",
+            &[("timeout", &format!("{timeout:?}"))],
+        ))
+    })?;
     Ok(ExecOutput {
         exit_code: code.unwrap_or(-1),
         stdout,
@@ -726,21 +780,30 @@ pub(crate) async fn exec_write(
     timeout: Duration,
 ) -> Result<ExecOutput, SshError> {
     let handle = session_handle(p).await?;
-    let channel = handle
-        .channel_open_session()
-        .await
-        .map_err(|e| SshError::Channel(format!("打开远程会话通道失败: {e}")))?;
-    channel
-        .exec(true, remote_cmd)
-        .await
-        .map_err(|e| SshError::Channel(format!("远程命令启动失败: {e}")))?;
+    let channel = handle.channel_open_session().await.map_err(|e| {
+        SshError::Channel(crate::i18n::tr(
+            "err.sshOpenChannelFailed",
+            &[("err", &e.to_string())],
+        ))
+    })?;
+    channel.exec(true, remote_cmd).await.map_err(|e| {
+        SshError::Channel(crate::i18n::tr(
+            "err.sshCommandStartFailed",
+            &[("err", &e.to_string())],
+        ))
+    })?;
     // 写入失败静默：远端 `cat` 提前退出即 EPIPE，与系统 ssh 管道行为一致
     let _ = channel.data_bytes(content).await;
     let _ = channel.eof().await;
 
     let (stdout, stderr, code) = tokio::time::timeout(timeout, drain_channel(channel))
         .await
-        .map_err(|_| SshError::Channel(format!("写入远程文件超时（超过 {timeout:?}）")))?;
+        .map_err(|_| {
+            SshError::Channel(crate::i18n::tr(
+                "err.sshWriteTimeout",
+                &[("timeout", &format!("{timeout:?}"))],
+            ))
+        })?;
     Ok(ExecOutput {
         exit_code: code.unwrap_or(-1),
         stdout,
@@ -760,7 +823,10 @@ pub async fn stop(profile_id: &str) {
         if let Some(path) = t.socket_path {
             let _ = std::fs::remove_file(path);
         }
-        log::info!("SSH 会话已停止: {profile_id}");
+        log::info!(
+            "{}",
+            crate::i18n::tr("log.sshSessionStopped", &[("id", profile_id)])
+        );
     }
 }
 
@@ -798,8 +864,12 @@ fn local_socket_path(p: &ConnectionProfile) -> PathBuf {
 async fn bind_local(p: &ConnectionProfile) -> Result<(String, LocalListener), SshError> {
     let path = local_socket_path(p);
     let _ = std::fs::remove_file(&path);
-    let listener = tokio::net::UnixListener::bind(&path)
-        .map_err(|e| SshError::Channel(format!("绑定本地 unix socket 失败: {e}")))?;
+    let listener = tokio::net::UnixListener::bind(&path).map_err(|e| {
+        SshError::Channel(crate::i18n::tr(
+            "err.sshBindUnixFailed",
+            &[("err", &e.to_string())],
+        ))
+    })?;
     Ok((path.to_string_lossy().into_owned(), listener))
 }
 
@@ -808,10 +878,20 @@ async fn bind_local(_p: &ConnectionProfile) -> Result<(String, LocalListener), S
     // tokio 的 TcpListener::bind 为异步（与 std 不同；local_addr 是同步的）
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
         .await
-        .map_err(|e| SshError::Channel(format!("绑定本地端口失败: {e}")))?;
+        .map_err(|e| {
+            SshError::Channel(crate::i18n::tr(
+                "err.sshBindPortFailed",
+                &[("err", &e.to_string())],
+            ))
+        })?;
     let port = listener
         .local_addr()
-        .map_err(|e| SshError::Channel(format!("读取本地端口失败: {e}")))?
+        .map_err(|e| {
+            SshError::Channel(crate::i18n::tr(
+                "err.sshLocalPortReadFailed",
+                &[("err", &e.to_string())],
+            ))
+        })?
         .port();
     Ok((format!("127.0.0.1:{port}"), listener))
 }
@@ -831,13 +911,17 @@ async fn accept_loop(listener: LocalListener, handle: Arc<Handle<ClientHandler>>
                             let _ = tokio::io::copy_bidirectional(&mut stream, &mut ch).await;
                         }
                         Err(e) => log::warn!(
-                            "SSH 转发通道打开失败（检查远程 docker.sock 路径与 sshd AllowTcpForwarding）: {e}"
+                            "{}",
+                            crate::i18n::tr("err.sshForwardOpenFailed", &[("err", &e.to_string())])
                         ),
                     }
                 });
             }
             Err(e) => {
-                log::warn!("SSH 隧道本地监听异常退出: {e}");
+                log::warn!(
+                    "{}",
+                    crate::i18n::tr("log.sshTunnelListenEnded", &[("err", &e.to_string())])
+                );
                 break;
             }
         }

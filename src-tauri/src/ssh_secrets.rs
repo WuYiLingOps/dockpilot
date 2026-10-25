@@ -56,7 +56,10 @@ fn sync_secret_key_for(target_id: &str, kind: &str) -> Result<String, String> {
         "keychain_pem" => Ok(key_pem_key(target_id)),
         "keychain_passphrase" => Ok(keychain_passphrase_key(target_id)),
         "identity_password" => Ok(identity_password_key(target_id)),
-        other => Err(format!("未知的 ssh 凭证类型: {other}")),
+        other => Err(crate::i18n::tr(
+            "err.unknownSshSecretKind",
+            &[("kind", other)],
+        )),
     }
 }
 
@@ -148,7 +151,7 @@ fn sync_import_target<'a>(
         .connections
         .iter_mut()
         .find(|c| c.id == entry.target_id && c.kind == "ssh")
-        .ok_or_else(|| format!("同步凭证对应的 SSH 连接不存在: {}", entry.target_id))?;
+        .ok_or_else(|| crate::i18n::tr("err.syncConnNotFound", &[("id", &entry.target_id)]))?;
     Ok((profile, key))
 }
 
@@ -168,48 +171,66 @@ fn import_in(
                     let backend = secret_store::save_secret(dir, &key, &entry.value)?;
                     profile.secret_backend = backend.as_str().to_string();
                     log::info!(
-                        "已导入 SSH 凭证 {} 的{}（{}）",
-                        entry.target_id,
-                        entry.kind,
-                        backend.as_str()
+                        "{}",
+                        crate::i18n::tr(
+                            "log.importedConnSecret",
+                            &[
+                                ("id", &entry.target_id),
+                                ("kind", &entry.kind),
+                                ("backend", backend.as_str()),
+                            ],
+                        )
                     );
                 }
-                Err(e) => log::warn!("{e}，跳过"),
+                Err(e) => log::warn!("{}", crate::i18n::tr("log.importSkipped", &[("err", &e)])),
             },
             // 钥匙串侧：条目元数据应已随载荷的 ssh_keys 落地；缺失（载荷不完整）
             // 时跳过并保留既有内容
             "keychain_pem" | "keychain_passphrase" => {
                 if !s.ssh_keys.iter().any(|k| k.id == entry.target_id) {
                     log::warn!(
-                        "钥匙串条目 {} 不在本机元数据中，跳过该凭证",
-                        entry.target_id
+                        "{}",
+                        crate::i18n::tr("log.keychainEntryNotLocal", &[("id", &entry.target_id)],)
                     );
                     continue;
                 }
                 let key = sync_secret_key_for(&entry.target_id, &entry.kind)?;
                 let backend = secret_store::save_secret(dir, &key, &entry.value)?;
                 log::info!(
-                    "已导入钥匙串凭证 {} 的{}（{}）",
-                    entry.target_id,
-                    entry.kind,
-                    backend.as_str()
+                    "{}",
+                    crate::i18n::tr(
+                        "log.importedKeychainSecret",
+                        &[
+                            ("id", &entry.target_id),
+                            ("kind", &entry.kind),
+                            ("backend", backend.as_str()),
+                        ],
+                    )
                 );
             }
             // 身份侧：密码写入 sshidpass/{id}（身份元数据应已随载荷的 ssh_identities 落地）
             "identity_password" => {
                 if !s.ssh_identities.iter().any(|i| i.id == entry.target_id) {
-                    log::warn!("身份 {} 不在本机元数据中，跳过该凭证", entry.target_id);
+                    log::warn!(
+                        "{}",
+                        crate::i18n::tr("log.identityNotLocal", &[("id", &entry.target_id)],)
+                    );
                     continue;
                 }
                 let key = sync_secret_key_for(&entry.target_id, &entry.kind)?;
                 let backend = secret_store::save_secret(dir, &key, &entry.value)?;
                 log::info!(
-                    "已导入身份 {} 的密码（{}）",
-                    entry.target_id,
-                    backend.as_str()
+                    "{}",
+                    crate::i18n::tr(
+                        "log.importedIdentityPassword",
+                        &[("id", &entry.target_id), ("backend", backend.as_str()),],
+                    )
                 );
             }
-            other => log::warn!("未知的 ssh 凭证类型: {other}，跳过"),
+            other => log::warn!(
+                "{}",
+                crate::i18n::tr("log.unknownSshSecretSkipped", &[("kind", other)])
+            ),
         }
     }
     Ok(())
@@ -227,33 +248,42 @@ pub async fn set_ssh_secret(
     secret: String,
 ) -> CmdResult<()> {
     if !matches!(kind.as_str(), "password" | "key_passphrase") {
-        return Err(format!(
-            "未知的 ssh 密钥类型: {kind}（钥匙串条目请用 save_ssh_key_entry）"
-        ));
+        return Err(crate::i18n::tr("err.unknownSshKeyKind", &[("kind", &kind)]));
     }
     let key = sync_secret_key_for(&profile_id, &kind)?;
 
     let mut s = settings::load(&app);
     let profile = settings::find_connection(&s, &profile_id)
-        .ok_or_else(|| format!("连接配置不存在: {profile_id}"))?
+        .ok_or_else(|| crate::i18n::tr("err.connProfileNotFound", &[("id", &profile_id)]))?
         .clone();
     if profile.kind != "ssh" {
-        return Err("仅 SSH 连接支持保存密码 / 私钥口令".into());
+        return Err(crate::i18n::t("err.onlySshSupportsSecret").into());
     }
 
     let dir = secret_store::config_dir(&app)?;
     let backend = if secret.is_empty() {
         let prefer = backend_hint(&profile.secret_backend);
         secret_store::delete_secret_any(&dir, &key, prefer)?;
-        log::info!("已清除 SSH 连接 {} 的{}密钥", profile_id, kind);
+        log::info!(
+            "{}",
+            crate::i18n::tr(
+                "log.connSecretCleared",
+                &[("id", &profile_id), ("kind", &kind)],
+            )
+        );
         String::new()
     } else {
         let backend = secret_store::save_secret(&dir, &key, &secret)?;
         log::info!(
-            "已保存 SSH 连接 {} 的{}密钥（{}）",
-            profile_id,
-            kind,
-            backend.as_str()
+            "{}",
+            crate::i18n::tr(
+                "log.connSecretSaved",
+                &[
+                    ("id", &profile_id),
+                    ("kind", &kind),
+                    ("backend", backend.as_str()),
+                ],
+            )
         );
         backend.as_str().to_string()
     };
@@ -263,7 +293,7 @@ pub async fn set_ssh_secret(
         .connections
         .iter_mut()
         .find(|c| c.id == profile_id)
-        .ok_or_else(|| format!("连接配置不存在: {profile_id}"))?;
+        .ok_or_else(|| crate::i18n::tr("err.connProfileNotFound", &[("id", &profile_id)]))?;
     target.secret_backend = backend;
     settings::save(&app, &s)?;
     Ok(())
@@ -302,24 +332,22 @@ pub async fn import_ssh_secrets(
 pub async fn read_private_key_file(path: String) -> CmdResult<String> {
     let p = std::path::PathBuf::from(path.trim());
     if p.extension().is_some_and(|e| e.eq_ignore_ascii_case("pub")) {
-        return Err(
-            "指向了 .pub 公钥文件，请选择对应的私钥（例如 id_rsa，而不是 id_rsa.pub）".into(),
-        );
+        return Err(crate::i18n::t("err.pubKeyNotPrivate").into());
     }
     let meta = tokio::fs::metadata(&p)
         .await
-        .map_err(|e| format!("读取私钥文件失败: {e}"))?;
+        .map_err(|e| crate::i18n::tr("err.readPrivateKeyFailed", &[("err", &e.to_string())]))?;
     if !meta.is_file() {
-        return Err("所选路径不是文件".into());
+        return Err(crate::i18n::t("err.notAFile").into());
     }
     if meta.len() > 256 * 1024 {
-        return Err("私钥文件过大（>256KB），请确认选择的是正确的私钥文件".into());
+        return Err(crate::i18n::t("err.keyFileTooLarge").into());
     }
-    let content = tokio::fs::read_to_string(&p)
-        .await
-        .map_err(|e| format!("读取私钥文件失败（含非文本内容?）: {e}"))?;
+    let content = tokio::fs::read_to_string(&p).await.map_err(|e| {
+        crate::i18n::tr("err.readPrivateKeyFailedBinary", &[("err", &e.to_string())])
+    })?;
     if !content.contains("-----BEGIN") {
-        return Err("文件不像私钥（缺少 PEM 头），请确认选择的是私钥文件".into());
+        return Err(crate::i18n::t("err.notAPrivateKey").into());
     }
     Ok(content)
 }
@@ -405,7 +433,7 @@ pub async fn save_ssh_key_entry(
 ) -> CmdResult<SshKeyEntry> {
     let label = label.trim().to_string();
     if label.is_empty() {
-        return Err("请填写私钥名称".into());
+        return Err(crate::i18n::t("err.keyLabelRequired").into());
     }
     let dir = secret_store::config_dir(&app)?;
     let mut s = settings::load(&app);
@@ -413,7 +441,10 @@ pub async fn save_ssh_key_entry(
     let key_id = match id.as_deref().filter(|v| !v.is_empty()) {
         Some(existing) => {
             if !s.ssh_keys.iter().any(|k| k.id == existing) {
-                return Err(format!("钥匙串条目不存在: {existing}"));
+                return Err(crate::i18n::tr(
+                    "err.keychainEntryMissing",
+                    &[("id", existing)],
+                ));
             }
             existing.to_string()
         }
@@ -425,12 +456,12 @@ pub async fn save_ssh_key_entry(
     if let Some(pem) = pem.as_deref().filter(|p| !p.trim().is_empty()) {
         let pem = pem.trim().to_string();
         let (fp, pk) = key_material_of_pem(&pem, passphrase.as_deref())
-            .ok_or_else(|| "私钥解析失败：内容不是有效的私钥，或口令不正确".to_string())?;
+            .ok_or_else(|| crate::i18n::t("err.keyParseFailed").to_string())?;
         fingerprint = fp;
         public_key = pk;
         secret_store::save_secret(&dir, &key_pem_key(&key_id), &pem)?;
     } else if id.as_deref().filter(|v| !v.is_empty()).is_none() {
-        return Err("请选择要导入的私钥文件".into());
+        return Err(crate::i18n::t("err.selectKeyFile").into());
     }
     if let Some(pass) = passphrase.as_deref() {
         if pass.is_empty() {
@@ -453,7 +484,13 @@ pub async fn save_ssh_key_entry(
     let returned = entry.clone();
     upsert_key_entry(&mut s, entry);
     settings::save(&app, &s)?;
-    log::info!("已保存钥匙串私钥「{}」（{}）", returned.label, returned.id);
+    log::info!(
+        "{}",
+        crate::i18n::tr(
+            "log.keySaved",
+            &[("label", &returned.label), ("id", &returned.id)],
+        )
+    );
     Ok(returned)
 }
 
@@ -469,8 +506,9 @@ pub async fn delete_ssh_key_entry(app: tauri::AppHandle, id: String) -> CmdResul
         .filter(|c| c.kind == "ssh" && c.key_id == id)
         .count();
     if refs > 0 {
-        return Err(format!(
-            "该私钥正被 {refs} 个连接引用，请先在连接设置中改用其他私钥来源"
+        return Err(crate::i18n::tr(
+            "err.keyInUseRefs",
+            &[("n", &refs.to_string())],
         ));
     }
 
@@ -480,7 +518,7 @@ pub async fn delete_ssh_key_entry(app: tauri::AppHandle, id: String) -> CmdResul
     }
     s.ssh_keys.retain(|k| k.id != id);
     settings::save(&app, &s)?;
-    log::info!("已删除钥匙串私钥 {id}");
+    log::info!("{}", crate::i18n::tr("log.keyDeleted", &[("id", &id)]));
     Ok(())
 }
 
@@ -499,10 +537,10 @@ pub async fn save_ssh_identity(
     let label = label.trim().to_string();
     let username = username.trim().to_string();
     if label.is_empty() {
-        return Err("请填写身份名称".into());
+        return Err(crate::i18n::t("err.identityNameRequired").into());
     }
     if username.is_empty() {
-        return Err("请填写用户名".into());
+        return Err(crate::i18n::t("err.usernameRequired2").into());
     }
     let dir = secret_store::config_dir(&app)?;
     let mut s = settings::load(&app);
@@ -510,7 +548,7 @@ pub async fn save_ssh_identity(
     let iid = match id.as_deref().filter(|v| !v.is_empty()) {
         Some(existing) => {
             if !s.ssh_identities.iter().any(|i| i.id == existing) {
-                return Err(format!("身份不存在: {existing}"));
+                return Err(crate::i18n::tr("err.identityMissing", &[("id", existing)]));
             }
             existing.to_string()
         }
@@ -521,7 +559,7 @@ pub async fn save_ssh_identity(
         Some("") => String::new(),
         Some(kid) => {
             if !s.ssh_keys.iter().any(|k| k.id == kid) {
-                return Err(format!("关联的钥匙串私钥不存在: {kid}"));
+                return Err(crate::i18n::tr("err.linkedKeyMissing", &[("id", kid)]));
             }
             kid.to_string()
         }
@@ -543,7 +581,7 @@ pub async fn save_ssh_identity(
         .flatten()
         .is_some();
         if !has_password && password.as_deref().filter(|p| !p.is_empty()).is_none() {
-            return Err("请填写密码，或关联一把钥匙串私钥".into());
+            return Err(crate::i18n::t("err.identityNeedsPasswordOrKey").into());
         }
     }
 
@@ -578,7 +616,13 @@ pub async fn save_ssh_identity(
         None => s.ssh_identities.push(entry.clone()),
     }
     settings::save(&app, &s)?;
-    log::info!("已保存 SSH 身份「{}」（{}）", entry.label, entry.id);
+    log::info!(
+        "{}",
+        crate::i18n::tr(
+            "log.identitySaved",
+            &[("label", &entry.label), ("id", &entry.id)],
+        )
+    );
     Ok(entry)
 }
 
@@ -594,8 +638,9 @@ pub async fn delete_ssh_identity(app: tauri::AppHandle, id: String) -> CmdResult
         .filter(|c| c.kind == "ssh" && c.identity_id == id)
         .count();
     if refs > 0 {
-        return Err(format!(
-            "该身份正被 {refs} 个连接引用，请先在连接设置中解除"
+        return Err(crate::i18n::tr(
+            "err.identityInUseRefs",
+            &[("n", &refs.to_string())],
         ));
     }
 
@@ -603,7 +648,7 @@ pub async fn delete_ssh_identity(app: tauri::AppHandle, id: String) -> CmdResult
         secret_store::delete_secret_any(&dir, &identity_password_key(&id), SecretBackend::Keyring);
     s.ssh_identities.retain(|i| i.id != id);
     settings::save(&app, &s)?;
-    log::info!("已删除 SSH 身份 {id}");
+    log::info!("{}", crate::i18n::tr("log.identityDeleted", &[("id", &id)]));
     Ok(())
 }
 
@@ -644,10 +689,19 @@ pub fn migrate_embedded_to_keychain(app: &tauri::AppHandle) -> usize {
     let migrated = migrate_in(&dir, &mut s);
     if migrated > 0 {
         if let Err(e) = settings::save(app, &s) {
-            log::warn!("钥匙串迁移结果保存失败: {e}");
+            log::warn!(
+                "{}",
+                crate::i18n::tr(
+                    "log.keychainMigrationSaveFailed",
+                    &[("err", &e.to_string())]
+                )
+            );
             return 0;
         }
-        log::info!("钥匙串迁移完成：{migrated} 个连接");
+        log::info!(
+            "{}",
+            crate::i18n::tr("log.keychainMigrationDone", &[("n", &migrated.to_string())])
+        );
     }
     migrated
 }
@@ -687,7 +741,7 @@ fn plan_migrations(dir: &std::path::Path, s: &AppSettings) -> Vec<MigrationPlan>
         let (fingerprint, public_key) = key_material_of_pem(&pem, None).unwrap_or_default();
         plans.push(MigrationPlan {
             profile_id: c.id.clone(),
-            label: format!("{} 的私钥", c.name),
+            label: crate::i18n::tr("diag.keyLabelSuffix", &[("name", &c.name)]),
             pem,
             passphrase,
             fingerprint,
@@ -719,7 +773,10 @@ fn migrate_in(dir: &std::path::Path, s: &mut AppSettings) -> usize {
             created_at: settings::now_secs(),
         });
         migrated += 1;
-        log::info!("已迁移连接 {} 的导入式私钥到钥匙串", plan.profile_id);
+        log::info!(
+            "{}",
+            crate::i18n::tr("log.embeddedKeyMigrated", &[("id", &plan.profile_id)])
+        );
     }
     migrated
 }
@@ -747,10 +804,19 @@ fn cleanup_removed_in(dir: &std::path::Path, old: &AppSettings, new: &AppSetting
             key_pem_key(&c.id),
         ] {
             if let Err(e) = secret_store::delete_secret_any(dir, &key, prefer) {
-                log::warn!("清理已删除 SSH 连接 {} 的密钥失败: {e}", c.id);
+                log::warn!(
+                    "{}",
+                    crate::i18n::tr(
+                        "log.removedConnSecretsCleanFailed",
+                        &[("id", &c.id), ("err", &e.to_string())],
+                    )
+                );
             }
         }
-        log::info!("已清理已删除 SSH 连接 {} 的密钥", c.id);
+        log::info!(
+            "{}",
+            crate::i18n::tr("log.removedConnSecretsCleaned", &[("id", &c.id)])
+        );
     }
 }
 

@@ -17,7 +17,7 @@ async fn volume_users(d: &bollard::Docker) -> Result<HashMap<String, Vec<String>
             ..Default::default()
         }))
         .await
-        .map_err(|e| format!("获取容器列表失败: {e}"))?;
+        .map_err(|e| crate::i18n::tr("err.list_containers_generic", &[("err", &e.to_string())]))?;
 
     let mut users: HashMap<String, Vec<String>> = HashMap::new();
     for c in &list {
@@ -48,12 +48,12 @@ pub async fn list_volumes() -> CmdResult<Vec<VolumeDto>> {
         async {
             d.list_volumes(None::<ListVolumesOptions>)
                 .await
-                .map_err(|e| format!("获取卷列表失败: {e}"))
+                .map_err(|e| crate::i18n::tr("err.list_volumes_failed", &[("err", &e.to_string())]))
         },
         async {
             d.df(None::<DataUsageOptions>)
                 .await
-                .map_err(|e| format!("获取磁盘占用失败: {e}"))
+                .map_err(|e| crate::i18n::tr("err.disk_usage_generic", &[("err", &e.to_string())]))
         }
     );
     let list = list?;
@@ -112,7 +112,7 @@ pub async fn list_volumes() -> CmdResult<Vec<VolumeDto>> {
 #[tauri::command]
 pub async fn create_volume(spec: VolumeCreateSpec) -> CmdResult<()> {
     let name = spec.name.trim();
-    validate_resource_name(name, "卷")?;
+    validate_resource_name(name, crate::i18n::t("label.volume"))?;
 
     let driver = spec
         .driver
@@ -130,7 +130,10 @@ pub async fn create_volume(spec: VolumeCreateSpec) -> CmdResult<()> {
     }
 
     let d = docker().await?;
-    log::info!("创建卷：{name}（驱动 {driver}）");
+    log::info!(
+        "{}",
+        crate::i18n::tr("log.volumeCreated", &[("name", name), ("driver", &driver)])
+    );
     d.create_volume(VolumeCreateOptions {
         name: Some(name.to_string()),
         driver: Some(driver),
@@ -138,29 +141,45 @@ pub async fn create_volume(spec: VolumeCreateSpec) -> CmdResult<()> {
         ..Default::default()
     })
     .await
-    .map_err(|e| format!("创建卷失败: {e}"))?;
+    .map_err(|e| crate::i18n::tr("err.volume_create_failed", &[("err", &e.to_string())]))?;
     Ok(())
 }
 
 /// 删除卷；被容器引用时拒绝（force 时跳过本地检查，交给 daemon 强制删除）
 #[tauri::command]
 pub async fn remove_volume(name: String, force: bool) -> CmdResult<()> {
-    log::info!("删除卷：{name}{}", if force { "（force）" } else { "" });
+    log::info!(
+        "{}",
+        crate::i18n::tr(
+            "log.volumeRemoved",
+            &[
+                ("name", &name),
+                (
+                    "force",
+                    if force {
+                        crate::i18n::t("log.forceSuffix")
+                    } else {
+                        ""
+                    }
+                ),
+            ]
+        )
+    );
     let d = docker().await?;
     if !force {
         let users = volume_users(&d).await?;
         if let Some(cs) = users.get(name.as_str()) {
             if !cs.is_empty() {
-                return Err(format!(
-                    "卷 {name} 正在被 {} 个容器使用，请先卸载相关容器",
-                    cs.len()
+                return Err(crate::i18n::tr(
+                    "err.volumeInUsePrune",
+                    &[("name", &name), ("n", &cs.len().to_string())],
                 ));
             }
         }
     }
     d.remove_volume(&name, Some(RemoveVolumeOptions { force }))
         .await
-        .map_err(|e| format!("删除卷失败: {e}"))?;
+        .map_err(|e| crate::i18n::tr("err.volume_remove_failed", &[("err", &e.to_string())]))?;
     Ok(())
 }
 

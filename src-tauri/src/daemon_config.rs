@@ -36,7 +36,10 @@ fn read_json_file(path: &str) -> Result<(bool, String), String> {
     match std::fs::read_to_string(path) {
         Ok(text) => Ok((true, text)),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok((false, String::new())),
-        Err(e) => Err(format!("读取 {path} 失败: {e}")),
+        Err(e) => Err(crate::i18n::tr(
+            "err.daemonReadFailed",
+            &[("path", path), ("err", &e.to_string())],
+        )),
     }
 }
 
@@ -53,25 +56,28 @@ fn validate_content(content: &str, current: Option<&str>) -> (Vec<String>, Vec<S
     let v: serde_json::Value = match serde_json::from_str(content) {
         Ok(v) => v,
         Err(e) => {
-            errors.push(format!("JSON 语法错误: {e}"));
+            errors.push(crate::i18n::tr(
+                "diag.jsonSyntaxError",
+                &[("err", &e.to_string())],
+            ));
             return (errors, warnings);
         }
     };
     let Some(obj) = v.as_object() else {
-        errors.push("顶层必须是 JSON 对象（{...}）".into());
+        errors.push(crate::i18n::t("diag.topLevelObject").into());
         return (errors, warnings);
     };
     if let Some(mirrors) = obj.get("registry-mirrors") {
         match mirrors.as_array() {
-            None => errors.push("registry-mirrors 必须是字符串数组".into()),
+            None => errors.push(crate::i18n::t("diag.mirrorsMustBeArray").into()),
             Some(items) => {
                 for item in items {
                     match item.as_str() {
                         Some(s) if s.trim().is_empty() => {
-                            warnings.push("registry-mirrors 存在空字符串条目，daemon 将忽略".into())
+                            warnings.push(crate::i18n::t("diag.mirrorsEmptyEntry").into())
                         }
                         Some(_) => {}
-                        None => errors.push("registry-mirrors 必须是字符串数组".into()),
+                        None => errors.push(crate::i18n::t("diag.mirrorsMustBeArray").into()),
                     }
                 }
             }
@@ -79,17 +85,13 @@ fn validate_content(content: &str, current: Option<&str>) -> (Vec<String>, Vec<S
     }
     // hosts 与 systemd 版 docker.service 的 ExecStart -H 冲突，是 daemon 拒绝启动的常见原因
     if obj.contains_key("hosts") {
-        warnings.push(
-            "检测到 hosts 键：systemd 部署的 Docker 与其 ExecStart 的 -H 参数冲突，可能导致 daemon 无法启动".into(),
-        );
+        warnings.push(crate::i18n::t("diag.hostsKeyWarning").into());
     }
     // 存储位置类键变更后既有镜像/容器不可见；新值本身是否合法交给深度校验
     if let Some(cur) = current.and_then(|c| serde_json::from_str::<serde_json::Value>(c).ok()) {
         for key in ["storage-driver", "data-root"] {
             if obj.contains_key(key) && cur.get(key).is_some() && obj.get(key) != cur.get(key) {
-                warnings.push(format!(
-                    "{key} 与当前配置不同：切换后既有的镜像/容器可能不可见，请确认后再应用"
-                ));
+                warnings.push(crate::i18n::tr("diag.keyChangeWarning", &[("key", key)]));
             }
         }
     }
@@ -139,7 +141,13 @@ async fn deep_validate(content: &str) -> (bool, Vec<String>) {
     if combined.contains("permission denied") || combined.to_lowercase().contains("root") {
         return (false, Vec::new());
     }
-    (true, vec![format!("dockerd 校验失败: {combined}")])
+    (
+        true,
+        vec![crate::i18n::tr(
+            "diag.dockerdValidateFailed",
+            &[("combined", &combined)],
+        )],
+    )
 }
 
 fn trim(s: &[u8]) -> String {
@@ -150,7 +158,7 @@ fn trim(s: &[u8]) -> String {
 /// Windows 版不支持本地 daemon 管理（UI 亦隐藏入口，此处双保险）
 #[cfg(windows)]
 fn unsupported_platform() -> CmdResult<()> {
-    Err("该功能仅支持 Linux 本机 Docker".to_string())
+    Err(crate::i18n::t("err.linuxOnly").to_string())
 }
 
 #[cfg(not(windows))]
@@ -228,7 +236,8 @@ pub async fn write_daemon_json(content: String) -> CmdResult<()> {
     let (exists, _) = read_daemon_raw()?;
 
     let tmp = std::env::temp_dir().join(format!("dockpilot-daemon-{}.json", uuid::Uuid::new_v4()));
-    std::fs::write(&tmp, &content).map_err(|e| format!("写入临时文件失败: {e}"))?;
+    std::fs::write(&tmp, &content)
+        .map_err(|e| crate::i18n::tr("err.tmpWriteFailed", &[("err", &e.to_string())]))?;
 
     let tmp_display = tmp.display();
     // dockerd 门禁：配置非法时中止且不落盘；旧版 dockerd 无 --validate 时自动跳过
@@ -247,27 +256,32 @@ pub async fn write_daemon_json(content: String) -> CmdResult<()> {
         .args(["/bin/sh", "-c", &script])
         .output()
         .await
-        .map_err(|e| format!("无法启动 pkexec: {e}（请确认系统安装了 polkit）"))?;
+        .map_err(|e| crate::i18n::tr("err.pkexecStartFailed", &[("err", &e.to_string())]))?;
 
     let _ = std::fs::remove_file(&tmp);
 
     if !out.status.success() {
         let stderr = trim(&out.stderr);
         if stderr.contains("dismissed") || stderr.contains("cancelled") {
-            return Err("已取消授权，未修改配置".into());
+            return Err(crate::i18n::t("log.authCancelled").into());
         }
-        log::warn!("daemon.json 写入失败：{stderr}");
-        return Err(format!(
-            "写入 daemon.json 失败: {stderr}（可在下方改用终端命令手动执行）"
+        log::warn!(
+            "{}",
+            crate::i18n::tr("log.daemonJsonWriteFailed", &[("stderr", &stderr)])
+        );
+        return Err(crate::i18n::tr(
+            "err.daemonJsonWriteFailed2",
+            &[("stderr", &stderr)],
         ));
     }
+    let what = if exists {
+        crate::i18n::tr("diag.bakNote", &[("bak", DAEMON_JSON_BAK)])
+    } else {
+        crate::i18n::t("diag.newConfig").to_string()
+    };
     log::info!(
-        "daemon.json 已写入（{}）",
-        if exists {
-            format!("原文件已备份为 {DAEMON_JSON_BAK}")
-        } else {
-            "新建配置".to_string()
-        }
+        "{}",
+        crate::i18n::tr("log.daemonJsonWritten", &[("what", &what)])
     );
     Ok(())
 }
@@ -276,7 +290,7 @@ pub async fn write_daemon_json(content: String) -> CmdResult<()> {
 #[tauri::command]
 pub async fn restart_docker() -> CmdResult<()> {
     unsupported_platform()?;
-    log::info!("重启 Docker 服务（systemctl restart docker）");
+    log::info!("{}", crate::i18n::t("log.dockerRestartStart"));
     let out = tokio::time::timeout(
         Duration::from_secs(60),
         tokio::process::Command::new("pkexec")
@@ -284,14 +298,20 @@ pub async fn restart_docker() -> CmdResult<()> {
             .output(),
     )
     .await
-    .map_err(|_| "重启超时，请检查 systemd 状态".to_string())?
-    .map_err(|e| format!("无法启动 pkexec: {e}（请确认系统安装了 polkit）"))?;
+    .map_err(|_| crate::i18n::t("err.dockerRestartTimeout").to_string())?
+    .map_err(|e| crate::i18n::tr("err.pkexecStartFailed", &[("err", &e.to_string())]))?;
 
     if !out.status.success() {
-        log::warn!("重启 Docker 失败: {}", trim(&out.stderr));
-        return Err(format!("重启 Docker 失败: {}", trim(&out.stderr)));
+        log::warn!(
+            "{}",
+            crate::i18n::tr("err.dockerRestartFailed", &[("err", &trim(&out.stderr))])
+        );
+        return Err(crate::i18n::tr(
+            "err.dockerRestartFailed",
+            &[("err", &trim(&out.stderr))],
+        ));
     }
-    log::info!("Docker 服务已重启");
+    log::info!("{}", crate::i18n::t("log.dockerRestarted"));
     Ok(())
 }
 
@@ -316,7 +336,7 @@ pub async fn generate_daemon_command(content: String) -> CmdResult<String> {
 pub async fn test_mirror(url: String) -> CmdResult<u64> {
     let url = crate::settings::normalize_mirror(&url);
     if url.is_empty() {
-        return Err("地址为空".into());
+        return Err(crate::i18n::t("err.mirrorUrlEmpty").into());
     }
 
     static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
@@ -329,13 +349,20 @@ pub async fn test_mirror(url: String) -> CmdResult<u64> {
     });
 
     let start = Instant::now();
-    client
-        .get(format!("{url}/v2/"))
-        .send()
-        .await
-        .map_err(|e| format!("{url} 不可达: {e}"))?;
+    client.get(format!("{url}/v2/")).send().await.map_err(|e| {
+        crate::i18n::tr(
+            "err.mirrorUnreachable",
+            &[("url", &url), ("err", &e.to_string())],
+        )
+    })?;
     let ms = start.elapsed().as_millis() as u64;
-    log::info!("镜像源测速：{url} → {ms} ms");
+    log::info!(
+        "{}",
+        crate::i18n::tr(
+            "log.mirrorSpeedTest",
+            &[("url", &url), ("ms", &ms.to_string())],
+        )
+    );
     Ok(ms)
 }
 

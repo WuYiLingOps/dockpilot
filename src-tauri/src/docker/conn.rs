@@ -119,7 +119,7 @@ pub async fn docker() -> CmdResult<Docker> {
 
 /// 连接错误统一包装
 fn build_err(e: bollard::errors::Error) -> String {
-    format!("连接 Docker daemon 失败: {e}")
+    crate::i18n::tr("err.dockerConnectFailed", &[("err", &e.to_string())])
 }
 
 /// 按连接类型构建 bollard 连接；ssh 先建立/复用本地 SSH 隧道再连接。
@@ -141,16 +141,19 @@ pub async fn build_conn_with(
             #[cfg(unix)]
             {
                 let path = conn.effective_socket();
-                let d = Docker::connect_with_socket(&path, timeout, API_DEFAULT_VERSION)
-                    .map_err(|e| format!("连接 Docker daemon 失败（socket: {path}）: {e}"))?;
+                let d = Docker::connect_with_socket(&path, timeout, API_DEFAULT_VERSION).map_err(
+                    |e| {
+                        crate::i18n::tr(
+                            "err.dockerConnectSocketFailed",
+                            &[("path", &path), ("err", &e.to_string())],
+                        )
+                    },
+                )?;
                 Ok((d, None))
             }
             #[cfg(windows)]
             {
-                Err(
-                    "Windows 版不支持本地 Docker 连接，请在设置中配置远程连接（SSH / TLS / TCP）"
-                        .into(),
-                )
+                Err(crate::i18n::t("err.windowsNoLocalDocker").into())
             }
         }
         "tcp" => {
@@ -165,7 +168,7 @@ pub async fn build_conn_with(
         "tls" => {
             let dir = Path::new(&p.cert_path);
             if p.cert_path.is_empty() {
-                return Err("TLS 连接需要配置证书目录".into());
+                return Err(crate::i18n::t("err.tlsCertDirRequired").into());
             }
             let (key, cert, ca) = (
                 dir.join("key.pem"),
@@ -174,9 +177,9 @@ pub async fn build_conn_with(
             );
             for f in [&key, &cert, &ca] {
                 if !f.exists() {
-                    return Err(format!(
-                        "证书文件缺失: {}（证书目录下需要 ca.pem、cert.pem、key.pem）",
-                        f.display()
+                    return Err(crate::i18n::tr(
+                        "err.tlsCertMissing",
+                        &[("path", &f.display().to_string())],
                     ));
                 }
             }
@@ -199,7 +202,9 @@ pub async fn build_conn_with(
             #[cfg(unix)]
             {
                 let d = Docker::connect_with_socket(&endpoint, timeout, API_DEFAULT_VERSION)
-                    .map_err(|e| format!("经 SSH 隧道连接 Docker daemon 失败: {e}"))?;
+                    .map_err(|e| {
+                        crate::i18n::tr("err.dockerViaSshFailed", &[("err", &e.to_string())])
+                    })?;
                 Ok((d, Some(endpoint)))
             }
             #[cfg(windows)]
@@ -209,11 +214,13 @@ pub async fn build_conn_with(
                     timeout,
                     API_DEFAULT_VERSION,
                 )
-                .map_err(|e| format!("经 SSH 隧道连接 Docker daemon 失败: {e}"))?;
+                .map_err(|e| {
+                    crate::i18n::tr("err.dockerViaSshFailed", &[("err", &e.to_string())])
+                })?;
                 Ok((d, Some(endpoint)))
             }
         }
-        other => Err(format!("未知连接类型: {other}")),
+        other => Err(crate::i18n::tr("err.unknownConnKind", &[("kind", other)])),
     }
 }
 
@@ -228,7 +235,10 @@ async fn probe_with(
 ) -> Result<(u128, String), String> {
     let start = std::time::Instant::now();
     let (d, _) = build_conn_with(conn, PROBE_TIMEOUT, secrets).await?;
-    let v = d.version().await.map_err(|e| format!("连接不可达: {e}"))?;
+    let v = d
+        .version()
+        .await
+        .map_err(|e| crate::i18n::tr("err.connUnreachable", &[("err", &e.to_string())]))?;
     Ok((start.elapsed().as_millis(), v.version.unwrap_or_default()))
 }
 
@@ -249,7 +259,13 @@ pub async fn test_connection(
     ssh_password: Option<String>,
     key_passphrase: Option<String>,
 ) -> ConnectionTestResult {
-    log::info!("测试连接「{}」（{}）", profile.name, profile.kind);
+    log::info!(
+        "{}",
+        crate::i18n::tr(
+            "log.connTestStart",
+            &[("name", &profile.name), ("kind", &profile.kind)],
+        )
+    );
     let secrets = TransientSecrets {
         password: ssh_password.filter(|s| !s.is_empty()),
         passphrase: key_passphrase.filter(|s| !s.is_empty()),
@@ -268,7 +284,13 @@ pub async fn test_connection(
             if conn.profile.kind == "ssh" && active().profile.id != conn.profile.id {
                 ssh_client::stop(&conn.profile.id).await;
             }
-            log::info!("测试连接成功：{ms} ms，Docker {version}");
+            log::info!(
+                "{}",
+                crate::i18n::tr(
+                    "log.connTestOk",
+                    &[("ms", &ms.to_string()), ("version", &version),],
+                )
+            );
             ConnectionTestResult {
                 ok: true,
                 latency_ms: Some(u64::try_from(ms).unwrap_or(u64::MAX)),
@@ -280,7 +302,7 @@ pub async fn test_connection(
             if conn.profile.kind == "ssh" && active().profile.id != conn.profile.id {
                 ssh_client::stop(&conn.profile.id).await;
             }
-            log::warn!("测试连接失败: {e}");
+            log::warn!("{}", crate::i18n::tr("log.connTestFailed", &[("err", &e)]));
             ConnectionTestResult {
                 ok: false,
                 latency_ms: None,
@@ -299,14 +321,17 @@ pub async fn switch_connection(app: tauri::AppHandle, id: String) -> CmdResult<C
     let s = settings::load(&app);
     let profile = settings::find_connection(&s, &id)
         .cloned()
-        .ok_or_else(|| format!("连接配置不存在: {id}"))?;
+        .ok_or_else(|| crate::i18n::tr("err.connNotFound", &[("id", &id)]))?;
 
     let conn = ActiveConn::new(profile.clone());
     if let Err(e) = probe(&conn).await {
         if profile.kind == "ssh" && active().profile.id != profile.id {
             ssh_client::stop(&profile.id).await;
         }
-        let msg = format!("切换到「{}」失败: {e}", profile.name);
+        let msg = crate::i18n::tr(
+            "err.connSwitchFailed",
+            &[("name", &profile.name), ("err", &e)],
+        );
         log::warn!("{msg}");
         return Err(msg);
     }
@@ -330,7 +355,13 @@ pub async fn switch_connection(app: tauri::AppHandle, id: String) -> CmdResult<C
     ));
     w.docker = Some((gen, d));
     drop(w);
-    log::info!("连接已切换：{}（{}）", profile.name, profile.kind);
+    log::info!(
+        "{}",
+        crate::i18n::tr(
+            "log.connSwitched",
+            &[("name", &profile.name), ("kind", &profile.kind)],
+        )
+    );
 
     // 重启全局事件监听（旧任务持有旧连接句柄）
     super::events::start_global_listener(
@@ -393,8 +424,9 @@ pub fn validate_resource_name(name: &str, label: &str) -> Result<(), String> {
     if valid {
         Ok(())
     } else {
-        Err(format!(
-            "{label}名称只能包含字母、数字、下划线、点和中划线，且以字母或数字开头"
+        Err(crate::i18n::tr(
+            "err.resourceNameInvalid",
+            &[("label", label)],
         ))
     }
 }

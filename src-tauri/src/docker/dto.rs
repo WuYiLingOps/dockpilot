@@ -440,6 +440,8 @@ pub struct PullProgress {
     pub id: Option<String>,
     pub progress: Option<String>,
     pub error: Option<String>,
+    /// 取消哨兵：取消以稳定布尔表达，前端不比较 error 文案（error 随界面语言本地化）
+    pub cancelled: bool,
     pub done: bool,
 }
 
