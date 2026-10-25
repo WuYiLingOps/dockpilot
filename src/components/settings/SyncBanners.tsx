@@ -5,6 +5,7 @@
  */
 
 import { useCloudSyncState, useSyncActions } from "../../hooks/useCloudSync";
+import { useT } from "../../lib/i18n";
 import { Button } from "../ui";
 import { TriangleAlert, Download, Upload } from "lucide-react";
 
@@ -12,34 +13,47 @@ import { TriangleAlert, Download, Upload } from "lucide-react";
 export function SyncBanners({ onManage }: { onManage: () => void }) {
   const state = useCloudSyncState();
   const actions = useSyncActions();
+  const t = useT();
 
   if (state.emptyVaultPending) {
+    const pending = state.emptyVaultPending.payload;
+    // 数量清单按非零项拼接（中英各自的分隔符由词典提供）
+    const summaryParts: string[] = [];
+    if (pending.connections.length > 0) {
+      summaryParts.push(
+        t(pending.connections.length === 1 ? "syncBanner.connCountOne" : "syncBanner.connCount", {
+          n: pending.connections.length,
+        }),
+      );
+    }
+    if (pending.registries.length > 0) {
+      summaryParts.push(
+        t(pending.registries.length === 1 ? "syncBanner.regCountOne" : "syncBanner.regCount", {
+          n: pending.registries.length,
+        }),
+      );
+    }
+    const summary = summaryParts.join(t("syncBanner.listJoin"));
+
     return (
       <div className="fixed bottom-4 right-4 z-40 w-[380px] rounded-card border border-warn/30 bg-panel p-4 shadow-[var(--app-shadow)]" data-no-drag>
         <div className="flex items-start gap-2.5">
           <TriangleAlert size={16} className="mt-0.5 shrink-0 text-warn" />
           <div className="min-w-0 flex-1">
-            <div className="text-[13px] font-semibold text-fg">发现云端备份</div>
+            <div className="text-[13px] font-semibold text-fg">
+              {t("syncBanner.cloudBackupFound")}
+            </div>
             <p className="mt-1 text-[12px] leading-4 text-fg3">
-              本机没有连接与仓库数据，云端存在
-              {state.emptyVaultPending.payload.connections.length > 0 &&
-                ` ${state.emptyVaultPending.payload.connections.length} 条连接配置`}
-              {state.emptyVaultPending.payload.connections.length > 0 &&
-                state.emptyVaultPending.payload.registries.length > 0 &&
-                "、"}
-              {state.emptyVaultPending.payload.registries.length > 0 &&
-                ` ${state.emptyVaultPending.payload.registries.length} 条仓库凭据信息`}
-              （凭据密码保存在各设备本机，不会同步）。
-              为防止误覆盖云端，请选择如何处理：
+              {t("syncBanner.emptyVaultDesc", { summary })}
             </p>
             <div className="mt-2.5 flex gap-2">
               <Button variant="primary" onClick={() => void actions.restoreEmptyVault()}>
                 <Download size={13} />
-                恢复云端数据
+                {t("syncBanner.restoreCloud")}
               </Button>
               <Button variant="outline" onClick={() => void actions.pushEmptyVault()}>
                 <Upload size={13} />
-                推送本机数据
+                {t("syncBanner.pushLocal")}
               </Button>
             </div>
           </div>
@@ -59,9 +73,9 @@ export function SyncBanners({ onManage }: { onManage: () => void }) {
       >
         <TriangleAlert size={16} className="shrink-0 text-err" />
         <span className="min-w-0 flex-1 text-[12px] leading-4 text-fg2">
-          GitHub 授权已失效，云同步已暂停 —— 点击重新连接（数据不会丢失）
+          {t("syncBanner.tokenInvalid")}
         </span>
-        <span className="shrink-0 text-[11px] text-accent">去处理</span>
+        <span className="shrink-0 text-[11px] text-accent">{t("syncBanner.goFix")}</span>
       </button>
     );
   }
@@ -79,7 +93,12 @@ export function SyncBanners({ onManage }: { onManage: () => void }) {
     >
       <TriangleAlert size={15} className="shrink-0 text-warn" />
       <span className="text-[12px] text-fg">
-        云同步需要处理：{state.syncState === "CONFLICT" ? "云端数据与本机密码不一致" : "本次推送会删除过多数据，已暂停"}
+        {t("syncBanner.needsAttention", {
+          reason:
+            state.syncState === "CONFLICT"
+              ? t("syncBanner.conflict")
+              : t("syncBanner.blocked"),
+        })}
       </span>
     </button>
   );

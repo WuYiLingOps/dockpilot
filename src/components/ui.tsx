@@ -7,6 +7,8 @@ import type {
 } from "react";
 import { useEffect } from "react";
 import { withDragRegion } from "../lib/drag";
+import { t, useT } from "../lib/i18n";
+import type { MsgKey } from "../lib/i18n/zh";
 import type { PortDto } from "../types/docker";
 
 export function cn(...parts: Array<string | false | null | undefined>): string {
@@ -70,14 +72,14 @@ export function IconButton({
 /* 状态 — 圆点 + 文字（OrbStack 主视觉），Badge 仅保留给端口等标签      */
 /* ---------------------------------------------------------------- */
 
-const STATE_LABEL: Record<string, string> = {
-  running: "运行中",
-  exited: "已退出",
-  paused: "已暂停",
-  created: "已创建",
-  restarting: "重启中",
-  removing: "移除中",
-  dead: "已死亡",
+const STATE_KEYS: Record<string, MsgKey> = {
+  running: "state.running",
+  exited: "state.exited",
+  paused: "state.paused",
+  created: "state.created",
+  restarting: "state.restarting",
+  removing: "state.removing",
+  dead: "state.dead",
 };
 
 const STATE_TONE: Record<string, string> = {
@@ -96,7 +98,8 @@ export function statusColor(state: string): string {
 }
 
 export function statusText(state: string): string {
-  return STATE_LABEL[state] ?? (state || "未知");
+  const key = STATE_KEYS[state];
+  return key ? t(key) : state || t("state.unknown");
 }
 
 export function StatusDot({
@@ -123,20 +126,31 @@ export function StateBadge({ state }: { state: string }) {
   );
 }
 
-/** 健康检查状态：文案与色调的单一来源（列表徽标、详情卡片共用） */
-export const HEALTH_META: Record<
-  string,
-  { tone: "ok" | "warn" | "err"; label: string; title: string }
-> = {
-  healthy: { tone: "ok", label: "健康", title: "健康检查通过" },
-  unhealthy: { tone: "err", label: "不健康", title: "健康检查未通过" },
-  starting: { tone: "warn", label: "检查中", title: "健康检查启动中" },
-};
+/** 健康检查状态：文案与色调的单一来源（列表徽标、详情卡片共用）。未知状态回落原值 */
+export function healthMeta(health: string): {
+  tone: "ok" | "warn" | "err";
+  label: string;
+  title: string;
+} {
+  switch (health) {
+    case "healthy":
+      return { tone: "ok", label: t("health.healthy"), title: t("health.healthyTitle") };
+    case "unhealthy":
+      return { tone: "err", label: t("health.unhealthy"), title: t("health.unhealthyTitle") };
+    case "starting":
+      return { tone: "warn", label: t("health.starting"), title: t("health.startingTitle") };
+    default:
+      return { tone: "warn", label: health, title: health };
+  }
+}
+
+const KNOWN_HEALTH = new Set(["healthy", "unhealthy", "starting"]);
 
 /** 健康检查徽标：着色小圆片，与 compose 项目徽标同视觉语言，置于容器名旁 */
 export function HealthBadge({ health }: { health: string }) {
-  const meta = HEALTH_META[health];
-  if (!meta) return null;
+  // 未知状态不渲染徽标（与 HEALTH_META 缺项返回 null 的历史行为一致）
+  if (!KNOWN_HEALTH.has(health)) return null;
+  const meta = healthMeta(health);
   return (
     <span
       aria-label={meta.title}
@@ -218,7 +232,7 @@ export function Input({ className, ...props }: InputHTMLAttributes<HTMLInputElem
 export function SearchInput({
   value,
   onChange,
-  placeholder = "搜索",
+  placeholder,
   className,
 }: {
   value: string;
@@ -226,6 +240,7 @@ export function SearchInput({
   placeholder?: string;
   className?: string;
 }) {
+  const t = useT();
   return (
     <div className={cn("relative", className)}>
       <Search
@@ -235,7 +250,7 @@ export function SearchInput({
       <input
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
+        placeholder={placeholder ?? t("common.search")}
         data-no-drag
         className={cn(
           "h-8 w-full rounded-ctl border border-edge-strong bg-panel pl-7 pr-7 text-[13px] text-fg outline-none transition-shadow placeholder:text-fg3 focus:border-accent focus:ring-[3px] focus:ring-accent/25",
@@ -245,7 +260,7 @@ export function SearchInput({
       {value && (
         <button
           type="button"
-          aria-label="清空搜索"
+          aria-label={t("common.clearSearch")}
           data-no-drag
           onClick={() => onChange("")}
           className="absolute right-1.5 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-full text-fg3 transition-colors hover:bg-hover hover:text-fg"
@@ -457,6 +472,7 @@ export function Modal({
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
 
+  const t = useT();
   if (!open) return null;
   return (
     <div
@@ -472,7 +488,7 @@ export function Modal({
       >
         <div className="mb-3 flex items-center justify-between">
           <h3 className="text-[15px] font-semibold text-fg">{title}</h3>
-          <IconButton title="关闭" onClick={onClose}>
+          <IconButton title={t("common.close")} onClick={onClose}>
             <X size={16} />
           </IconButton>
         </div>
@@ -557,12 +573,13 @@ export function PageHeader({
 }
 
 export function ErrorNote({ message, onRetry }: { message: string; onRetry?: () => void }) {
+  const t = useT();
   return (
     <div className="flex h-full flex-col items-center justify-center gap-3 p-8">
       <div className="max-w-lg break-all text-center text-[13px] text-err">{message}</div>
       {onRetry && (
         <Button variant="outline" onClick={onRetry}>
-          重试
+          {t("common.retry")}
         </Button>
       )}
     </div>

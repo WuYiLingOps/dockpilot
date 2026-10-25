@@ -1,5 +1,6 @@
 import { invoke, Channel } from "@tauri-apps/api/core";
 import { applog } from "./applog";
+import { t } from "./i18n";
 import type {
   ContainerDto,
   ContainerHealthDto,
@@ -62,7 +63,7 @@ function withCancel(sidPromise: Promise<string>, onError?: (e: string) => void):
   return () => {
     void sidPromise
       .then((sid) => invoke("cancel_stream", { streamId: sid }))
-      .catch((e) => applog.errorOf("取消流任务失败", e));
+      .catch((e) => applog.errorOf(t("log.cancelStreamFailed"), e));
   };
 }
 
@@ -268,7 +269,7 @@ export const api = {
     const ch = new Channel<DockerEventDto>();
     ch.onmessage = onEvent;
     void invoke("subscribe_events", { onEvent: ch }).catch((e) =>
-      applog.errorOf("订阅 Docker 事件失败，列表将退化为手动刷新", e),
+      applog.errorOf(t("log.subscribeEventsFailed"), e),
     );
     return () => {};
   },
@@ -295,6 +296,9 @@ export const api = {
 
   setSettings: (settings: AppSettings) =>
     invoke<AppSettings>("set_settings", { settings }),
+
+  /** 上报前端解析后的界面语言（"system" 的解析结果仅前端可知；后端错误消息/托盘/通知文案使用） */
+  setUiLanguage: (language: string) => invoke<void>("set_ui_language", { language }),
 
   /** 关闭询问弹窗的回传：action 决定本次行为，remember 时持久化到设置 */
   applyCloseAction: (action: CloseAction, remember: boolean) =>

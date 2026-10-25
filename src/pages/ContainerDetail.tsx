@@ -11,6 +11,8 @@ import {
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
 import { actionPendingText, useContainerActions } from "../hooks/useContainerActions";
+import { useT } from "../lib/i18n";
+import type { MsgKey } from "../lib/i18n/zh";
 import { withDragRegion } from "../lib/drag";
 import { InspectView } from "../components/detail/InspectView";
 import { FileBrowserView } from "../components/detail/FileBrowserView";
@@ -31,13 +33,13 @@ import {
 
 type Tab = "overview" | "logs" | "terminal" | "process" | "files" | "inspect";
 
-const TABS: { key: Tab; label: string }[] = [
-  { key: "overview", label: "概览" },
-  { key: "logs", label: "日志" },
-  { key: "terminal", label: "终端" },
-  { key: "process", label: "进程" },
-  { key: "files", label: "文件" },
-  { key: "inspect", label: "详情" },
+const TABS: { key: Tab; labelKey: MsgKey }[] = [
+  { key: "overview", labelKey: "cd.tabOverview" },
+  { key: "logs", labelKey: "cd.tabLogs" },
+  { key: "terminal", labelKey: "cd.tabTerminal" },
+  { key: "process", labelKey: "cd.tabProcess" },
+  { key: "files", labelKey: "cd.tabFiles" },
+  { key: "inspect", labelKey: "cd.tabInspect" },
 ];
 
 export function ContainerDetail({
@@ -47,6 +49,7 @@ export function ContainerDetail({
   id: string;
   onBack: () => void;
 }) {
+  const t = useT();
   const query = useQuery({
     queryKey: ["containers"],
     queryFn: () => api.listContainers(true),
@@ -76,7 +79,7 @@ export function ContainerDetail({
         {...withDragRegion()}
         className="flex h-12 shrink-0 items-center gap-2.5 border-b border-edge bg-panel px-3"
       >
-        <IconButton title="返回列表" onClick={onBack} data-no-drag>
+        <IconButton title={t("cd.back")} onClick={onBack} data-no-drag>
           <ChevronLeft size={17} />
         </IconButton>
         {c ? (
@@ -116,7 +119,7 @@ export function ContainerDetail({
               onClick={() => action.mutate({ id: c.id, act: "start" })}
             >
               {actPending("start") ? <Spinner className="h-3.5 w-3.5" /> : <Play size={14} />}
-              {actPending("start") ? actionPendingText("start") : "启动"}
+              {actPending("start") ? actionPendingText("start") : t("containers.actStart")}
             </Button>
           )}
           {running && (
@@ -127,7 +130,7 @@ export function ContainerDetail({
                 onClick={() => action.mutate({ id: c.id, act: "stop" })}
               >
                 {actPending("stop") ? <Spinner className="h-3.5 w-3.5" /> : <Square size={14} />}
-                {actPending("stop") ? actionPendingText("stop") : "停止"}
+                {actPending("stop") ? actionPendingText("stop") : t("containers.actStop")}
               </Button>
               <Button
                 variant="ghost"
@@ -139,7 +142,7 @@ export function ContainerDetail({
                 ) : (
                   <RotateCw size={14} />
                 )}
-                {actPending("restart") ? actionPendingText("restart") : "重启"}
+                {actPending("restart") ? actionPendingText("restart") : t("containers.actRestart")}
               </Button>
               <Button
                 variant="ghost"
@@ -147,7 +150,7 @@ export function ContainerDetail({
                 onClick={() => action.mutate({ id: c.id, act: "pause" })}
               >
                 {actPending("pause") ? <Spinner className="h-3.5 w-3.5" /> : <Pause size={14} />}
-                {actPending("pause") ? actionPendingText("pause") : "暂停"}
+                {actPending("pause") ? actionPendingText("pause") : t("containers.actPause")}
               </Button>
             </>
           )}
@@ -158,7 +161,7 @@ export function ContainerDetail({
               onClick={() => action.mutate({ id: c.id, act: "stop" })}
             >
               {actPending("stop") ? <Spinner className="h-3.5 w-3.5" /> : <Square size={14} />}
-              {actPending("stop") ? actionPendingText("stop") : "停止"}
+              {actPending("stop") ? actionPendingText("stop") : t("containers.actStop")}
             </Button>
           )}
           {c?.state === "paused" && (
@@ -168,12 +171,12 @@ export function ContainerDetail({
               onClick={() => action.mutate({ id: c.id, act: "unpause" })}
             >
               {actPending("unpause") ? <Spinner className="h-3.5 w-3.5" /> : <Play size={14} />}
-              {actPending("unpause") ? actionPendingText("unpause") : "恢复"}
+              {actPending("unpause") ? actionPendingText("unpause") : t("containers.actUnpause")}
             </Button>
           )}
           {c && (
             <IconButton
-              title="更新配置（重启策略 / 资源限制）"
+              title={t("cd.updateConfig")}
               disabled={action.isPending}
               onClick={() => setUpdateOpen(true)}
             >
@@ -181,7 +184,7 @@ export function ContainerDetail({
             </IconButton>
           )}
           <IconButton
-            title="删除"
+            title={t("containers.actRemove")}
             disabled={remove.isPending}
             className="hover:bg-err/10 hover:text-err"
             onClick={() => setConfirmDelete(true)}
@@ -192,7 +195,11 @@ export function ContainerDetail({
       </div>
 
       <div className="flex h-11 shrink-0 items-center border-b border-edge bg-panel px-4">
-        <SegmentedControl options={TABS} value={tab} onChange={setTab} />
+        <SegmentedControl
+          options={TABS.map(({ key, labelKey }) => ({ key, label: t(labelKey) }))}
+          value={tab}
+          onChange={setTab}
+        />
       </div>
 
       <div className="min-h-0 flex-1">
@@ -223,12 +230,12 @@ export function ContainerDetail({
 
       <Modal
         open={confirmDelete}
-        title="删除容器"
+        title={t("containers.deleteConfirmTitle")}
         onClose={() => setConfirmDelete(false)}
         footer={
           <>
             <Button variant="outline" onClick={() => setConfirmDelete(false)}>
-              取消
+              {t("common.cancel")}
             </Button>
             <Button
               variant="danger"
@@ -245,18 +252,21 @@ export function ContainerDetail({
                 })
               }
             >
-              {remove.isPending ? "删除中…" : "确认删除"}
+              {remove.isPending ? t("containers.deleting") : t("containers.confirmDelete")}
             </Button>
           </>
         }
       >
         <p>
-          确定删除容器 <span className="font-mono text-fg">{c?.name}</span> 吗？
+          {t("containers.deleteConfirmBefore")}
+          <span className="font-mono text-fg">{c?.name}</span>
+          {t("containers.deleteConfirmAfter")}
         </p>
         {(running || c?.state === "restarting" || c?.state === "paused") && (
           <p className="mt-2 text-[12px] text-warn">
-            该容器{c?.state === "restarting" ? "正在重启循环中" : "尚未停止"}
-            ，删除时会先强制停止，此操作不可恢复。
+            {t("containers.deleteForceWarn", {
+              state: c?.state === "restarting" ? t("containers.restartLoopState") : t("containers.notStopped"),
+            })}
           </p>
         )}
       </Modal>

@@ -16,6 +16,7 @@ import { api } from "../lib/api";
 import { useSettings } from "../lib/settings";
 import type { ContainerDto, ContainerSpec } from "../types/docker";
 import { actionPendingText, useContainerActions } from "../hooks/useContainerActions";
+import { useT } from "../lib/i18n";
 import { timeAgo } from "../lib/format";
 import { CreateContainerModal } from "../components/containers/CreateContainerModal";
 import {
@@ -47,6 +48,7 @@ export function Containers({
   search: string;
   onSearch: (v: string) => void;
 }) {
+  const t = useT();
   const qc = useQueryClient();
   const [pendingDelete, setPendingDelete] = useState<ContainerDto | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
@@ -67,12 +69,12 @@ export function Containers({
   const deleteForce = useMutation({
     mutationFn: (c: ContainerDto) => api.containerAction(c.id, "remove", needsForce(c)),
     onSuccess: () => {
-      toast.success("容器已删除");
+      toast.success(t("containers.removed"));
       setPendingDelete(null);
       void qc.invalidateQueries({ queryKey: ["containers"] });
       void qc.invalidateQueries({ queryKey: ["dockerInfo"] });
     },
-    onError: (e) => toast.error(`删除容器失败: ${e}`),
+    onError: (e) => toast.error(t("containers.removeFailed", { err: String(e) })),
   });
 
   /** 克隆容器：inspect 反解析为创建规格回填表单（compose 标签已被后端剔除） */
@@ -87,14 +89,14 @@ export function Containers({
         // 因此重置为不重启，由用户确认配置后再手动启动
         spec.restart_policy = "no";
         toast.info(
-          "已克隆配置；原容器正在运行，重启策略已改为不重启，端口与卷挂载很可能冲突，请确认后再启动",
+          t("containers.cloneWarn"),
           { duration: 8000 },
         );
       }
       setCloneSpec(spec);
       setCreateOpen(true);
     } catch (e) {
-      toast.error(`读取容器配置失败: ${e}`);
+      toast.error(t("containers.readSpecFailed", { err: String(e) }));
     }
   };
 
@@ -111,7 +113,7 @@ export function Containers({
 
   return (
     <>
-      <PageHeader title="容器" desc={`${list.length} 个容器 · 点击行查看详情`}>
+      <PageHeader title={t("nav.containers")} desc={t("containers.pageDesc", { n: list.length })}>
         <SearchInput value={search} onChange={onSearch} className="w-44" />
         <Button
           variant="primary"
@@ -121,10 +123,10 @@ export function Containers({
           }}
         >
           <Plus size={15} />
-          创建容器
+          {t("containers.create")}
         </Button>
         <IconButton
-          title="刷新"
+          title={t("common.refresh")}
           onClick={() => void query.refetch()}
           className="h-8 w-8"
         >
@@ -141,11 +143,11 @@ export function Containers({
       ) : filtered.length === 0 ? (
         <EmptyState
           icon={<Boxes size={40} strokeWidth={1.5} />}
-          title={keyword ? "没有匹配的容器" : "还没有容器"}
+          title={keyword ? t("containers.emptySearch") : t("containers.empty")}
           desc={
             keyword
-              ? "换个关键字试试"
-              : "运行 docker run 创建一个容器后这里会显示"
+              ? t("inspect.noMatchHint")
+              : t("containers.emptyHint")
           }
         />
       ) : (
@@ -154,11 +156,11 @@ export function Containers({
             <div
               className={`${GRID} h-8 border-b border-edge bg-panel2/60 px-4 text-[11px] font-medium text-fg3`}
             >
-              <div>状态</div>
-              <div>名称</div>
-              <div>镜像</div>
-              <div>端口</div>
-              <div>创建时间</div>
+              <div>{t("containers.thState")}</div>
+              <div>{t("containers.thName")}</div>
+              <div>{t("nav.images")}</div>
+              <div>{t("containers.thPorts")}</div>
+              <div>{t("containers.thCreated")}</div>
               <div />
             </div>
             {filtered.map((c) => {
@@ -204,7 +206,7 @@ export function Containers({
                     {c.compose_project && (
                       <button
                         type="button"
-                        title={`compose 项目：${c.compose_project}，点击查看编排详情`}
+                        title={t("containers.composeTitle", { name: c.compose_project })}
                         onClick={(e) => {
                           e.stopPropagation();
                           onOpenProject(c.compose_project!);
@@ -233,7 +235,7 @@ export function Containers({
                 >
                   {(c.state === "exited" || c.state === "created" || c.state === "dead") && (
                     <IconButton
-                      title="启动"
+                      title={t("containers.actStart")}
                       disabled={action.isPending}
                       onClick={() => action.mutate({ id: c.id, act: "start" })}
                     >
@@ -243,21 +245,21 @@ export function Containers({
                   {c.state === "running" && (
                     <>
                       <IconButton
-                        title="停止"
+                        title={t("containers.actStop")}
                         disabled={action.isPending}
                         onClick={() => action.mutate({ id: c.id, act: "stop" })}
                       >
                         {spinIcon("stop", <Square size={14} />)}
                       </IconButton>
                       <IconButton
-                        title="重启"
+                        title={t("containers.actRestart")}
                         disabled={action.isPending}
                         onClick={() => action.mutate({ id: c.id, act: "restart" })}
                       >
                         {spinIcon("restart", <RotateCw size={14} />)}
                       </IconButton>
                       <IconButton
-                        title="暂停"
+                        title={t("containers.actPause")}
                         disabled={action.isPending}
                         onClick={() => action.mutate({ id: c.id, act: "pause" })}
                       >
@@ -267,7 +269,7 @@ export function Containers({
                   )}
                   {c.state === "restarting" && (
                     <IconButton
-                      title="停止（退出重启循环）"
+                      title={t("containers.stopFromRestartLoop")}
                       disabled={action.isPending}
                       onClick={() => action.mutate({ id: c.id, act: "stop" })}
                     >
@@ -276,18 +278,18 @@ export function Containers({
                   )}
                   {c.state === "paused" && (
                     <IconButton
-                      title="恢复"
+                      title={t("containers.actUnpause")}
                       disabled={action.isPending}
                       onClick={() => action.mutate({ id: c.id, act: "unpause" })}
                     >
                       {spinIcon("unpause", <Play size={14} />)}
                     </IconButton>
                   )}
-                  <IconButton title="克隆（以此配置创建新容器）" onClick={() => void clone(c)}>
+                  <IconButton title={t("containers.cloneTitle")} onClick={() => void clone(c)}>
                     <Copy size={14} />
                   </IconButton>
                   <IconButton
-                    title="删除"
+                    title={t("containers.actRemove")}
                     disabled={deleteForce.isPending}
                     className="hover:bg-err/10 hover:text-err"
                     onClick={() => setPendingDelete(c)}
@@ -310,32 +312,35 @@ export function Containers({
 
       <Modal
         open={pendingDelete !== null}
-        title="删除容器"
+        title={t("containers.deleteConfirmTitle")}
         onClose={() => setPendingDelete(null)}
         footer={
           <>
             <Button variant="outline" onClick={() => setPendingDelete(null)}>
-              取消
+              {t("common.cancel")}
             </Button>
             <Button
               variant="danger"
               disabled={deleteForce.isPending}
               onClick={() => pendingDelete && deleteForce.mutate(pendingDelete)}
             >
-              {deleteForce.isPending ? "删除中…" : "确认删除"}
+              {deleteForce.isPending ? t("containers.deleting") : t("containers.confirmDelete")}
             </Button>
           </>
         }
       >
         <p>
-          确定删除容器 <span className="font-mono text-fg">{pendingDelete?.name}</span> 吗？
+          {t("containers.deleteConfirmBefore")}
+          <span className="font-mono text-fg">{pendingDelete?.name}</span>
+          {t("containers.deleteConfirmAfter")}
         </p>
         {(pendingDelete?.state === "running" ||
           pendingDelete?.state === "restarting" ||
           pendingDelete?.state === "paused") && (
           <p className="mt-2 text-[12px] text-warn">
-            该容器{pendingDelete.state === "restarting" ? "正在重启循环中" : "尚未停止"}
-            ，删除时会先强制停止，此操作不可恢复。
+            {t("containers.deleteForceWarn", {
+              state: pendingDelete.state === "restarting" ? t("containers.restartLoopState") : t("containers.notStopped"),
+            })}
           </p>
         )}
       </Modal>

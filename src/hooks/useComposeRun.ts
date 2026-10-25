@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
+import { t } from "../lib/i18n";
 import type { ComposeOutput } from "../types/compose";
 
 type Unsubscribe = () => void;
@@ -61,15 +62,15 @@ export function useComposeRun() {
         unsubRef.current = null;
         doneRef.current = null;
         if (r.error !== null) {
-          toast.error(`${opts.label}失败: ${r.error}`);
+          toast.error(t("compose.runFailed", { label: opts.label, err: r.error }));
         } else if (r.code === 0) {
-          toast.success(`${opts.label}完成`);
+          toast.success(t("compose.runDone", { label: opts.label }));
           // 编排动作会改变容器/镜像状态，完成后统一刷新
           void qc.invalidateQueries({ queryKey: ["composeProjects"] });
           void qc.invalidateQueries({ queryKey: ["containers"] });
           void qc.invalidateQueries({ queryKey: ["dockerInfo"] });
         } else {
-          toast.error(`${opts.label}失败（退出码 ${r.code}）`);
+          toast.error(t("compose.runExitCode", { label: opts.label, code: r.code ?? "?" }));
         }
         opts.onDone?.(r);
       };

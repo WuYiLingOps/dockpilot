@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { api } from "./api";
+import { t } from "./i18n";
 import type { RegistrySpec } from "../types/settings";
 
 /** 镜像仓库凭据列表（后端脱敏，不含密码） */
@@ -20,9 +21,13 @@ export function useSaveRegistry() {
     onSuccess: (saved, spec) => {
       void qc.invalidateQueries({ queryKey: ["registries"] });
       void qc.invalidateQueries({ queryKey: ["settings"] });
-      toast.success(spec.id ? "仓库凭据已保存" : `已添加仓库「${saved.name}」`);
+      toast.success(
+        spec.id
+          ? t("registry.saved")
+          : t("registry.added", { name: saved.name }),
+      );
     },
-    onError: (e) => toast.error(`保存凭据失败: ${e}`),
+    onError: (e) => toast.error(t("registry.saveFailed", { err: String(e) })),
   });
 }
 
@@ -34,7 +39,7 @@ export function useRemoveRegistry() {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["registries"] });
       void qc.invalidateQueries({ queryKey: ["settings"] });
-      toast.success("仓库凭据已删除");
+      toast.success(t("registry.deleted"));
     },
     onError: (e) => toast.error(String(e)),
   });

@@ -8,6 +8,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { toast } from "sonner";
 import { api } from "./api";
 import { applog } from "./applog";
+import { t } from "./i18n";
 import type { AppUpdateInfo } from "../types/appUpdate";
 
 // ---------------------------------------------------------------------------
@@ -206,7 +207,7 @@ export async function checkNow(manual: boolean): Promise<void> {
     }
   } catch (e) {
     const msg = errText(e);
-    applog.warn(`检查应用更新失败: ${msg}`);
+    applog.warn(`${t("upd.checkFailedLog")}: ${msg}`);
     apply({ type: "check-failed", error: msg, manual });
     if (manual) toast.error(msg, { duration: 10000 });
   } finally {
@@ -233,7 +234,7 @@ export async function downloadAndOpen(): Promise<void> {
     await installAppUpdate();
   } catch (e) {
     const msg = errText(e);
-    applog.warn(`下载更新包失败: ${msg}`);
+    applog.warn(`${t("upd.downloadFailedLog")}: ${msg}`);
     apply({ type: "download-failed" });
     toast.error(msg, { duration: 10000 });
   } finally {
@@ -255,7 +256,7 @@ export async function installAppUpdate(): Promise<void> {
     await api.installAppUpdate(path);
   } catch (e) {
     const msg = errText(e);
-    applog.warn(`自动应用更新失败: ${msg}`);
+    applog.warn(`${t("upd.installFailedLog")}: ${msg}`);
     apply({ type: "install-failed" });
     toast.error(msg, { duration: 10000 });
   }

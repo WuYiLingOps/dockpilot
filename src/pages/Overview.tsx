@@ -17,7 +17,9 @@ import {
   Server,
 } from "lucide-react";
 import { api } from "../lib/api";
-import { formatBytes, imageShortRef } from "../lib/format";
+import { formatBytes, formatCores, imageShortRef } from "../lib/format";
+import { useLang, useT } from "../lib/i18n";
+import type { MsgKey } from "../lib/i18n/zh";
 import { useSettings } from "../lib/settings";
 import type { HostStatsDto, NamedSizeDto } from "../types/docker";
 import type { PageKey } from "../components/Sidebar";
@@ -65,10 +67,10 @@ type UsageTab = "containers" | "images" | "volumes";
 // 切回页面时已有数据立即上屏；离开期间的空档在固定时间轴上自然留白
 let historyBuffer: Sample[] = [];
 
-const USAGE_TABS: { key: UsageTab; label: string }[] = [
-  { key: "containers", label: "容器" },
-  { key: "images", label: "镜像" },
-  { key: "volumes", label: "存储卷" },
+const USAGE_TABS: { key: UsageTab; labelKey: MsgKey }[] = [
+  { key: "containers", labelKey: "overview.tabContainers" },
+  { key: "images", labelKey: "overview.tabImages" },
+  { key: "volumes", labelKey: "overview.tabVolumes" },
 ];
 
 /** 树图/列表中“非正常态”格子的着色（已停止容器、无标签镜像） */
@@ -328,6 +330,7 @@ function UsageList({
   /** 行点击回调（提供后整行可点、显示手型光标），如跳转容器详情 */
   onRowClick?: (item: NamedSizeDto) => void;
 }) {
+  const t = useT();
   const total = items.reduce((s, d) => s + d.size, 0);
   const sorted = [...items].sort((a, b) => b.size - a.size);
   if (sorted.length === 0) {
@@ -336,7 +339,7 @@ function UsageList({
         className="flex items-center justify-center rounded-ctl border border-dashed border-edge text-[12px] text-fg3"
         style={{ height: 240 }}
       >
-        暂无可统计的占用数据
+        {t("overview.noUsageData")}
       </div>
     );
   }
@@ -403,6 +406,8 @@ export function Overview({
   /** tab 参数用于跳转「存储和网络」页的对应子 Tab；id 用于直达容器详情 */
   onNavigate: (p: PageKey, tab?: string, id?: string) => void;
 }) {
+  const t = useT();
+  const lang = useLang();
   const info = useQuery({
     queryKey: ["dockerInfo"],
     queryFn: api.dockerInfo,
@@ -550,31 +555,32 @@ export function Overview({
   const infoRows = useMemo(() => {
     const d = info.data;
     const rows: [string, string][] = [
-      ["面板信息", appVersion ? `DockPilot v${appVersion}` : ""],
+      [t("overview.infoPanel"), appVersion ? `DockPilot v${appVersion}` : ""],
       ["Docker Host", d?.host ?? ""],
       [
-        "Docker 版本",
+        t("overview.dockerVersion"),
         d ? `Server: ${d.version} / API: ${d.api_version}` : "",
       ],
       [
-        "系统架构",
+        t("overview.arch"),
         [d?.os_name, d?.kernel_version, d ? `${d.os} / ${d.arch}` : ""]
           .filter(Boolean)
           .join(" · "),
       ],
       [
         "Cpu / Mem",
-        d?.ncpu ? `${d.ncpu} 核 / ${formatBytes(d.mem_total ?? 0)}` : "",
+        d?.ncpu ? `${formatCores(d.ncpu)} / ${formatBytes(d.mem_total ?? 0)}` : "",
       ],
-      ["根目录", d?.docker_root_dir ?? ""],
-      ["存储驱动", d?.driver ?? ""],
-      ["日志驱动", d?.logging_driver ?? ""],
-      ["存储插件", d?.plugins_volume?.join(" ") ?? ""],
-      ["网络插件", d?.plugins_network?.join(" ") ?? ""],
-      ["系统时间", formatClock(now)],
+      [t("overview.rootDir"), d?.docker_root_dir ?? ""],
+      [t("overview.storageDriver"), d?.driver ?? ""],
+      [t("overview.logDriver"), d?.logging_driver ?? ""],
+      [t("overview.volumePlugins"), d?.plugins_volume?.join(" ") ?? ""],
+      [t("overview.networkPlugins"), d?.plugins_network?.join(" ") ?? ""],
+      [t("overview.systemTime"), formatClock(now)],
     ];
     return rows.filter(([, v]) => v);
-  }, [info.data, appVersion, now]);
+    // lang：文案随语言切换重算（infoRows 的标签来自词典）
+  }, [info.data, appVersion, now, lang, t]);
 
   const refresh = async () => {
     setRefreshing(true);
@@ -597,20 +603,20 @@ export function Overview({
         {
           icon: Server,
           text: `Docker ${d.version} · API ${d.api_version}`,
-          title: "Docker 引擎版本",
+          title: t("overview.engineVersion"),
         },
         {
           icon: Monitor,
           text: [d.os_name, `${d.os} / ${d.arch}`].filter(Boolean).join(" · "),
-          title: "操作系统 / 架构",
+          title: t("overview.osArch"),
         },
         {
           icon: Cpu,
-          text: d.ncpu ? `${d.ncpu} 核 / ${formatBytes(d.mem_total ?? 0)}` : "",
-          title: "CPU 核数 / 内存总量",
+          text: d.ncpu ? `${formatCores(d.ncpu)} / ${formatBytes(d.mem_total ?? 0)}` : "",
+          title: t("overview.cpuMem"),
         },
-        { icon: FolderOpen, text: d.docker_root_dir ?? "", title: "Docker 根目录" },
-        { icon: Layers, text: d.driver ?? "", title: "存储驱动" },
+        { icon: FolderOpen, text: d.docker_root_dir ?? "", title: t("overview.dockerRoot") },
+        { icon: Layers, text: d.driver ?? "", title: t("overview.storageDriver") },
       ].filter((c) => c.text)
     : [];
 
@@ -625,8 +631,11 @@ export function Overview({
       name: "CPU",
       value: stats.data ? `${cpuPct.toFixed(2)} %` : "—",
       sub: stats.data
-        ? `${((cpuPct / 100) * (stats.data.online_cpus || 1)).toFixed(2)} / ${stats.data.online_cpus} 核`
-        : "等待采样…",
+        ? t("overview.coresUsed", {
+            used: ((cpuPct / 100) * (stats.data.online_cpus || 1)).toFixed(2),
+            total: stats.data.online_cpus,
+          })
+        : t("overview.waitingSample"),
       scale: "0–100 %",
       fixedMax: 100,
       series: [
@@ -636,17 +645,17 @@ export function Overview({
     {
       key: "mem",
       icon: MemoryStick,
-      name: "内存",
+      name: t("overview.mem"),
       value: memTotal > 0 ? `${memPct.toFixed(2)} %` : "—",
       sub:
         memTotal > 0
           ? `${formatBytes(curMemUsed)} / ${formatBytes(memTotal)}`
-          : "等待采样…",
+          : t("overview.waitingSample"),
       scale: "0–100 %",
       fixedMax: 100,
       series: [
         {
-          name: "内存",
+          name: t("overview.mem"),
           color: CHART_COLORS[1],
           values: history.map((s) => (memTotal > 0 ? (s.memUsed / memTotal) * 100 : 0)),
         },
@@ -655,33 +664,37 @@ export function Overview({
     {
       key: "net",
       icon: Network,
-      name: "网络",
+      name: t("overview.networks"),
       value: (
-        <span className="flex items-baseline gap-2" title="上行 / 下行速率">
+        <span className="flex items-baseline gap-2" title={t("overview.updown")}>
           <span style={{ color: CHART_COLORS[1] }}>↓ {formatBytes(rxRate)}/s</span>
           <span style={{ color: CHART_COLORS[0] }}>↑ {formatBytes(txRate)}/s</span>
         </span>
       ),
       scale: `0–${formatBytes(netMax, 0)}/s`,
       series: [
-        { name: "上行", color: CHART_COLORS[0], values: history.map((s) => s.txRate) },
-        { name: "下行", color: CHART_COLORS[1], values: history.map((s) => s.rxRate) },
+        { name: t("overview.up"), color: CHART_COLORS[0], values: history.map((s) => s.txRate) },
+        { name: t("overview.down"), color: CHART_COLORS[1], values: history.map((s) => s.rxRate) },
       ],
     },
     {
       key: "disk",
       icon: HardDrive,
-      name: "磁盘",
+      name: t("overview.disk"),
       value: (
-        <span className="flex items-baseline gap-2" title="读取 / 写入速率">
-          <span style={{ color: CHART_COLORS[0] }}>读 {formatBytes(rdRate)}/s</span>
-          <span style={{ color: CHART_COLORS[1] }}>写 {formatBytes(wrRate)}/s</span>
+        <span className="flex items-baseline gap-2" title={t("overview.rw")}>
+          <span style={{ color: CHART_COLORS[0] }}>
+            {t("overview.read")} {formatBytes(rdRate)}/s
+          </span>
+          <span style={{ color: CHART_COLORS[1] }}>
+            {t("overview.write")} {formatBytes(wrRate)}/s
+          </span>
         </span>
       ),
       scale: `0–${formatBytes(diskMax, 0)}/s`,
       series: [
-        { name: "读取", color: CHART_COLORS[0], values: history.map((s) => s.rdRate) },
-        { name: "写入", color: CHART_COLORS[1], values: history.map((s) => s.wrRate) },
+        { name: t("overview.read"), color: CHART_COLORS[0], values: history.map((s) => s.rdRate) },
+        { name: t("overview.write"), color: CHART_COLORS[1], values: history.map((s) => s.wrRate) },
       ],
     },
   ];
@@ -705,8 +718,8 @@ export function Overview({
     {
       key: "images",
       color: CHART_COLORS[0],
-      label: "镜像",
-      count: `${dfd?.images_count ?? 0} 个 · 包含中间镜像`,
+      label: t("nav.images"),
+      count: t("overview.imagesCount", { n: dfd?.images_count ?? 0 }),
       value: formatBytes(dfd?.images_size ?? 0),
       share: shareOf(dfd?.images_size),
       onClick: () => onNavigate("images"),
@@ -714,8 +727,8 @@ export function Overview({
     {
       key: "containers",
       color: CHART_COLORS[1],
-      label: "容器",
-      count: `${dfd?.containers_count ?? 0} 个 · 根目录及写入数据`,
+      label: t("nav.containers"),
+      count: t("overview.containersCount", { n: dfd?.containers_count ?? 0 }),
       value: formatBytes(dfd?.containers_size ?? 0),
       share: shareOf(dfd?.containers_size),
       onClick: () => onNavigate("containers"),
@@ -723,8 +736,8 @@ export function Overview({
     {
       key: "volumes",
       color: CHART_COLORS[2],
-      label: "存储卷",
-      count: `${dfd?.volumes_count ?? 0} 个 · 不含挂载目录`,
+      label: t("overview.tabVolumes"),
+      count: t("overview.volumesCount", { n: dfd?.volumes_count ?? 0 }),
       value: formatBytes(dfd?.volumes_size ?? 0),
       share: shareOf(dfd?.volumes_size),
       onClick: () => onNavigate("storage", "volumes"),
@@ -732,8 +745,8 @@ export function Overview({
     {
       key: "build_cache",
       color: CHART_COLORS[4],
-      label: "构建缓存",
-      count: "docker build 层缓存",
+      label: t("cleanup.buildCache"),
+      count: t("overview.buildCacheCount"),
       value: formatBytes(dfd?.build_cache_size ?? 0),
       share: shareOf(dfd?.build_cache_size),
     },
@@ -766,7 +779,7 @@ export function Overview({
       );
     }
     if (usageTab === "images" && isUntaggedImage(item.name)) {
-      return <div className="mt-1 text-[11px] text-fg3">无标签镜像（悬空/中间层）</div>;
+      return <div className="mt-1 text-[11px] text-fg3">{t("overview.untaggedHint")}</div>;
     }
     return null;
   };
@@ -787,10 +800,10 @@ export function Overview({
       const stopped = items.length - running;
       return [
         ...(running > 0
-          ? [{ color: CHART_COLORS_SWATCH, label: `运行中 ${running}` }]
+          ? [{ color: CHART_COLORS_SWATCH, label: t("overview.legendRunning", { n: running }) }]
           : []),
         ...(stopped > 0
-          ? [{ color: MUTED_COLOR, label: `已停止 ${stopped}` }]
+          ? [{ color: MUTED_COLOR, label: t("overview.legendStopped", { n: stopped }) }]
           : []),
       ];
     }
@@ -798,20 +811,23 @@ export function Overview({
       const untagged = items.filter((it) => isUntaggedImage(it.name)).length;
       const normal = items.length - untagged;
       return [
-        ...(normal > 0 ? [{ color: CHART_COLORS_SWATCH, label: `正常 ${normal}` }] : []),
+        ...(normal > 0
+          ? [{ color: CHART_COLORS_SWATCH, label: t("overview.legendNormal", { n: normal }) }]
+          : []),
         ...(untagged > 0
-          ? [{ color: MUTED_COLOR, label: `无标签 ${untagged}` }]
+          ? [{ color: MUTED_COLOR, label: t("overview.legendUntagged", { n: untagged }) }]
           : []),
       ];
     }
     return [];
-  }, [usageTab, dfd, containerMetaByName]);
+    // lang：图例文案随语言切换重算
+  }, [usageTab, dfd, containerMetaByName, lang, t]);
 
   return (
     <>
-      <PageHeader title="系统概览" desc="Docker 引擎与宿主资源总览">
+      <PageHeader title={t("nav.overview")} desc={t("overview.pageDesc")}>
         <IconButton
-          title="刷新"
+          title={t("overview.refresh")}
           onClick={() => void refresh()}
           className={refreshing ? "text-accent" : ""}
         >
@@ -831,7 +847,7 @@ export function Overview({
               <StatusDot
                 state={d ? "running" : info.isError ? "dead" : "created"}
               />
-              {d ? "引擎运行中" : info.isError ? "连接失败" : "连接中…"}
+              {d ? t("overview.engineRunning") : info.isError ? t("overview.connectFailed") : t("overview.connecting")}
             </span>
             {engineChips.map((c, i) => (
               <span key={i} className="inline-flex min-w-0 items-center gap-1.5" title={c.title}>
@@ -844,17 +860,17 @@ export function Overview({
               className="ml-auto px-2"
               onClick={() => setInfoOpen(true)}
             >
-              详情
+              {t("overview.details")}
             </Button>
           </section>
 
           {/* 实时资源：四条泳道共享 2 分钟时间轴 */}
           <Card
             icon={Activity}
-            title="实时资源"
+            title={t("overview.realtime")}
             className="shrink-0"
             extra={
-              <span className="text-[11px] text-fg3">最近 2 分钟 · 每 2 秒采样</span>
+              <span className="text-[11px] text-fg3">{t("overview.realtimeHint")}</span>
             }
           >
             <div className="flex flex-col">
@@ -882,28 +898,28 @@ export function Overview({
           {/* 用量统计：占比行列表 + 树图 */}
           <Card
             icon={ChartPie}
-            title="用量统计"
+            title={t("overview.usage")}
             className="shrink-0"
             extra={
               <>
                 <CountPill
-                  label="运行中容器"
+                  label={t("overview.runningContainers")}
                   value={stats.data?.containers_running ?? 0}
                   onClick={() => onNavigate("containers")}
                 />
                 <CountPill
-                  label="网络"
+                  label={t("overview.networks")}
                   value={networks.data?.length ?? 0}
                   onClick={() => onNavigate("storage", "networks")}
                 />
                 <CountPill
-                  label="主机端口"
+                  label={t("overview.hostPorts")}
                   value={hostPorts}
                   onClick={() => onNavigate("containers")}
                 />
                 {df.dataUpdatedAt ? (
                   <span className="hidden text-[11px] text-fg3 xl:inline">
-                    数据最后更新：{formatTime(df.dataUpdatedAt)}
+                    {t("overview.lastUpdated", { time: formatTime(df.dataUpdatedAt) })}
                   </span>
                 ) : null}
               </>
@@ -912,7 +928,7 @@ export function Overview({
             <div className="flex flex-col gap-4">
               <div className="flex flex-col gap-1">
                 <div className="flex items-baseline gap-2 pb-1.5">
-                  <span className="text-[12px] text-fg2">磁盘占用</span>
+                  <span className="text-[12px] text-fg2">{t("overview.diskUsage")}</span>
                   <span className="text-[15px] font-semibold tabular-nums text-fg">
                     {formatBytes(usageTotal)}
                   </span>
@@ -925,7 +941,7 @@ export function Overview({
                     count={r.count}
                     value={r.value}
                     share={r.share}
-                    title={`${r.label}：${r.value}`}
+                    title={t("overview.usageRowTitle", { label: r.label, value: r.value })}
                     onClick={r.onClick}
                   />
                 ))}
@@ -935,21 +951,21 @@ export function Overview({
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="flex items-center gap-2">
                     <SegmentedControl
-                      options={USAGE_TABS}
+                      options={USAGE_TABS.map(({ key, labelKey }) => ({ key, label: t(labelKey) }))}
                       value={usageTab}
                       onChange={setUsageTab}
                     />
                     <div className="flex items-center gap-0.5 rounded-ctl bg-panel2 p-0.5">
                       <ViewBtn
                         active={usageView === "treemap"}
-                        title="树图视图"
+                        title={t("overview.treemapView")}
                         onClick={() => setUsageView("treemap")}
                       >
                         <LayoutGrid size={13} />
                       </ViewBtn>
                       <ViewBtn
                         active={usageView === "list"}
-                        title="列表视图"
+                        title={t("overview.listView")}
                         onClick={() => setUsageView("list")}
                       >
                         <List size={13} />
@@ -971,7 +987,7 @@ export function Overview({
                     ))}
                     {dfd && (
                       <span className="text-[11px] text-fg3">
-                        共 {dfd[usageTab].length} 项
+                        {t("overview.totalItems", { n: dfd[usageTab].length })}
                       </span>
                     )}
                   </div>
@@ -1004,7 +1020,7 @@ export function Overview({
       )}
 
       {/* 完整系统信息（原基础信息 11 行） */}
-      <Modal open={infoOpen} title="系统信息" onClose={() => setInfoOpen(false)}>
+      <Modal open={infoOpen} title={t("overview.sysInfo")} onClose={() => setInfoOpen(false)}>
         <div className="py-1">
           {infoRows.map(([label, value]) => (
             <InfoRow key={label} label={label} value={value} />

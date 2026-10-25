@@ -1,10 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
 import { Cpu } from "lucide-react";
 import { api } from "../../lib/api";
+import { useT } from "../../lib/i18n";
 import { EmptyState, ErrorNote, Spinner } from "../ui";
 
 /** 容器进程视图（docker top，5 秒轮询；仅运行中容器可获取） */
 export function ProcessView({ id, running }: { id: string; running: boolean }) {
+  const t = useT();
   const query = useQuery({
     queryKey: ["containerTop", id],
     queryFn: () => api.containerTop(id),
@@ -16,8 +18,8 @@ export function ProcessView({ id, running }: { id: string; running: boolean }) {
     return (
       <EmptyState
         icon={<Cpu size={28} />}
-        title="容器未运行"
-        desc="进程列表仅在容器运行时可获取，启动容器后自动出现。"
+        title={t("process.notRunning")}
+        desc={t("process.notRunningDesc")}
       />
     );
   }
@@ -36,7 +38,7 @@ export function ProcessView({ id, running }: { id: string; running: boolean }) {
   if (!top) return null;
   const { titles, processes } = top;
   if (titles.length === 0) {
-    return <EmptyState icon={<Cpu size={28} />} title="暂无进程数据" />;
+    return <EmptyState icon={<Cpu size={28} />} title={t("process.empty")} />;
   }
 
   return (
@@ -64,7 +66,7 @@ export function ProcessView({ id, running }: { id: string; running: boolean }) {
         </tbody>
       </table>
       {processes.length === 0 && (
-        <div className="py-6 text-center text-xs text-fg3">暂无进程</div>
+        <div className="py-6 text-center text-xs text-fg3">{t("process.none")}</div>
       )}
     </div>
   );

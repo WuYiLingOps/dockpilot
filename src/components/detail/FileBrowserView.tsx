@@ -15,6 +15,7 @@ import { open as openFileDialog, save } from "@tauri-apps/plugin-dialog";
 import { toast } from "sonner";
 import { api } from "../../lib/api";
 import { formatBytes } from "../../lib/format";
+import { useT } from "../../lib/i18n";
 import type { FileEntry } from "../../types/docker";
 import { Button, EmptyState, ErrorNote, IconButton, Spinner } from "../ui";
 
@@ -39,6 +40,7 @@ function crumbs(path: string): { label: string; path: string }[] {
  * 目录列表与删除要求容器运行中；上传下载对已停止容器也可用。
  */
 export function FileBrowserView({ id, running }: { id: string; running: boolean }) {
+  const t = useT();
   const qc = useQueryClient();
   const [path, setPath] = useState("/");
   const [transfer, setTransfer] = useState<{ label: string; written: number } | null>(null);
@@ -54,10 +56,10 @@ export function FileBrowserView({ id, running }: { id: string; running: boolean 
     mutationFn: (e: FileEntry) =>
       api.containerDeleteFile(id, joinPath(path, e.name), e.is_dir),
     onSuccess: () => {
-      toast.success("已删除");
+      toast.success(t("files.deleted"));
       void qc.invalidateQueries({ queryKey: ["containerFiles", id, path] });
     },
-    onError: (e) => toast.error(`删除失败: ${e}`),
+    onError: (e) => toast.error(t("files.deleteFailed", { err: String(e) })),
   });
 
   // 上传：选文件/目录后开始传输
@@ -65,7 +67,7 @@ export function FileBrowserView({ id, running }: { id: string; running: boolean 
     let picked: string[] | string | null;
     try {
       picked = (await openFileDialog({
-        title: "上传文件",
+        title: t("files.uploadDialogTitle"),
         multiple: true,
       })) as string[] | string | null;
     } catch {
@@ -77,17 +79,17 @@ export function FileBrowserView({ id, running }: { id: string; running: boolean 
     const label =
       paths.length === 1
         ? paths[0].split(/[\\/]/).pop() || paths[0]
-        : `${paths.length} 项`;
+        : t("files.nItems", { n: paths.length });
     setTransfer({ label, written: 0 });
     transferCancelRef.current = api.containerUploadFile(id, path, paths, (p) => {
       setTransfer({ label, written: p.written });
       if (p.done) {
         transferCancelRef.current = null;
         setTransfer(null);
-        if (p.cancelled) toast.info("上传已取消");
-        else if (p.error) toast.error(`上传失败: ${p.error}`);
+        if (p.cancelled) toast.info(t("files.uploadCancelled"));
+        else if (p.error) toast.error(t("files.uploadFailed", { err: p.error }));
         else {
-          toast.success("上传完成");
+          toast.success(t("files.uploadDone"));
           void qc.invalidateQueries({ queryKey: ["containerFiles", id, path] });
         }
       }
@@ -100,13 +102,13 @@ export function FileBrowserView({ id, running }: { id: string; running: boolean 
     try {
       if (e.is_dir) {
         const dir = (await openFileDialog({
-          title: `下载目录 ${e.name}（保留原名）`,
+          title: t("files.downloadDirTitle", { name: e.name }),
           directory: true,
         })) as string | null;
         if (!dir) return;
         startDownload(src, dir, e);
       } else {
-        const dest = await save({ title: "下载文件", defaultPath: e.name });
+        const dest = await save({ title: t("files.downloadFileTitle"), defaultPath: e.name });
         if (!dest) return;
         startDownload(src, dest, e);
       }
@@ -122,9 +124,9 @@ export function FileBrowserView({ id, running }: { id: string; running: boolean 
       if (p.done) {
         transferCancelRef.current = null;
         setTransfer(null);
-        if (p.cancelled) toast.info("下载已取消");
-        else if (p.error) toast.error(`下载失败: ${p.error}`);
-        else toast.success(`已保存到 ${dest}`);
+        if (p.cancelled) toast.info(t("files.downloadCancelled"));
+        else if (p.error) toast.error(t("files.downloadFailed", { err: p.error }));
+        else toast.success(t("files.savedTo", { path: dest }));
       }
     });
   };
@@ -133,8 +135,8 @@ export function FileBrowserView({ id, running }: { id: string; running: boolean 
     return (
       <EmptyState
         icon={<FolderOpen size={28} />}
-        title="容器未运行"
-        desc="浏览与删除需要容器内可执行命令（ls/rm），上传下载亦依赖列表定位路径；启动容器后自动可用。"
+        title={t("process.notRunning")}
+        desc={t("files.needsRunning")}
       />
     );
   }
@@ -163,7 +165,7 @@ export function FileBrowserView({ id, running }: { id: string; running: boolean 
         </div>
         {path !== "/" && (
           <IconButton
-            title="上一级"
+            title={t("files.parent")}
             className="h-7 w-7"
             onClick={() => setPath(path.replace(/\/[^/]+$/, "") || "/")}
           >
@@ -171,7 +173,7 @@ export function FileBrowserView({ id, running }: { id: string; running: boolean 
           </IconButton>
         )}
         <IconButton
-          title="刷新"
+          title={t("common.refresh")}
           className="h-7 w-7"
           onClick={() => void query.refetch()}
         >
@@ -179,7 +181,7 @@ export function FileBrowserView({ id, running }: { id: string; running: boolean 
         </IconButton>
         <Button variant="outline" className="h-7 px-2 text-[12px]" disabled={transfer !== null} onClick={() => void upload()}>
           <Upload size={13} />
-          上传
+          {t("files.upload")}
         </Button>
       </div>
 
@@ -188,7 +190,7 @@ export function FileBrowserView({ id, running }: { id: string; running: boolean 
         <div className="flex shrink-0 items-center gap-2 border-b border-edge bg-accent/5 px-4 py-1.5 text-[11.5px] text-fg2">
           <Spinner className="h-3 w-3" />
           <span className="truncate">
-            {transfer.label} · 已传 {formatBytes(transfer.written)}
+            {t("files.transferred", { label: transfer.label, written: formatBytes(transfer.written) })}
           </span>
           <button
             type="button"
@@ -196,7 +198,7 @@ export function FileBrowserView({ id, running }: { id: string; running: boolean 
             className="ml-auto shrink-0 text-fg3 underline-offset-2 hover:text-err hover:underline"
             onClick={() => transferCancelRef.current?.()}
           >
-            取消
+            {t("common.cancel")}
           </button>
         </div>
       )}
@@ -210,7 +212,7 @@ export function FileBrowserView({ id, running }: { id: string; running: boolean 
         ) : query.isError ? (
           <ErrorNote message={String(query.error)} onRetry={() => void query.refetch()} />
         ) : entries.length === 0 ? (
-          <EmptyState icon={<FolderOpen size={28} />} title="空目录" />
+          <EmptyState icon={<FolderOpen size={28} />} title={t("files.emptyDir")} />
         ) : (
           <div className="overflow-hidden rounded-card border border-edge bg-panel">
             {entries.map((e) => (
@@ -232,7 +234,7 @@ export function FileBrowserView({ id, running }: { id: string; running: boolean 
                   </span>
                 </div>
                 <div className="text-[11.5px] text-fg3">
-                  {e.is_dir ? "目录" : formatBytes(e.size)}
+                  {e.is_dir ? t("files.dir") : formatBytes(e.size)}
                 </div>
                 <div className="truncate font-mono text-[11px] text-fg3" title={e.mode}>
                   {e.mode}
@@ -240,14 +242,14 @@ export function FileBrowserView({ id, running }: { id: string; running: boolean 
                 <div className="truncate text-[11.5px] text-fg3">{e.date}</div>
                 <div className="flex items-center justify-end gap-0.5" data-no-drag>
                   <IconButton
-                    title={e.is_dir ? "下载目录（保留原名）" : "下载文件"}
+                    title={e.is_dir ? t("files.downloadDir") : t("files.downloadFileTitle")}
                     className="h-7 w-7"
                     onClick={() => void download(e)}
                   >
                     <FileDown size={13} />
                   </IconButton>
                   <IconButton
-                    title={e.is_dir ? "删除目录" : "删除文件"}
+                    title={e.is_dir ? t("files.deleteDir") : t("files.deleteFile")}
                     className="h-7 w-7 hover:bg-err/10 hover:text-err"
                     disabled={remove.isPending}
                     onClick={() => remove.mutate(e)}
@@ -261,7 +263,7 @@ export function FileBrowserView({ id, running }: { id: string; running: boolean 
         )}
       </div>
       <p className="shrink-0 px-4 pb-2 text-[11px] text-fg3">
-        目录列表与删除经容器内命令执行（需运行中）；上传/下载等同 docker cp，可能受镜像内工具差异影响。
+        {t("files.footerHint")}
       </p>
     </div>
   );

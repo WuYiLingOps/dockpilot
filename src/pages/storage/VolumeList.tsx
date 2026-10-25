@@ -1,5 +1,6 @@
 import { Database, Trash2 } from "lucide-react";
 import { formatBytes, rfc3339ToUnix, timeAgo } from "../../lib/format";
+import { useT } from "../../lib/i18n";
 import type { VolumeDto } from "../../types/docker";
 import { Badge, EmptyState, IconButton } from "../../components/ui";
 
@@ -17,6 +18,7 @@ export function VolumeList({
   onOpen: (name: string) => void;
   onDelete: (v: VolumeDto) => void;
 }) {
+  const t = useT();
   const keyword = search.trim().toLowerCase();
   const filtered = keyword
     ? vols.filter(
@@ -30,8 +32,8 @@ export function VolumeList({
   return filtered.length === 0 ? (
     <EmptyState
       icon={<Database size={40} strokeWidth={1.5} />}
-      title={keyword ? "没有匹配的卷" : "还没有存储卷"}
-      desc={keyword ? "换个关键字试试" : "创建卷或运行挂载卷的容器后这里会显示"}
+      title={keyword ? t("st.volEmptySearch") : t("st.volEmpty")}
+      desc={keyword ? t("inspect.noMatchHint") : t("st.volEmptyHint")}
     />
   ) : (
     <div className="flex-1 overflow-auto p-4 pt-2">
@@ -39,12 +41,12 @@ export function VolumeList({
         <div
           className={`${VOLUME_GRID} h-8 border-b border-edge bg-panel2/60 px-4 text-[11px] font-medium text-fg3`}
         >
-          <div>名称</div>
-          <div>驱动</div>
-          <div>大小</div>
-          <div>引用</div>
-          <div>创建时间</div>
-          <div>挂载点</div>
+          <div>{t("st.name")}</div>
+          <div>{t("st.driver")}</div>
+          <div>{t("st.thSize")}</div>
+          <div>{t("st.thRefs")}</div>
+          <div>{t("containers.thCreated")}</div>
+          <div>{t("st.mountpoint")}</div>
           <div />
         </div>
         {filtered.map((v) => (
@@ -65,10 +67,12 @@ export function VolumeList({
             <div>
               {v.in_use ? (
                 <Badge tone="accent" >
-                  <span title={v.used_by.join("、")}>{v.ref_count} 个容器</span>
+                  <span title={v.used_by.join("、")}>
+                    {t("st.nContainers", { n: v.ref_count })}
+                  </span>
                 </Badge>
               ) : (
-                <Badge tone="warn">未使用</Badge>
+                <Badge tone="warn">{t("st.unused")}</Badge>
               )}
             </div>
             <div className="text-[12px] text-fg3">{timeAgo(rfc3339ToUnix(v.created))}</div>
@@ -84,7 +88,7 @@ export function VolumeList({
               data-no-drag
             >
               <IconButton
-                title="删除"
+                title={t("containers.actRemove")}
                 className="hover:bg-err/10 hover:text-err"
                 onClick={() => onDelete(v)}
               >

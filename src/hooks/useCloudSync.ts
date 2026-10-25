@@ -12,6 +12,7 @@
 import { useCallback, useEffect, useRef, useSyncExternalStore } from "react";
 import { toast } from "sonner";
 import { api } from "../lib/api";
+import { t } from "../lib/i18n";
 import { useSettings, useUpdateSettings } from "../lib/settings";
 import * as engine from "../lib/sync/engine";
 import { applySyncPayload, buildSyncPayload, payloadFingerprint } from "../lib/sync/payload";
@@ -39,7 +40,7 @@ export function useSyncApplyLocal(): (payload: SyncPayload) => Promise<void> {
   return useCallback(
     async (payload) => {
       const current = settingsRef.current;
-      if (!current) throw new Error("设置尚未加载，无法应用同步数据");
+      if (!current) throw new Error(t("sync.settingsNotLoaded"));
       const next = applySyncPayload(current, payload);
       await update.mutateAsync(next);
       // SSH 凭证落地本机 secret_store（此步在连接档案写入后，条目必然已存在；
@@ -49,7 +50,7 @@ export function useSyncApplyLocal(): (payload: SyncPayload) => Promise<void> {
         try {
           await api.importSshSecrets(creds);
         } catch (e) {
-          toast.error(`SSH 凭证写入本机失败: ${String(e)}`);
+          toast.error(t("sync.sshSecretsWriteFailed", { err: String(e) }));
         }
       }
     },
@@ -68,14 +69,20 @@ export function useSyncActions() {
   const report = useCallback((r: SyncResult, okMessage: string) => {
     if (r.success) {
       const actionText =
-        r.action === "merge" ? "已合并同步" : r.action === "download" ? "已拉取云端数据" : r.action === "upload" ? "已上传" : okMessage;
+        r.action === "merge"
+          ? t("sync.merged")
+          : r.action === "download"
+            ? t("sync.downloaded")
+            : r.action === "upload"
+              ? t("sync.uploaded")
+              : okMessage;
       toast.success(actionText);
     } else if (
       !r.conflictDetected &&
       !r.shrinkBlocked &&
       r.error !== "empty-vault-guard"
     ) {
-      toast.error(`同步失败: ${r.error ?? "未知错误"}`);
+      toast.error(t("sync.failed", { err: r.error ?? t("sync.unknownError") }));
     }
     return r;
   }, []);
@@ -84,14 +91,14 @@ export function useSyncActions() {
     const s = settingsRef.current;
     if (!s) return;
     const r = await engine.syncNow(s, { reason: "manual", applyLocal });
-    report(r, "云端与本地一致");
+    report(r, t("sync.alreadyInSync"));
   }, [applyLocal, report]);
 
   const resolveConflictRemote = useCallback(
     async (cloudPassword: string) => {
       const r = await engine.resolveConflictUseRemote(cloudPassword, applyLocal);
       // 失败原因（密码错误等）由弹窗内联展示，不走全局 toast
-      if (r.success) toast.success("已恢复云端数据");
+      if (r.success) toast.success(t("sync.remoteRestored"));
       return r;
     },
     [applyLocal],
@@ -101,31 +108,31 @@ export function useSyncActions() {
     const s = settingsRef.current;
     if (!s) return;
     const r = await engine.resolveConflictUseLocal(s);
-    report(r, "已推送本地数据");
+    report(r, t("sync.localPushed"));
   }, [report]);
 
   const restoreBlockedRemote = useCallback(async () => {
     const r = await engine.restoreRemoteFromBlocked(applyLocal);
-    report(r, "已恢复云端数据");
+    report(r, t("sync.remoteRestored"));
   }, [applyLocal, report]);
 
   const forcePushBlockedLocal = useCallback(async () => {
     const s = settingsRef.current;
     if (!s) return;
     const r = await engine.forcePushLocal(s);
-    report(r, "已强制推送本地数据");
+    report(r, t("sync.localForcePushed"));
   }, [report]);
 
   const restoreEmptyVault = useCallback(async () => {
     const r = await engine.confirmEmptyVaultRestore(applyLocal);
-    report(r, "已恢复云端数据");
+    report(r, t("sync.remoteRestored"));
   }, [applyLocal, report]);
 
   const pushEmptyVault = useCallback(async () => {
     const s = settingsRef.current;
     if (!s) return;
     const r = await engine.confirmEmptyVaultPush(s);
-    report(r, "已推送本地数据");
+    report(r, t("sync.localPushed"));
   }, [report]);
 
   const dismissEmptyVault = useCallback(() => engine.dismissEmptyVaultPrompt(), []);
@@ -135,10 +142,10 @@ export function useSyncActions() {
     async (sha: string) => {
       const s = settingsRef.current;
       if (!s) {
-        return { success: false, action: "none" as const, error: "设置尚未加载" };
+        return { success: false, action: "none" as const, error: t("sync.settingsNotLoaded") };
       }
       const r = await engine.restoreRevision(sha, applyLocal);
-      report(r, "已恢复历史版本");
+      report(r, t("sync.revisionRestored"));
       return r;
     },
     [applyLocal, report],
@@ -232,7 +239,7 @@ export function useCloudSync(): void {
             applyLocal: (p) => applyLocalRef.current(p),
           });
           if (!r.success && r.error && !r.conflictDetected && !r.shrinkBlocked && r.error !== "empty-vault-guard") {
-            toast.error(`云同步失败: ${r.error}`);
+            toast.error(t("sync.autoSyncFailed", { err: r.error }));
           }
         })().catch(() => {});
       }, DEBOUNCE_MS);

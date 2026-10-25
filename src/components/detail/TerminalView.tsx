@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { copyText, readClipboardText } from "../../lib/clipboard";
 import { api } from "../../lib/api";
 import { applog } from "../../lib/applog";
+import { useT } from "../../lib/i18n";
 import { useSettings } from "../../lib/settings";
 import { fallbackShell, isExecStartFailure } from "../../lib/terminal";
 import { useTheme } from "../../lib/theme";
@@ -64,6 +65,7 @@ function terminalTheme(dark: boolean) {
 
 /** 容器详情 · 终端 Tab（交互式 shell，主题随应用亮暗切换；默认 shell 来自设置） */
 export function TerminalView({ id, running }: { id: string; running: boolean }) {
+  const t = useT();
   const { isDark } = useTheme();
   const { data: settings } = useSettings();
   const [shell, setShell] = useState<string>(() => settings?.terminal_shell ?? "bash");
@@ -93,7 +95,7 @@ export function TerminalView({ id, running }: { id: string; running: boolean }) 
     if (!term) return;
     const text = await readClipboardText();
     if (text == null) {
-      toast.error("读取剪贴板失败");
+      toast.error(t("term.clipboardFailed"));
       return;
     }
     if (text) term.paste(text);
@@ -188,13 +190,13 @@ export function TerminalView({ id, running }: { id: string; running: boolean }) 
       if (endNotified || disposed) return;
       endNotified = true;
       setPhase("ended");
-      term.write(`\r\n\x1b[33m── ${reason}，点上方「重连」可重建会话 ──\x1b[0m\r\n`);
+      term.write(`\r\n\x1b[33m${t("term.endedBanner", { reason })} ──\x1b[0m\r\n`);
     };
 
     const sendInput = (data: string) => {
       api.execInput(execId, data).catch((e) => {
-        applog.warn(`终端输入写入失败（会话可能已关闭）: ${String(e)}`);
-        if (connected) markEnded("会话已断开");
+        applog.warn(`${t("term.inputFailed")}: ${String(e)}`);
+        if (connected) markEnded(t("term.disconnected"));
         // 会话尚未建立完成（exec 创建/启动中）：继续缓存，首帧到达后补发
         else pendingInput += data;
       });
@@ -211,10 +213,10 @@ export function TerminalView({ id, running }: { id: string; running: boolean }) 
           if (!disposed) await doResize(cols, rows, false);
           return;
         }
-        applog.warn(`终端尺寸调整失败（会话可能已关闭）: ${String(e)}`);
+        applog.warn(`${t("term.resizeFailed")}: ${String(e)}`);
         if (!resizeWarned && !disposed) {
           resizeWarned = true;
-          term.write("\x1b[33m（尺寸同步失败，长行显示可能错位，可点「重连」）\x1b[0m\r\n");
+          term.write(`\x1b[33m${t("term.resizeWarn")}\x1b[0m\r\n`);
         }
       }
     };
@@ -228,7 +230,7 @@ export function TerminalView({ id, running }: { id: string; running: boolean }) 
           const fb = fallbackRef.current;
           if (fb) {
             fallbackRef.current = "";
-            term.write(`\x1b[33m（容器内无 ${fb}，已自动改用 ${shell}）\x1b[0m\r\n`);
+            term.write(`\x1b[33m${t("term.shellFallback", { missing: fb, shell })}\x1b[0m\r\n`);
           }
           if (pendingResize) {
             void doResize(pendingResize.cols, pendingResize.rows, true);
@@ -254,8 +256,8 @@ export function TerminalView({ id, running }: { id: string; running: boolean }) 
       }
       // shell 降级链走完仍失败时给出准确原因，其余沿用后端原因
       markEnded(
-        f.reason === "进程已退出" && isExecStartFailure(outputHead)
-          ? "终端启动失败：容器内未找到可用的 shell（bash/sh/ash）"
+        f.code === "process_exited" && isExecStartFailure(outputHead)
+          ? t("term.noShell")
           : f.reason,
       );
     };
@@ -279,7 +281,7 @@ export function TerminalView({ id, running }: { id: string; running: boolean }) 
         execId = created;
         unsubOutput = api.execAttach(execId, onFrame);
       } catch (e) {
-        markEnded(`连接失败: ${String(e)}`);
+        markEnded(t("term.connectFailed", { err: String(e) }));
       }
     })();
 
@@ -305,8 +307,8 @@ export function TerminalView({ id, running }: { id: string; running: boolean }) 
     return (
       <EmptyState
         icon={<span className="font-mono text-2xl text-fg3">$_</span>}
-        title="容器未运行"
-        desc="终端只能连接运行中的容器"
+        title={t("process.notRunning")}
+        desc={t("term.needsRunning")}
       />
     );
   }
@@ -332,10 +334,10 @@ export function TerminalView({ id, running }: { id: string; running: boolean }) 
           onClick={() => setEpoch((n) => n + 1)}
         >
           <RotateCw size={14} />
-          重连
+          {t("term.reconnect")}
         </Button>
-        {phase === "connecting" && <Badge tone="warn">连接中</Badge>}
-        {phase === "ended" && <Badge tone="err">已断开</Badge>}
+        {phase === "connecting" && <Badge tone="warn">{t("term.connectingBadge")}</Badge>}
+        {phase === "ended" && <Badge tone="err">{t("term.disconnectedBadge")}</Badge>}
       </div>
       <div className="min-h-0 flex-1 p-4">
         <div
@@ -363,24 +365,24 @@ export function TerminalView({ id, running }: { id: string; running: boolean }) 
                     closeSearch();
                   }
                 }}
-                placeholder="搜索终端内容"
+                placeholder={t("term.searchPlaceholder")}
                 className="w-44 bg-transparent px-1.5 text-[12.5px] text-fg outline-none placeholder:text-fg3"
               />
               <IconButton
-                title="上一个（Shift+Enter）"
+                title={t("term.prevMatch")}
                 className="h-6 w-6"
                 onClick={() => query && searchRef.current?.findPrevious(query)}
               >
                 <ChevronUp size={13} />
               </IconButton>
               <IconButton
-                title="下一个（Enter）"
+                title={t("term.nextMatch")}
                 className="h-6 w-6"
                 onClick={() => query && searchRef.current?.findNext(query)}
               >
                 <ChevronDown size={13} />
               </IconButton>
-              <IconButton title="关闭（Esc）" className="h-6 w-6" onClick={closeSearch}>
+              <IconButton title={t("appLog.closeHint")} className="h-6 w-6" onClick={closeSearch}>
                 <X size={13} />
               </IconButton>
             </div>

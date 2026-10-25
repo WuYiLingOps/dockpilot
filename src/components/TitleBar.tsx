@@ -3,6 +3,7 @@ import { Moon, PanelLeftClose, Sun } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTheme, type ThemeMode } from "../lib/theme";
 import { withDragRegion } from "../lib/drag";
+import { useT } from "../lib/i18n";
 import { IconButton } from "./ui";
 
 const win = getCurrentWindow();
@@ -13,6 +14,7 @@ const win = getCurrentWindow();
  *  DOM 靠后，仍然盖过本组件 */
 export function WindowControls() {
   const [maximized, setMaximized] = useState(false);
+  const t = useT();
 
   useEffect(() => {
     let unlisten: (() => void) | undefined;
@@ -31,8 +33,8 @@ export function WindowControls() {
     <div className="absolute right-0 top-0 z-50 flex h-11 items-stretch" data-no-drag>
       <button
         type="button"
-        title="最小化"
-        aria-label="最小化"
+        title={t("window.minimize")}
+        aria-label={t("window.minimize")}
         onClick={() => void win.minimize()}
         className="flex w-11 items-center justify-center text-fg2 transition-colors hover:bg-hover hover:text-fg"
       >
@@ -42,8 +44,8 @@ export function WindowControls() {
       </button>
       <button
         type="button"
-        title={maximized ? "还原" : "最大化"}
-        aria-label={maximized ? "还原" : "最大化"}
+        title={maximized ? t("window.restore") : t("window.maximize")}
+        aria-label={maximized ? t("window.restore") : t("window.maximize")}
         onClick={() => void win.toggleMaximize()}
         className="flex w-11 items-center justify-center text-fg2 transition-colors hover:bg-hover hover:text-fg"
       >
@@ -63,8 +65,8 @@ export function WindowControls() {
       </button>
       <button
         type="button"
-        title="关闭"
-        aria-label="关闭"
+        title={t("common.close")}
+        aria-label={t("common.close")}
         onClick={() => void win.close()}
         className="flex w-11 items-center justify-center text-fg2 transition-colors hover:bg-err hover:text-white"
       >
@@ -80,13 +82,16 @@ const THEME_ORDER: ThemeMode[] = ["system", "light", "dark"];
 
 function ThemeToggle() {
   const { mode, setMode, isDark } = useTheme();
+  const t = useT();
   const next = () =>
     setMode(THEME_ORDER[(THEME_ORDER.indexOf(mode) + 1) % THEME_ORDER.length]);
-  const label = mode === "system" ? "跟随系统" : mode === "light" ? "亮色" : "暗色";
+  const label = t(
+    mode === "system" ? "theme.system" : mode === "light" ? "theme.light" : "theme.dark",
+  );
   return (
     <button
       type="button"
-      title={`主题：${label}（点击切换）`}
+      title={t("window.themeTitle", { mode: label })}
       onClick={next}
       className="flex h-6 w-6 items-center justify-center rounded-btn text-fg3 transition-colors hover:bg-hover hover:text-fg"
     >
@@ -128,6 +133,7 @@ export function SidebarTopBar({
   collapsed?: boolean;
   onToggleCollapse?: () => void;
 }) {
+  const t = useT();
   if (collapsed) {
     return (
       <>
@@ -155,7 +161,11 @@ export function SidebarTopBar({
       <div className="ml-auto flex items-center gap-1">
         <ThemeToggle />
         {onToggleCollapse && (
-          <IconButton title="收起侧栏" aria-label="收起侧栏" onClick={onToggleCollapse}>
+          <IconButton
+            title={t("window.collapseSidebar")}
+            aria-label={t("window.collapseSidebar")}
+            onClick={onToggleCollapse}
+          >
             <PanelLeftClose size={15} />
           </IconButton>
         )}

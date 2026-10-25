@@ -1,5 +1,6 @@
 import { X } from "lucide-react";
 import { useEffect } from "react";
+import { useT } from "../../lib/i18n";
 import { IconButton } from "../ui";
 import { ConnectionSettings } from "./ConnectionSettings";
 
@@ -9,6 +10,7 @@ import { ConnectionSettings } from "./ConnectionSettings";
  * 弹窗不改变当前页面，关闭后回到原上下文。
  */
 export function ConnectionDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const t = useT();
   // Esc 关闭；使用日志查看器在前台时让位（与设置弹窗同一约定）
   useEffect(() => {
     if (!open) return;
@@ -34,12 +36,12 @@ export function ConnectionDialog({ open, onClose }: { open: boolean; onClose: ()
       >
         <div className="flex h-12 shrink-0 items-center justify-between border-b border-edge px-4">
           <div className="min-w-0">
-            <h2 className="text-[14px] font-semibold text-fg">Docker 连接管理</h2>
+            <h2 className="text-[14px] font-semibold text-fg">{t("connDialog.title")}</h2>
             <p className="truncate text-[11px] text-fg3">
-              添加 / 编辑 / 测试连接；点击列表中的连接即可切换（即时生效）
+              {t("connDialog.desc")}
             </p>
           </div>
-          <IconButton title="关闭（Esc）" onClick={onClose} data-no-drag>
+          <IconButton title={t("appLog.closeHint")} onClick={onClose} data-no-drag>
             <X size={16} />
           </IconButton>
         </div>

@@ -1,3 +1,4 @@
+import { t } from "./i18n";
 import type { PortDto } from "../types/docker";
 
 /** 多行错误消息取首行短原因：完整原因与操作指引在日志、悬停提示或引导页中查看 */
@@ -21,15 +22,15 @@ export function timeAgo(unixSeconds: number): string {
   if (!unixSeconds) return "-";
   const diff = Date.now() / 1000 - unixSeconds;
   const m = Math.floor(diff / 60);
-  if (m < 1) return "刚刚";
-  if (m < 60) return `${m} 分钟前`;
+  if (m < 1) return t("format.justNow");
+  if (m < 60) return t("format.minAgo", { n: m });
   const h = Math.floor(m / 60);
-  if (h < 24) return `${h} 小时前`;
+  if (h < 24) return t("format.hourAgo", { n: h });
   const d = Math.floor(h / 24);
-  if (d < 30) return `${d} 天前`;
+  if (d < 30) return t("format.dayAgo", { n: d });
   const mo = Math.floor(d / 30);
-  if (mo < 12) return `${mo} 个月前`;
-  return `${Math.floor(mo / 12)} 年前`;
+  if (mo < 12) return t("format.monthAgo", { n: mo });
+  return t("format.yearAgo", { n: Math.floor(mo / 12) });
 }
 
 export function shortId(id: string): string {
@@ -39,7 +40,8 @@ export function shortId(id: string): string {
 /** CPU 核数展示：去掉多余的尾零（1.5 → "1.5 核"，2 → "2 核"） */
 export function formatCores(cores: number): string {
   if (!Number.isFinite(cores) || cores <= 0) return "-";
-  return `${Number(cores.toFixed(2))} 核`;
+  const n = Number(cores.toFixed(2));
+  return t(n === 1 ? "format.coreOne" : "format.cores", { n });
 }
 
 /** RFC3339 时间字符串（卷/网络/构建缓存的 created 字段）转 unix 秒；无效时返回 0（timeAgo 显示 "-"） */
@@ -64,8 +66,8 @@ export function imageGroup(imageRef: string | undefined): string {
 
 /** imageGroup 返回值的展示名 */
 export function imageGroupLabel(group: string): string {
-  if (group === "docker.io") return "Docker Hub（无前缀）";
-  if (group === "<none>") return "悬空镜像（无标签）";
+  if (group === "docker.io") return t("format.groupDockerHub");
+  if (group === "<none>") return t("format.groupDangling");
   return group;
 }
 
@@ -92,5 +94,5 @@ export function formatPorts(ports: PortDto[]): string {
     return `${p.private_port}${p.proto ? `/${p.proto}` : ""}`;
   });
   const shown = parts.slice(0, 3).join(", ");
-  return parts.length > 3 ? `${shown} 等 ${parts.length} 项` : shown;
+  return parts.length > 3 ? t("format.portsMore", { shown, n: parts.length }) : shown;
 }

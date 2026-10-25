@@ -1,5 +1,7 @@
 /** SSH 连接的前端辅助纯函数 */
 
+import { t } from "./i18n";
+
 /** 后端 [HOST_KEY_CHANGED] 结构化错误的载荷（对应 ssh_client.rs 的 SshError::HostKeyChanged） */
 export interface HostKeyChange {
   /** known_hosts 主机标识：22 端口为 host，非 22 为 [host]:port */
@@ -38,5 +40,5 @@ export function parseHostKeyChange(error: string): HostKeyChange | null {
 export function friendlySshError(error: string): string {
   const change = parseHostKeyChange(error);
   if (!change) return error;
-  return `主机 ${change.dest} 的密钥指纹已变更（${change.algo}），需确认后才能继续连接`;
+  return t("ssh.hostKeyChangedFriendly", { dest: change.dest, algo: change.algo });
 }

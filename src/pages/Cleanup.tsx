@@ -4,13 +4,15 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { api } from "../lib/api";
 import { formatBytes } from "../lib/format";
+import { useT } from "../lib/i18n";
+import type { MsgKey } from "../lib/i18n/zh";
 import type { DiskUsageDto, UsageCategory } from "../types/daemon";
 import { Badge, Button, CheckDot, EmptyState, ErrorNote, IconButton, Modal, PageHeader, Spinner } from "../components/ui";
 
 interface KindDef {
   key: string;
-  label: string;
-  desc: string;
+  labelKey: MsgKey;
+  descKey: MsgKey;
   icon: typeof HardDrive;
   danger?: boolean;
   pick: (u: DiskUsageDto) => UsageCategory;
@@ -20,37 +22,37 @@ interface KindDef {
 const KINDS: KindDef[] = [
   {
     key: "dangling_images",
-    label: "悬空镜像",
-    desc: "无标签的 <none> 镜像层",
+    labelKey: "cleanup.danglingImages",
+    descKey: "cleanup.danglingImagesDesc",
     icon: Layers,
     pick: (u) => u.dangling_images,
   },
   {
     key: "unused_images",
-    label: "未使用镜像",
-    desc: "未被任何容器引用的镜像（含悬空）",
+    labelKey: "cleanup.unusedImages",
+    descKey: "cleanup.unusedImagesDesc",
     icon: PackageOpen,
     pick: (u) => u.unused_images,
   },
   {
     key: "stopped_containers",
-    label: "已停止容器",
-    desc: "退出/创建/死亡状态的容器记录",
+    labelKey: "cleanup.stoppedContainers",
+    descKey: "cleanup.stoppedContainersDesc",
     icon: HardDrive,
     pick: (u) => u.stopped_containers,
   },
   {
     key: "unused_volumes",
-    label: "未使用卷",
-    desc: "未被容器挂载的数据卷，卷内数据将被删除",
+    labelKey: "cleanup.unusedVolumes",
+    descKey: "cleanup.unusedVolumesDesc",
     icon: Database,
     danger: true,
     pick: (u) => u.unused_volumes,
   },
   {
     key: "build_cache",
-    label: "构建缓存",
-    desc: "docker build 产生的层缓存",
+    labelKey: "cleanup.buildCache",
+    descKey: "cleanup.buildCacheDesc",
     icon: Eraser,
     pick: (u) => u.build_cache,
   },
@@ -58,6 +60,7 @@ const KINDS: KindDef[] = [
 
 export function Cleanup() {
   const qc = useQueryClient();
+  const t = useT();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [confirmOpen, setConfirmOpen] = useState(false);
 
@@ -88,21 +91,22 @@ export function Cleanup() {
       setConfirmOpen(false);
       setSelected(new Set());
       if (res.total_reclaimed > 0) {
-        toast.success(`清理完成，回收 ${formatBytes(res.total_reclaimed)}`);
+        toast.success(t("cleanup.doneReclaimed", { size: formatBytes(res.total_reclaimed) }));
       } else {
-        toast.success("清理完成");
+        toast.success(t("cleanup.done"));
       }
       for (const item of res.items) {
         if (item.error) {
-          const label = KINDS.find((k) => k.key === item.kind)?.label ?? item.kind;
-          toast.error(`${label}清理失败: ${item.error}`);
+          const kindDef = KINDS.find((k) => k.key === item.kind);
+          const label = kindDef ? t(kindDef.labelKey) : item.kind;
+          toast.error(t("cleanup.kindFailed", { label, err: item.error }));
         }
       }
       for (const key of ["diskUsage", "containers", "images", "dockerInfo"]) {
         void qc.invalidateQueries({ queryKey: [key] });
       }
     },
-    onError: (e) => toast.error(`清理失败: ${e}`),
+    onError: (e) => toast.error(t("cleanup.failed", { err: String(e) })),
   });
 
   const selectedKinds = KINDS.filter((k) => selected.has(k.key));
@@ -111,15 +115,15 @@ export function Cleanup() {
   return (
     <>
       <PageHeader
-        title="空间清理"
+        title={t("nav.cleanup")}
         desc={
           usage
-            ? `可回收约 ${formatBytes(usage.total_reclaimable)}`
-            : "统计 Docker 磁盘占用中"
+            ? t("cleanup.pageDesc", { size: formatBytes(usage.total_reclaimable) })
+            : t("st.usageLoading")
         }
       >
         <IconButton
-          title="刷新"
+          title={t("common.refresh")}
           onClick={() => void query.refetch()}
           className="h-8 w-8"
         >
@@ -137,8 +141,8 @@ export function Cleanup() {
         usage.stopped_containers.count === 0 ? (
         <EmptyState
           icon={<Eraser size={40} strokeWidth={1.5} />}
-          title="一切都很干净"
-          desc="没有可回收的空间"
+          title={t("cleanup.allClean")}
+          desc={t("cleanup.allCleanDesc")}
         />
       ) : (
         <div className="flex min-h-0 flex-1 flex-col">
@@ -161,13 +165,15 @@ export function Cleanup() {
                   <k.icon size={17} className="shrink-0 text-fg3" strokeWidth={1.6} />
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 text-[13px] font-medium text-fg">
-                      {k.label}
-                      {k.danger && <Badge tone="err">不可恢复</Badge>}
+                      {t(k.labelKey)}
+                      {k.danger && <Badge tone="err">{t("cleanup.irreversible")}</Badge>}
                     </div>
-                    <div className="mt-0.5 text-[11px] text-fg3">{k.desc}</div>
+                    <div className="mt-0.5 text-[11px] text-fg3">{t(k.descKey)}</div>
                   </div>
                   <div className="shrink-0 text-right">
-                    <div className="font-mono text-[13px] text-fg2">{u.count} 项</div>
+                    <div className="font-mono text-[13px] text-fg2">
+                      {t("cleanup.nObjects", { n: u.count })}
+                    </div>
                     {u.size > 0 && (
                       <div className="mt-0.5 font-mono text-[11px] text-fg3">
                         {formatBytes(u.size)}
@@ -184,7 +190,7 @@ export function Cleanup() {
           {/* 底部操作条 */}
           <div className="flex shrink-0 items-center justify-between gap-3 border-t border-edge bg-panel px-4 py-3">
             <span className="text-[12px] text-fg3">
-              已选 {selected.size} 类，约 {selectedCount} 个对象
+              {t("cleanup.selectedSummary", { kinds: selected.size, objects: selectedCount })}
             </span>
             <Button
               variant="danger"
@@ -192,7 +198,7 @@ export function Cleanup() {
               onClick={() => setConfirmOpen(true)}
             >
               <Eraser size={14} />
-              清理所选
+              {t("cleanup.cleanSelected")}
             </Button>
           </div>
         </div>
@@ -200,32 +206,32 @@ export function Cleanup() {
 
       <Modal
         open={confirmOpen}
-        title="确认清理"
+        title={t("cleanup.confirmTitle")}
         onClose={() => setConfirmOpen(false)}
         footer={
           <>
             <Button variant="outline" onClick={() => setConfirmOpen(false)}>
-              取消
+              {t("common.cancel")}
             </Button>
             <Button variant="danger" disabled={cleanup.isPending} onClick={() => cleanup.mutate()}>
               {cleanup.isPending ? <Spinner className="h-3.5 w-3.5" /> : null}
-              确认清理
+              {t("cleanup.confirm")}
             </Button>
           </>
         }
       >
         <p className="flex items-start gap-1.5">
           <AlertTriangle size={15} className="mt-0.5 shrink-0 text-warn" />
-          清理操作不可恢复，将删除以下对象：
+          {t("cleanup.confirmWarning")}
         </p>
         <ul className="mt-2 space-y-1">
           {selectedKinds.map((k) => (
             <li key={k.key} className="flex items-center justify-between">
-              <span className={k.danger ? "text-err" : ""}>{k.label}</span>
+              <span className={k.danger ? "text-err" : ""}>{t(k.labelKey)}</span>
               <span className="font-mono text-[12px] text-fg3">
-                {usage ? k.pick(usage).count : "?"} 项
+                {t("cleanup.nObjects", { n: usage ? k.pick(usage).count : 0 })}
                 {k.key === "dangling_images" && selected.has("unused_images")
-                  ? "（已含在未使用镜像中）"
+                  ? t("cleanup.includedInUnused")
                   : ""}
               </span>
             </li>

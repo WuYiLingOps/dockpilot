@@ -1,5 +1,6 @@
 import { Trash2 } from "lucide-react";
 import { formatBytes } from "../../lib/format";
+import { useT } from "../../lib/i18n";
 import type { VolumeDto } from "../../types/docker";
 import { Button, Modal } from "../../components/ui";
 import { formatDateTime, InfoRow } from "./shared";
@@ -13,33 +14,34 @@ export function VolumeDetailModal({
   onClose: () => void;
   onDelete: (v: VolumeDto) => void;
 }) {
+  const t = useT();
   if (!vol) return null;
   return (
     <Modal
       open
-      title="存储卷详情"
+      title={t("st.volumeDetailTitle")}
       onClose={onClose}
       footer={
         <>
           <Button variant="danger" className="mr-auto" onClick={() => onDelete(vol)}>
             <Trash2 size={14} />
-            删除卷
+            {t("st.deleteVolume")}
           </Button>
           <Button variant="outline" onClick={onClose}>
-            关闭
+            {t("common.close")}
           </Button>
         </>
       }
     >
       <div className="space-y-1">
-        <InfoRow label="名称" value={vol.name} />
-        <InfoRow label="驱动" value={vol.driver} />
-        <InfoRow label="范围" value={vol.scope || "-"} />
-        <InfoRow label="大小" value={formatBytes(vol.size)} />
-        <InfoRow label="创建时间" value={formatDateTime(vol.created)} />
-        <InfoRow label="挂载点" value={vol.mountpoint || "-"} />
+        <InfoRow label={t("st.name")} value={vol.name} />
+        <InfoRow label={t("st.driver")} value={vol.driver} />
+        <InfoRow label={t("st.thScope")} value={vol.scope || "-"} />
+        <InfoRow label={t("st.thSize")} value={formatBytes(vol.size)} />
+        <InfoRow label={t("st.createdAt")} value={formatDateTime(vol.created)} />
+        <InfoRow label={t("st.mountpoint")} value={vol.mountpoint || "-"} />
         <InfoRow
-          label="标签"
+          label={t("st.thLabels")}
           value={
             vol.labels.length > 0
               ? vol.labels.map((l) => `${l.key}=${l.value}`).join("  ")
@@ -49,10 +51,10 @@ export function VolumeDetailModal({
       </div>
       <div className="mt-3 border-t border-edge/60 pt-3">
         <div className="mb-1.5 text-[12px] font-medium text-fg2">
-          使用该卷的容器（{vol.used_by.length}）
+          {t("st.volumesUsing", { n: vol.used_by.length })}
         </div>
         {vol.used_by.length === 0 ? (
-          <p className="text-[12px] text-fg3">暂无容器使用该卷</p>
+          <p className="text-[12px] text-fg3">{t("st.noContainersUsing")}</p>
         ) : (
           <div className="space-y-1">
             {vol.used_by.map((c) => (

@@ -2,6 +2,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Braces, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
+import { useT } from "../../lib/i18n";
 import { api } from "../../lib/api";
 import { formatBytes, shortId } from "../../lib/format";
 import type { ImageDto } from "../../types/docker";
@@ -10,6 +11,7 @@ import { Button, IconButton, Modal, Spinner } from "../../components/ui";
 
 /** 标签管理弹窗：列出镜像全部标签，可逐个移除；最后一个标签移除即删除整个镜像 */
 export function TagsModal({ img, onClose }: { img: ImageDto; onClose: () => void }) {
+  const t = useT();
   const qc = useQueryClient();
   const [tags, setTags] = useState<string[]>(img.tags);
   const [pendingTag, setPendingTag] = useState<string | null>(null);
@@ -24,16 +26,16 @@ export function TagsModal({ img, onClose }: { img: ImageDto; onClose: () => void
       void qc.invalidateQueries({ queryKey: ["images"] });
       void qc.invalidateQueries({ queryKey: ["dockerInfo"] });
       if (deletedImage) {
-        toast.success(`镜像 ${reference} 已删除（它是最后一个标签）`);
+        toast.success(t("img.tagDeletedImage", { ref: reference }));
         onClose();
         return;
       }
-      toast.success(`已移除标签 ${reference}`);
+      toast.success(t("img.tagRemoved", { ref: reference }));
       const rest = tags.filter((t) => t !== reference);
       setTags(rest);
       if (rest.length === 0) onClose();
     } catch (e) {
-      toast.error(`移除标签失败: ${e}`);
+      toast.error(t("img.tagRemoveFailed", { err: String(e) }));
     } finally {
       setPendingTag(null);
       setConfirmLast(false);
@@ -41,28 +43,30 @@ export function TagsModal({ img, onClose }: { img: ImageDto; onClose: () => void
   };
 
   return (
-    <Modal open title="标签管理" onClose={onClose}>
+    <Modal open title={t("img.tagsTitle")} onClose={onClose}>
       <p className="mb-3">
-        镜像{" "}
-        <span className="font-mono text-fg">{shortId(img.id)}</span> 共{" "}
-        {tags.length} 个标签，均指向同一镜像（{formatBytes(img.size)}）。
+        {t("img.tagsSummaryBefore")}{" "}
+        <span className="font-mono text-fg">{shortId(img.id)}</span>{" "}
+        {t("img.tagsSummaryAfter", { n: tags.length, size: formatBytes(img.size) })}
       </p>
       <div className="space-y-1.5">
-        {tags.map((t) => (
+        {tags.map((tag) => (
           <div
-            key={t}
+            key={tag}
             className="flex items-center gap-2 rounded-ctl border border-edge bg-panel2/40 px-2.5 py-2"
           >
-            <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-fg2" title={t}>
-              {t}
+            <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-fg2" title={tag}>
+              {tag}
             </span>
             <IconButton
               title={
-                tags.length === 1 ? "移除该标签将删除整个镜像" : `移除标签 ${t}`
+                tags.length === 1
+                  ? t("img.removeLastWarn")
+                  : t("img.removeTagTitle", { ref: tag })
               }
               disabled={pendingTag !== null}
               className="hover:bg-err/10 hover:text-err"
-              onClick={() => (tags.length === 1 ? setConfirmLast(true) : void remove(t))}
+              onClick={() => (tags.length === 1 ? setConfirmLast(true) : void remove(tag))}
             >
               <Trash2 size={13} />
             </IconButton>
@@ -73,11 +77,11 @@ export function TagsModal({ img, onClose }: { img: ImageDto; onClose: () => void
         <div className="mt-3 rounded-ctl border border-err/20 bg-err/5 p-2.5 text-[12px] leading-4 text-err">
           <p>
             <span className="font-mono">{tags[0]}</span>{" "}
-            是该镜像最后一个标签，移除将删除整个镜像（不可恢复）。
+            {t("img.lastTagWarn")}
           </p>
           <div className="mt-2 flex justify-end gap-2">
             <Button variant="outline" onClick={() => setConfirmLast(false)}>
-              取消
+              {t("common.cancel")}
             </Button>
             <Button
               variant="danger"
@@ -85,7 +89,7 @@ export function TagsModal({ img, onClose }: { img: ImageDto; onClose: () => void
               onClick={() => void remove(tags[0])}
             >
               {pendingTag !== null ? <Spinner className="h-3.5 w-3.5" /> : null}
-              确认删除镜像
+              {t("img.confirmDeleteImage")}
             </Button>
           </div>
         </div>
@@ -93,13 +97,13 @@ export function TagsModal({ img, onClose }: { img: ImageDto; onClose: () => void
       <div className="mt-3 flex justify-end">
         <Button variant="outline" onClick={() => setShowJson(true)}>
           <Braces size={13} />
-          查看原始 JSON
+          {t("img.viewJson")}
         </Button>
       </div>
       {showJson && (
         <Modal
           open
-          title={`镜像 JSON — ${img.tags[0] || shortId(img.id)}`}
+          title={t("img.jsonTitle", { ref: img.tags[0] || shortId(img.id) })}
           onClose={() => setShowJson(false)}
           size="lg"
         >

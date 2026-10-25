@@ -5,6 +5,7 @@ import { Toaster } from "sonner";
 import App from "./App";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { applog, installGlobalErrorHandlers } from "./lib/applog";
+import { t } from "./lib/i18n";
 import { useTheme } from "./lib/theme";
 import "./index.css";
 
@@ -18,7 +19,7 @@ const queryClient = new QueryClient({
         const msg = String(error);
         if (lastByKey.get(key) === msg) return;
         lastByKey.set(key, msg);
-        void applog.warn(`数据查询失败 ${key}: ${msg}`);
+        void applog.warn(t("log.queryFailed", { key, msg }));
       };
     })(),
   }),

@@ -2,12 +2,14 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { toast } from "sonner";
 import { api } from "../../lib/api";
+import { useT } from "../../lib/i18n";
 import type { KeyValueSpec } from "../../types/docker";
 import { Button, Input, Modal, Select } from "../../components/ui";
 import { KVEditor, NAME_RE } from "./shared";
 
 export function CreateVolumeModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const qc = useQueryClient();
+  const t = useT();
   const info = useQuery({
     queryKey: ["dockerInfo"],
     queryFn: api.dockerInfo,
@@ -26,7 +28,7 @@ export function CreateVolumeModal({ open, onClose }: { open: boolean; onClose: (
         labels: labels.filter((r) => r.key.trim() !== ""),
       }),
     onSuccess: () => {
-      toast.success(`卷 ${name.trim()} 已创建`);
+      toast.success(t("st.volumeCreated", { name: name.trim() }));
       onClose();
       setName("");
       setDriver("local");
@@ -35,13 +37,13 @@ export function CreateVolumeModal({ open, onClose }: { open: boolean; onClose: (
         void qc.invalidateQueries({ queryKey: [key] });
       }
     },
-    onError: (e) => toast.error(`创建卷失败: ${e}`),
+    onError: (e) => toast.error(t("st.volumeCreateFailed", { err: String(e) })),
   });
 
   const submit = () => {
     const n = name.trim();
     if (!NAME_RE.test(n)) {
-      toast.error("卷名称只能包含字母、数字、下划线、点和中划线，且以字母或数字开头");
+      toast.error(t("st.invalidName"));
       return;
     }
     create.mutate();
@@ -54,33 +56,33 @@ export function CreateVolumeModal({ open, onClose }: { open: boolean; onClose: (
   return (
     <Modal
       open={open}
-      title="创建存储卷"
+      title={t("st.createVolumeTitle")}
       onClose={onClose}
       footer={
         <>
           <Button variant="outline" onClick={onClose}>
-            取消
+            {t("common.cancel")}
           </Button>
           <Button variant="primary" disabled={create.isPending} onClick={submit}>
-            创建
+            {t("st.create")}
           </Button>
         </>
       }
     >
       <div className="space-y-3">
         <div>
-          <div className="mb-1 text-[12px] font-medium text-fg2">名称</div>
+          <div className="mb-1 text-[12px] font-medium text-fg2">{t("st.name")}</div>
           <Input
             autoFocus
             className="w-full font-mono text-[12px]"
-            placeholder="例如 app-data"
+            placeholder={t("st.namePlaceholderVol")}
             value={name}
             onChange={(e) => setName(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && submit()}
           />
         </div>
         <div>
-          <div className="mb-1 text-[12px] font-medium text-fg2">驱动</div>
+          <div className="mb-1 text-[12px] font-medium text-fg2">{t("st.driver")}</div>
           <Select className="w-full" value={driver} onChange={(e) => setDriver(e.target.value)}>
             {drivers.map((d) => (
               <option key={d} value={d}>
@@ -90,7 +92,9 @@ export function CreateVolumeModal({ open, onClose }: { open: boolean; onClose: (
           </Select>
         </div>
         <div>
-          <div className="mb-1 text-[12px] font-medium text-fg2">标签（{labels.length}）</div>
+          <div className="mb-1 text-[12px] font-medium text-fg2">
+            {t("st.labels", { n: labels.length })}
+          </div>
           <KVEditor rows={labels} onChange={setLabels} />
         </div>
       </div>

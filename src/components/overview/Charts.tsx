@@ -6,6 +6,7 @@ import {
   type RefObject,
 } from "react";
 import { formatBytes } from "../../lib/format";
+import { useT } from "../../lib/i18n";
 import type { NamedSizeDto } from "../../types/docker";
 
 /* ---------------------------------------------------------------- */
@@ -274,6 +275,7 @@ function TreemapTooltip({
   y: number;
   extra?: ReactNode;
 }) {
+  const t = useT();
   const pct = total > 0 ? ((item.size / total) * 100).toFixed(1) : "0.0";
   // 翻转与夹取用的估算尺寸（与 max-width 一致；高度按最多几行估）
   const W = 280;
@@ -293,7 +295,7 @@ function TreemapTooltip({
         <span className="font-semibold tabular-nums text-fg">
           {formatBytes(item.size)}
         </span>
-        <span className="tabular-nums text-fg3">占比 {pct}%</span>
+        <span className="tabular-nums text-fg3">{t("overview.share", { n: pct })}</span>
       </div>
       {extra}
     </div>
@@ -342,6 +344,7 @@ export function Treemap({
     y: number;
   } | null>(null);
 
+  const t = useT();
   return (
     <div ref={ref} className="min-w-0 flex-1" style={{ height }}>
       {rects.length === 0 ? (
@@ -349,7 +352,7 @@ export function Treemap({
           className="flex items-center justify-center rounded-ctl border border-dashed border-edge text-[12px] text-fg3"
           style={{ height }}
         >
-          暂无可统计的占用数据
+          {t("overview.noUsageData")}
         </div>
       ) : (
         <>

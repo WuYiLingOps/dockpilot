@@ -1,5 +1,6 @@
 /** 云同步域类型与常量（对应方案 sync-gist-plan.md；算法移植自 Netcatty） */
 
+import { t } from "../lib/i18n";
 import type {
   AppSettings,
   ConnectionProfile,
@@ -310,10 +311,10 @@ export const loadDeviceInfo = (): DeviceInfo => {
 
 /** 格式化同步时间：一分钟内"刚刚"，一小时内"N 分钟前"，否则 yyyyMMdd HHmm */
 export const formatLastSync = (timestamp?: number | null): string => {
-  if (!timestamp) return "从未同步";
+  if (!timestamp) return t("sync.neverSynced");
   const diff = Date.now() - timestamp;
-  if (diff < 60000) return "刚刚";
-  if (diff < 3600000) return `${Math.floor(diff / 60000)} 分钟前`;
+  if (diff < 60000) return t("format.justNow");
+  if (diff < 3600000) return t("format.minAgo", { n: Math.floor(diff / 60000) });
   const d = new Date(timestamp);
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())} ${pad(d.getHours())}${pad(d.getMinutes())}`;

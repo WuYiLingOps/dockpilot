@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "../../lib/api";
 import { formatBytes } from "../../lib/format";
 import { useSettings } from "../../lib/settings";
+import { useT } from "../../lib/i18n";
 import { cn, Button, CheckDot, Input, Select } from "../ui";
 
 type Stream = "out" | "err";
@@ -18,6 +19,7 @@ const MAX_LINES = 5000;
 
 /** 容器详情 · 日志 Tab（流式、自动跟随、关键字过滤；默认值来自设置） */
 export function LogsView({ id }: { id: string }) {
+  const t = useT();
   const { data: settings } = useSettings();
   const [tail, setTail] = useState(() =>
     String(settings?.logs_default_tail ?? 1000),
@@ -84,16 +86,16 @@ export function LogsView({ id }: { id: string }) {
     if (exporting) return;
     try {
       const path = await save({
-        title: "导出容器日志",
+        title: t("logs.exportDialogTitle"),
         defaultPath: `container-${id.slice(0, 12)}.log`,
-        filters: [{ name: "日志文件", extensions: ["log", "txt"] }],
+        filters: [{ name: t("appLog.exportFilterName"), extensions: ["log", "txt"] }],
       });
       if (!path) return;
       setExporting(true);
       const size = await api.exportLogs(id, tail, timestamps, path);
-      toast.success(`已导出 ${formatBytes(size)} 日志到 ${path}`);
+      toast.success(t("appLog.exported", { size: formatBytes(size), path }));
     } catch (e) {
-      toast.error(`导出日志失败: ${e}`);
+      toast.error(t("appLog.exportFailed", { err: String(e) }));
     } finally {
       setExporting(false);
     }
@@ -110,52 +112,52 @@ export function LogsView({ id }: { id: string }) {
           onChange={(e) => setTail(e.target.value)}
           className="w-32"
         >
-          <option value="100">最近 100 行</option>
-          <option value="1000">最近 1000 行</option>
-          <option value="5000">最近 5000 行</option>
-          <option value="10000">最近 10000 行</option>
+          <option value="100">{t("logs.tail", { n: 100 })}</option>
+          <option value="1000">{t("logs.tail", { n: 1000 })}</option>
+          <option value="5000">{t("logs.tail", { n: 5000 })}</option>
+          <option value="10000">{t("logs.tail", { n: 10000 })}</option>
         </Select>
         <button
           type="button"
           role="checkbox"
           aria-checked={follow}
-          title="跟随"
+          title={t("appLog.follow")}
           onClick={() => setFollow(!follow)}
           className="inline-flex cursor-pointer select-none items-center gap-1.5 text-[12px] text-fg2 hover:text-fg"
         >
           <CheckDot checked={follow} />
-          跟随
+          {t("appLog.follow")}
         </button>
         <button
           type="button"
           role="checkbox"
           aria-checked={timestamps}
-          title="时间戳"
+          title={t("logs.timestamps")}
           onClick={() => setTimestamps(!timestamps)}
           className="inline-flex cursor-pointer select-none items-center gap-1.5 text-[12px] text-fg2 hover:text-fg"
         >
           <CheckDot checked={timestamps} />
-          时间戳
+          {t("logs.timestamps")}
         </button>
         <Input
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
-          placeholder="过滤关键字"
+          placeholder={t("appLog.filterPlaceholder")}
           className="ml-auto h-7 w-44"
         />
         <Button variant="ghost" className="h-7" onClick={() => setLines([])}>
           <Eraser size={14} />
-          清屏
+          {t("logs.clear")}
         </Button>
         <Button
           variant="ghost"
           className="h-7"
-          title="按当前参数导出日志到文件"
+          title={t("logs.exportTitle")}
           disabled={exporting}
           onClick={() => void exportLogs()}
         >
           <Download size={14} />
-          导出
+          {t("appLog.export")}
         </Button>
       </div>
 
@@ -171,7 +173,7 @@ export function LogsView({ id }: { id: string }) {
       >
         {shown.length === 0 ? (
           <div className="pt-8 text-center text-fg3">
-            {lines.length === 0 ? "暂无日志输出" : "没有匹配过滤条件的行"}
+            {lines.length === 0 ? t("logs.empty") : t("logs.noMatch")}
           </div>
         ) : (
           shown.map((l, i) => (

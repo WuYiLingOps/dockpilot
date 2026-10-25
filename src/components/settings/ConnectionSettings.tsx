@@ -15,12 +15,19 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { toast } from "sonner";
 import { api } from "../../lib/api";
 import { firstLine } from "../../lib/format";
+import { t, useT } from "../../lib/i18n";
 import { useIsWindows } from "../../lib/platform";
-import { useSettings, useSwitchConnection, useUpdateSettings } from "../../lib/settings";
+import {
+  displayConnName,
+  useSettings,
+  useSwitchConnection,
+  useUpdateSettings,
+} from "../../lib/settings";
 import { parseHostKeyChange, type HostKeyChange } from "../../lib/ssh";
 import {
   CONNECTION_AUTHS,
   CONNECTION_KINDS,
+  connectionAuthLabel,
   connectionKindLabel,
   type ConnectionAuth,
   type ConnectionKind,
@@ -70,20 +77,20 @@ function displayUrl(p: ConnectionProfile): string {
 
 /** 连接地址合法性：远程类型必须给出地址 */
 function validateDraft(p: ConnectionProfile): string | null {
-  if (!p.name.trim()) return "请填写连接名称";
-  if (p.kind === "tcp" && !p.host.trim()) return "请填写主机地址";
+  if (!p.name.trim()) return t("conn.nameRequired");
+  if (p.kind === "tcp" && !p.host.trim()) return t("conn.hostRequired");
   if (p.kind === "tls") {
-    if (!p.host.trim()) return "请填写主机地址";
-    if (!p.cert_path.trim()) return "请选择证书目录";
+    if (!p.host.trim()) return t("conn.hostRequired");
+    if (!p.cert_path.trim()) return t("conn.certRequired");
   }
   if (p.kind === "ssh") {
-    if (!p.host.trim()) return "请填写 SSH 地址";
+    if (!p.host.trim()) return t("conn.sshAddrRequired");
     // 使用 SSH 身份时用户名来自身份，host 可只写 host[:port]
     if (p.identity_id === "" && !p.host.includes("@")) {
-      return "SSH 地址需为 user@host 形式（密码认证同样需要用户名），或在上方选择 SSH 身份";
+      return t("conn.sshAddrFormat");
     }
     if (p.auth !== "password" && p.key_path.trim().toLowerCase().endsWith(".pub")) {
-      return "请选择私钥文件，不要选择 .pub 公钥文件（例如 id_rsa.pub）";
+      return t("conn.pubKeySelected");
     }
   }
   return null;
@@ -112,26 +119,25 @@ function emptyDraft(kind: ConnectionKind = "local"): ConnectionProfile {
 function sshConnectionNotes(auth: ConnectionAuth | "", isWindows: boolean): string[] {
   if (auth === "password") {
     return [
-      "密码仅保存在本机（系统钥匙串，无钥匙串环境回退加密文件），不会上传或同步",
-      "SSH 地址需含用户名（user@host），远程用户需已加入 docker 组",
-      "服务器若禁用密码认证（PasswordAuthentication no），请改用私钥",
-      "数据经 SSH 加密隧道传输",
+      t("conn.notePwdLocal"),
+      t("conn.notePwdUserInDockerGroup"),
+      t("conn.notePwdDisabled"),
+      t("conn.noteEncrypted"),
     ];
   }
-  const deploy = isWindows
-    ? '首次使用需先部署公钥（输入一次密码，无密钥先 ssh-keygen -t ed25519）：在 PowerShell 执行 type $env:USERPROFILE\\.ssh\\id_ed25519.pub | ssh user@ip "mkdir -p ~/.ssh && cat >> ~/.ssh/authorized_keys"'
-    : "首次使用需先部署公钥（输入一次密码）：在终端执行 ssh-copy-id user@ip";
+  const deploy = isWindows ? t("conn.deployKeyWindows") : t("conn.deployKey");
   return [
-    "内置 SSH 引擎连接，无需本机安装 ssh 客户端；远程用户需已加入 docker 组",
-    "支持显式私钥（含口令）、ssh-agent（Windows 版暂不支持 agent，请指定私钥路径）或默认私钥（~/.ssh/id_*）",
-    `${deploy}，否则会报 Permission denied`,
-    "数据经 SSH 加密隧道传输",
+    t("conn.noteBuiltInEngine"),
+    t("conn.noteKeySources"),
+    `${deploy}${t("conn.deployKeySuffix")}`,
+    t("conn.noteEncrypted"),
   ];
 }
 
 /** 设置页 · Docker 连接分组：多连接配置的增删改、连通性测试与切换 */
 export function ConnectionSettings() {
   const qc = useQueryClient();
+  const t = useT();
   const { data: settings } = useSettings();
   const update = useUpdateSettings();
   const switchConn = useSwitchConnection();
@@ -192,7 +198,7 @@ export function ConnectionSettings() {
       await api.setSettings({ ...settings, connections: nextConnections });
       await persistSshSecrets(draft);
     } catch (e) {
-      toast.error(`保存设置失败: ${e}`);
+      toast.error(t("settings.saveFailed", { err: String(e) }));
       setSaving(false);
       return;
     }
@@ -202,7 +208,7 @@ export function ConnectionSettings() {
     if (wasActive) {
       try {
         await api.switchConnection(draft.id);
-        toast.success("连接配置已保存并重新连接");
+        toast.success(t("conn.savedAndReconnected"));
       } catch (e) {
         const message = String(e);
         const change = parseHostKeyChange(message);
@@ -211,25 +217,27 @@ export function ConnectionSettings() {
           setHostKey({ change, retry: async () => {
             try {
               await api.switchConnection(draft.id);
-              toast.success("连接配置已保存并重新连接");
+              toast.success(t("conn.savedAndReconnected"));
               void qc.invalidateQueries();
             } catch (err) {
-              toast.error(`配置已保存，但按新配置连接失败，已保持原连接：${firstLine(String(err))}`);
+              toast.error(
+                t("conn.savedButReconnectFailed", { err: firstLine(String(err)) }),
+              );
             }
           } });
           return;
         }
-        toast.error(`配置已保存，但按新配置连接失败，已保持原连接：${firstLine(message)}`);
+        toast.error(t("conn.savedButReconnectFailed", { err: firstLine(message) }));
       }
     } else {
-      toast.success("连接配置已保存");
+      toast.success(t("conn.saved"));
     }
     void qc.invalidateQueries();
   };
 
   /** 执行一次连通性测试；主机指纹变更时弹确认框并在确认后自动重试 */
   const runTest = async (p: ConnectionProfile, transient?: { password?: string; passphrase?: string }) => {
-    setTesting((t) => ({ ...t, [p.id]: { status: "testing" } }));
+    setTesting((prev) => ({ ...prev, [p.id]: { status: "testing" } }));
     try {
       const r: ConnectionTestResult = await api.testConnection(
         p,
@@ -240,18 +248,21 @@ export function ConnectionSettings() {
         const change = parseHostKeyChange(r.error);
         if (change) {
           setHostKey({ change, retry: () => runTest(p) });
-          setTesting((t) => ({ ...t, [p.id]: { status: "fail", error: "主机指纹已变更，等待确认" } }));
+          setTesting((prev) => ({
+            ...prev,
+            [p.id]: { status: "fail", error: t("conn.hostKeyAwaitingConfirm") },
+          }));
           return;
         }
       }
-      setTesting((t) =>
+      setTesting((prev) =>
         r.ok
-          ? { ...t, [p.id]: { status: "ok", ms: r.latency_ms ?? 0, version: r.version } }
-          : { ...t, [p.id]: { status: "fail", error: r.error || "连接失败" } },
+          ? { ...prev, [p.id]: { status: "ok", ms: r.latency_ms ?? 0, version: r.version } }
+          : { ...prev, [p.id]: { status: "fail", error: r.error || t("conn.connectFailed") } },
       );
     } catch (e) {
       const message = errorMessage(e);
-      setTesting((t) => ({ ...t, [p.id]: { status: "fail", error: message } }));
+      setTesting((prev) => ({ ...prev, [p.id]: { status: "fail", error: message } }));
       throw e instanceof Error ? e : new Error(message);
     }
   };
@@ -260,7 +271,7 @@ export function ConnectionSettings() {
     if (!draft || testing[draft.id]?.status === "testing") return;
     const err = validateDraft(draft);
     if (err) {
-      setTesting((t) => ({ ...t, [draft.id]: { status: "fail", error: err } }));
+      setTesting((prev) => ({ ...prev, [draft.id]: { status: "fail", error: err } }));
       toast.error(err);
       return;
     }
@@ -276,22 +287,22 @@ export function ConnectionSettings() {
     try {
       await runTest(p);
     } catch (e) {
-      toast.error(`测试「${p.name}」失败: ${firstLine(errorMessage(e))}`);
+      toast.error(t("reg.testFailedNamed", { name: p.name, err: firstLine(errorMessage(e)) }));
     }
   };
 
   const removeProfile = (p: ConnectionProfile) => {
     if (p.id === activeId) {
-      toast.info("不能删除当前连接，请先切换到其他连接");
+      toast.info(t("conn.cannotDeleteActive"));
       return;
     }
     if (connections.length <= 1) {
-      toast.info("至少保留一个连接配置");
+      toast.info(t("conn.keepAtLeastOne"));
       return;
     }
     update.mutate(
       { ...settings, connections: connections.filter((c) => c.id !== p.id) },
-      { onSuccess: () => toast.success("连接配置已删除") },
+      { onSuccess: () => toast.success(t("conn.deleted")) },
     );
   };
 
@@ -320,11 +331,11 @@ export function ConnectionSettings() {
   return (
     <section className="overflow-hidden rounded-card border border-edge bg-panel shadow-[var(--app-shadow)]">
       <div className="flex items-center justify-between border-b border-edge/60 bg-panel2/40 px-4 py-2.5">
-        <div className="text-[13px] font-semibold text-fg">Docker 连接</div>
+        <div className="text-[13px] font-semibold text-fg">{t("conn.sectionTitle")}</div>
         {connections.map((c) =>
           c.id === activeId ? (
             <span key="active" className="flex items-center gap-1.5 text-[11px] text-fg3">
-              当前：
+              {t("conn.currentPrefix")}
               <span className="max-w-40 truncate font-mono text-fg2">{c.name}</span>
             </span>
           ) : null,
@@ -335,12 +346,12 @@ export function ConnectionSettings() {
         {connections.map((c) => {
           const meta = KIND_META[c.kind] ?? KIND_META.local;
           const Icon = meta.icon;
-          const t = testing[c.id];
+          const ts = testing[c.id];
           const isActive = c.id === activeId;
           return (
             <div
               key={c.id}
-              title={isActive ? "当前连接" : "点击切换到此连接"}
+              title={isActive ? t("sidebar.currentConnection") : t("conn.clickToSwitch")}
               onClick={() => !isActive && switchConn.mutate(c.id)}
               className={`group flex items-center gap-2.5 px-4 py-2.5 transition-colors ${
                 isActive ? "bg-accent/5" : "cursor-pointer hover:bg-hover"
@@ -355,23 +366,23 @@ export function ConnectionSettings() {
               </div>
               <div data-no-drag className="min-w-0 flex-1">
                 <div className="flex items-center gap-1.5 text-[13px] text-fg">
-                  <span className="truncate">{c.name}</span>
-                  {isActive && <Badge tone="accent">当前</Badge>}
+                  <span className="truncate">{displayConnName(c.name)}</span>
+                  {isActive && <Badge tone="accent">{t("conn.currentBadge")}</Badge>}
                 </div>
                 <div className="truncate font-mono text-[11px] text-fg3" title={displayUrl(c)}>
                   {displayUrl(c)}
                 </div>
               </div>
               <Badge tone={meta.tone}>{connectionKindLabel(c.kind)}</Badge>
-              {t?.status === "testing" && <Spinner className="h-3.5 w-3.5" />}
-              {t?.status === "ok" && (
-                <Badge tone={t.ms < 300 ? "ok" : t.ms < 1000 ? "warn" : "neutral"}>
-                  {t.ms} ms{t.version ? ` · ${t.version}` : ""}
+              {ts?.status === "testing" && <Spinner className="h-3.5 w-3.5" />}
+              {ts?.status === "ok" && (
+                <Badge tone={ts.ms < 300 ? "ok" : ts.ms < 1000 ? "warn" : "neutral"}>
+                  {ts.ms} ms{ts.version ? ` · ${ts.version}` : ""}
                 </Badge>
               )}
-              {t?.status === "fail" && (
-                <span title={t.error || "连接失败"}>
-                  <Badge tone="err">不可达</Badge>
+              {ts?.status === "fail" && (
+                <span title={ts.error || t("conn.connectFailed")}>
+                  <Badge tone="err">{t("mir.unreachable")}</Badge>
                 </span>
               )}
               <div
@@ -379,7 +390,7 @@ export function ConnectionSettings() {
                 className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100"
               >
                 <IconButton
-                  title="测试连接"
+                  title={t("reg.testConnection")}
                   onClick={(e) => {
                     e.stopPropagation();
                     void testRow(c);
@@ -388,7 +399,7 @@ export function ConnectionSettings() {
                   <Gauge size={13} />
                 </IconButton>
                 <IconButton
-                  title="编辑"
+                  title={t("reg.edit")}
                   onClick={(e) => {
                     e.stopPropagation();
                     openDraft(c, false);
@@ -397,7 +408,7 @@ export function ConnectionSettings() {
                   <Pencil size={13} />
                 </IconButton>
                 <IconButton
-                  title={isActive ? "当前连接不可删除" : "删除"}
+                  title={isActive ? t("conn.activeNoDelete") : t("containers.actRemove")}
                   className={isActive ? "opacity-30" : "hover:bg-err/10 hover:text-err"}
                   onClick={(e) => {
                     e.stopPropagation();
@@ -413,9 +424,7 @@ export function ConnectionSettings() {
       </div>
 
       <div className="flex items-center justify-between gap-3 px-4 py-3">
-        <span className="text-[11px] text-fg3">
-          点击列表项切换连接，切换后自动刷新数据；远程连接失败时可在列表重试或修改配置
-        </span>
+        <span className="text-[11px] text-fg3">{t("conn.listHint")}</span>
         <Button
           variant="outline"
           className="shrink-0"
@@ -424,29 +433,29 @@ export function ConnectionSettings() {
           }}
         >
           <Plus size={13} />
-          添加连接
+          {t("conn.addConnection")}
         </Button>
       </div>
 
       {/* 添加 / 编辑连接 */}
       <Modal
         open={draft !== null}
-        title={isNew ? "添加连接" : "编辑连接"}
+        title={isNew ? t("conn.addTitle") : t("conn.editTitle")}
         onClose={() => setDraft(null)}
         size="lg"
         footer={
           <>
             <Button variant="outline" onClick={() => void testDraft()} disabled={!draft}>
               {draftTest?.status === "testing" ? <Spinner className="h-3.5 w-3.5" /> : <Gauge size={14} />}
-              测试连接
+              {t("reg.testConnection")}
             </Button>
             <div className="flex-1" />
             <Button variant="outline" onClick={() => setDraft(null)}>
-              取消
+              {t("common.cancel")}
             </Button>
             <Button variant="primary" onClick={() => void saveDraft()} disabled={saving || !draft}>
               {saving ? <Spinner className="h-3.5 w-3.5" /> : null}
-              {isNew ? "添加" : "保存"}
+              {isNew ? t("img.add") : t("common.save")}
             </Button>
           </>
         }
@@ -454,33 +463,35 @@ export function ConnectionSettings() {
         {draft && (
           <div className="space-y-3.5">
             <div>
-              <div className="mb-1.5 text-[12px] text-fg3">连接类型</div>
+              <div className="mb-1.5 text-[12px] text-fg3">{t("conn.kindLabel")}</div>
               <SegmentedControl
-                options={CONNECTION_KINDS.filter((k) => !(isWindows && k.key === "local"))}
+                options={CONNECTION_KINDS.filter((k) => !(isWindows && k.key === "local")).map(
+                  ({ key }) => ({ key, label: connectionKindLabel(key) }),
+                )}
                 value={draft.kind}
                 onChange={(k) => setDraft({ ...draft, kind: k })}
               />
               {draft.kind === "tcp" && (
                 <div className="mt-2">
-                  <Badge tone="warn">明文传输不安全，流量未加密，建议改用 SSH 或 TLS</Badge>
+                  <Badge tone="warn">{t("conn.tcpPlaintextWarning")}</Badge>
                 </div>
               )}
             </div>
 
             <div className="grid grid-cols-2 gap-3">
               <label className="col-span-1 block">
-                <span className="mb-1 block text-[12px] text-fg3">名称</span>
+                <span className="mb-1 block text-[12px] text-fg3">{t("st.name")}</span>
                 <Input
                   value={draft.name}
                   onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-                  placeholder={`我的 ${connectionKindLabel(draft.kind)}连接`}
+                  placeholder={t("conn.namePlaceholder", { kind: connectionKindLabel(draft.kind) })}
                   spellCheck={false}
                 />
               </label>
 
               {draft.kind === "local" && (
                 <label className="col-span-1 block">
-                  <span className="mb-1 block text-[12px] text-fg3">Socket 路径</span>
+                  <span className="mb-1 block text-[12px] text-fg3">{t("conn.socketPath")}</span>
                   <Input
                     value={draft.socket_path}
                     onChange={(e) => setDraft({ ...draft, socket_path: e.target.value })}
@@ -493,7 +504,7 @@ export function ConnectionSettings() {
 
               {(draft.kind === "tcp" || draft.kind === "tls") && (
                 <label className="col-span-1 block">
-                  <span className="mb-1 block text-[12px] text-fg3">主机地址</span>
+                  <span className="mb-1 block text-[12px] text-fg3">{t("conn.hostLabel")}</span>
                   <Input
                     value={draft.host}
                     onChange={(e) => setDraft({ ...draft, host: e.target.value })}
@@ -506,14 +517,14 @@ export function ConnectionSettings() {
 
               {draft.kind === "ssh" && (
                 <label className="col-span-1 block">
-                  <span className="mb-1 block text-[12px] text-fg3">SSH 地址</span>
+                  <span className="mb-1 block text-[12px] text-fg3">{t("conn.sshAddrLabel")}</span>
                   <Input
                     value={draft.host}
                     onChange={(e) => setDraft({ ...draft, host: e.target.value })}
                     placeholder={
                       draft.identity_id
-                        ? "ip 或 ip:端口（用户名来自所选 SSH 身份）"
-                        : "user@ip 或 user@ip:port"
+                        ? t("conn.sshAddrPhWithIdentity")
+                        : t("conn.sshAddrPh")
                     }
                     className="font-mono"
                     spellCheck={false}
@@ -524,7 +535,7 @@ export function ConnectionSettings() {
 
             {draft.kind === "tls" && (
               <label className="block">
-                <span className="mb-1 block text-[12px] text-fg3">证书目录</span>
+                <span className="mb-1 block text-[12px] text-fg3">{t("conn.certDirLabel")}</span>
                 <div className="flex gap-2">
                   <Input
                     value={draft.cert_path}
@@ -534,21 +545,17 @@ export function ConnectionSettings() {
                     spellCheck={false}
                   />
                   <Button variant="outline" onClick={() => void pickCertDir()}>
-                    选择目录
+                    {t("compose.chooseDir")}
                   </Button>
                 </div>
-                <span className="mt-1 block text-[11px] text-fg3">
-                  目录下需包含 ca.pem、cert.pem、key.pem（服务端需开启 TLS 验证，默认端口 2376）
-                </span>
+                <span className="mt-1 block text-[11px] text-fg3">{t("conn.certDirHint")}</span>
               </label>
             )}
 
             {draft.kind === "ssh" && (
               <>
                 <div>
-                  <div className="mb-1.5 text-[12px] text-fg3">
-                    SSH 身份（可选：用户名与认证由身份统一提供，跨连接复用）
-                  </div>
+                  <div className="mb-1.5 text-[12px] text-fg3">{t("conn.identityLabel")}</div>
                   <Select
                     value={draft.identity_id || ""}
                     onChange={(e) => {
@@ -560,11 +567,11 @@ export function ConnectionSettings() {
                     }}
                     className="w-full"
                   >
-                    <option value="">不使用（手动配置认证）</option>
+                    <option value="">{t("conn.identityNone")}</option>
                     {sshIdentities.map((i) => (
                       <option key={i.id} value={i.id}>
-                        {i.label}（{i.username}
-                        {i.key_id ? " · 钥匙串私钥" : " · 密码"}）
+                        {displayConnName(i.label)}（{i.username}
+                        {i.key_id ? t("conn.identityUsesKey") : t("conn.identityUsesPassword")}）
                       </option>
                     ))}
                   </Select>
@@ -572,17 +579,19 @@ export function ConnectionSettings() {
 
                 {draft.identity_id !== "" && (
                   <div className="rounded-ctl border border-edge bg-panel2/50 px-2.5 py-2 text-[11px] leading-4 text-fg3">
-                    使用 SSH 身份：连接时以身份的用户名登录，认证方式与凭证由身份提供
-                    （可在「设置 → SSH 凭证」中修改）。下方认证配置暂不参与。
+                    {t("conn.identityInUseNote")}
                   </div>
                 )}
 
                 {draft.identity_id === "" && (
                 <>
                 <div>
-                  <div className="mb-1.5 text-[12px] text-fg3">认证方式</div>
+                  <div className="mb-1.5 text-[12px] text-fg3">{t("conn.authMethod")}</div>
                   <SegmentedControl
-                    options={CONNECTION_AUTHS}
+                    options={CONNECTION_AUTHS.map(({ key }) => ({
+                      key,
+                      label: connectionAuthLabel(key),
+                    }))}
                     value={draft.auth || "key"}
                     onChange={(k: ConnectionAuth) => {
                       // 切换认证方式时清掉另一侧的瞬态输入，避免误存
@@ -594,13 +603,17 @@ export function ConnectionSettings() {
 
                 {draft.auth === "password" ? (
                   <label className="block">
-                    <span className="mb-1 block text-[12px] text-fg3">密码</span>
+                    <span className="mb-1 block text-[12px] text-fg3">{t("reg.authPassword")}</span>
                     <div className="flex gap-2">
                       <Input
                         type="password"
                         value={draftPassword}
                         onChange={(e) => setDraftPassword(e.target.value)}
-                        placeholder={draft.secret_backend ? "已保存，留空保持不变" : "远程用户的 SSH 登录密码"}
+                        placeholder={
+                          draft.secret_backend
+                            ? t("ssh.passphraseKeep")
+                            : t("conn.passwordPlaceholder")
+                        }
                         className="flex-1"
                         autoComplete="off"
                       />
@@ -612,24 +625,26 @@ export function ConnectionSettings() {
                               .setSshSecret(draft.id, "password", "")
                               .then(() => {
                                 setDraft({ ...draft, secret_backend: "" });
-                                toast.success("已清除保存的密码");
+                                toast.success(t("conn.passwordCleared"));
                               })
-                              .catch((e) => toast.error(`清除密码失败: ${e}`));
+                              .catch((e) =>
+                                toast.error(t("conn.passwordClearFailed", { err: String(e) })),
+                              );
                           }}
                         >
-                          清除已保存
+                          {t("conn.clearSaved")}
                         </Button>
                       )}
                     </div>
                     <span className="mt-1 block text-[11px] text-fg3">
-                      密码保存在本机系统钥匙串（无钥匙串环境回退加密文件），不写入配置文件、不上传
+                      {t("conn.passwordStorageNote")}
                     </span>
                   </label>
                 ) : (
                   <label className="block">
                     {sshKeys.length > 0 && (
                       <>
-                        <span className="mb-1 block text-[12px] text-fg3">私钥来源</span>
+                        <span className="mb-1 block text-[12px] text-fg3">{t("conn.keySource")}</span>
                         <Select
                           value={draft.key_id ? `key:${draft.key_id}` : "path"}
                           onChange={(e) => {
@@ -638,12 +653,10 @@ export function ConnectionSettings() {
                           }}
                           className="w-full"
                         >
-                          <option value="path">
-                            私钥文件路径（留空则依次尝试 ssh-agent 与默认私钥）
-                          </option>
+                          <option value="path">{t("conn.keySourcePath")}</option>
                           {sshKeys.map((k) => (
                             <option key={k.id} value={`key:${k.id}`}>
-                              钥匙串：{k.label}
+                              {t("ssh.usesKey", { key: k.label })}
                             </option>
                           ))}
                         </Select>
@@ -657,25 +670,31 @@ export function ConnectionSettings() {
                             onChange={(e) => setDraft({ ...draft, key_path: e.target.value })}
                             placeholder={
                               isWindows
-                                ? "建议指定私钥路径（Windows 版暂不支持 ssh-agent），留空则尝试默认私钥"
-                                : "留空则依次尝试 ssh-agent 与默认私钥（~/.ssh/id_*）"
+                                ? t("conn.keyPathPhWindows")
+                                : t("conn.keyPathPh")
                             }
                             className="flex-1 font-mono"
                             spellCheck={false}
                           />
                           <Button variant="outline" onClick={() => void pickKeyFile()}>
-                            选择文件
+                            {t("compose.chooseFile")}
                           </Button>
                         </div>
                         {draft.key_path.trim() && (
                           <div className="mt-1">
-                            <span className="mb-1 block text-[12px] text-fg3">私钥口令（可选）</span>
+                            <span className="mb-1 block text-[12px] text-fg3">
+                              {t("ssh.passphraseLabel")}
+                            </span>
                             <div className="flex gap-2">
                               <Input
                                 type="password"
                                 value={draftPassphrase}
                                 onChange={(e) => setDraftPassphrase(e.target.value)}
-                                placeholder={draft.secret_backend ? "已保存，留空保持不变" : "私钥有口令时填写"}
+                                placeholder={
+                                  draft.secret_backend
+                                    ? t("ssh.passphraseKeep")
+                                    : t("ssh.passphraseIfAny")
+                                }
                                 className="flex-1"
                                 autoComplete="off"
                               />
@@ -687,12 +706,16 @@ export function ConnectionSettings() {
                                       .setSshSecret(draft.id, "key_passphrase", "")
                                       .then(() => {
                                         setDraft({ ...draft, secret_backend: "" });
-                                        toast.success("已清除保存的口令");
+                                        toast.success(t("conn.passphraseCleared"));
                                       })
-                                      .catch((e) => toast.error(`清除口令失败: ${e}`));
+                                      .catch((e) =>
+                                        toast.error(
+                                          t("conn.passphraseClearFailed", { err: String(e) }),
+                                        ),
+                                      );
                                   }}
                                 >
-                                  清除已保存
+                                  {t("conn.clearSaved")}
                                 </Button>
                               )}
                             </div>
@@ -702,14 +725,13 @@ export function ConnectionSettings() {
                     )}
                     {draft.key_id !== "" && (
                       <div className="mt-1.5 rounded-btn bg-panel2/50 px-2.5 py-1.5 text-[11px] leading-4 text-fg3">
-                        使用 SSH 钥匙串私钥：加密存于本机密钥库、随云同步跨设备可用；
-                        私钥口令在「设置 → SSH 凭证」中管理
+                        {t("conn.keychainKeyNote")}
                       </div>
                     )}
                     <span className="mt-1.5 block text-[11px] text-fg3">
                       {sshKeys.length === 0
-                        ? "提示：在「设置 → SSH 凭证」导入私钥后可跨连接复用、随云同步跨设备"
-                        : `钥匙串中共 ${sshKeys.length} 把私钥；导入 / 删除请到「设置 → SSH 凭证」`}
+                        ? t("conn.keychainEmptyHint")
+                        : t("conn.keychainCountHint", { n: sshKeys.length })}
                     </span>
                   </label>
                 )}
@@ -717,7 +739,9 @@ export function ConnectionSettings() {
                 )}
 
                 <label className="block">
-                  <span className="mb-1 block text-[12px] text-fg3">远程 Socket 路径（可选）</span>
+                  <span className="mb-1 block text-[12px] text-fg3">
+                    {t("conn.remoteSocketLabel")}
+                  </span>
                   <Input
                     value={draft.remote_socket}
                     onChange={(e) => setDraft({ ...draft, remote_socket: e.target.value })}
@@ -726,11 +750,11 @@ export function ConnectionSettings() {
                     spellCheck={false}
                   />
                   <span className="mt-1 block text-[11px] text-fg3">
-                    {"rootless Docker 填 /run/user/<uid>/docker.sock"}
+                    {t("conn.remoteSocketHint")}
                   </span>
                 </label>
                 <div className="rounded-ctl border border-edge bg-panel2 p-2.5 text-[11px] leading-4 text-fg3">
-                  <span className="mb-1 block font-medium text-fg2">连接要求</span>
+                  <span className="mb-1 block font-medium text-fg2">{t("conn.requirements")}</span>
                   <ul className="list-disc space-y-1 pl-4">
                     {sshConnectionNotes(draft.auth, isWindows).map((note) => (
                       <li key={note}>{note}</li>
@@ -745,7 +769,7 @@ export function ConnectionSettings() {
                 role="status"
                 className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 rounded-ctl border border-ok/20 bg-ok/5 px-2.5 py-2 text-[12px]"
               >
-                <Badge tone="ok">连接成功</Badge>
+                <Badge tone="ok">{t("conn.testOk")}</Badge>
                 <span className="shrink-0 tabular-nums text-fg2">
                   {draftTest.ms} ms
                 </span>
@@ -764,7 +788,7 @@ export function ConnectionSettings() {
                 role="alert"
                 className="max-h-28 overflow-auto whitespace-pre-wrap break-all rounded-ctl border border-err/20 bg-err/5 px-2.5 py-2 text-[12px] leading-4 text-err"
               >
-                {draftTest.error || "连接失败"}
+                {draftTest.error || t("conn.connectFailed")}
               </div>
             )}
           </div>
@@ -774,12 +798,12 @@ export function ConnectionSettings() {
       {/* 主机指纹变更确认（TOFU） */}
       <Modal
         open={hostKey !== null}
-        title="主机指纹已变更"
+        title={t("conn.hostKeyChangedTitle")}
         onClose={() => setHostKey(null)}
         footer={
           <>
             <Button variant="outline" onClick={() => setHostKey(null)}>
-              取消
+              {t("common.cancel")}
             </Button>
             <Button
               variant="primary"
@@ -790,10 +814,12 @@ export function ConnectionSettings() {
                 void api
                   .acceptHostKey(change.dest, change.new, change.algo)
                   .then(retry)
-                  .catch((e) => toast.error(`保存主机指纹失败: ${e}`));
+                  .catch((e) =>
+                    toast.error(t("conn.hostKeySaveFailed", { err: String(e) })),
+                  );
               }}
             >
-              确认变更并重连
+              {t("conn.hostKeyAccept")}
             </Button>
           </>
         }
@@ -802,35 +828,32 @@ export function ConnectionSettings() {
           <p className="flex items-start gap-1.5">
             <ShieldAlert size={15} className="mt-0.5 shrink-0 text-warn" />
             <span>
-              主机 <span className="font-mono font-semibold">{hostKey?.change.dest}</span> 的密钥指纹
-              （{hostKey?.change.algo}）与上次记录不一致。这通常发生在系统重装或 sshd 重新生成主机密钥后，
-              但也可能是中间人攻击的信号。
+              {t("conn.hostKeyChangedDesc", { dest: hostKey?.change.dest ?? "", algo: hostKey?.change.algo ?? "" })}
             </span>
           </p>
           <div className="rounded-ctl border border-edge bg-panel2 p-2.5 font-mono text-[11px] leading-4">
             <div className="text-fg3">
-              原指纹：<span className="break-all text-fg2">{hostKey?.change.stored}</span>
+              {t("conn.fingerprintOld")}
+              <span className="break-all text-fg2">{hostKey?.change.stored}</span>
             </div>
             <div className="text-fg3">
-              新指纹：<span className="break-all text-warn">{hostKey?.change.new}</span>
+              {t("conn.fingerprintNew")}
+              <span className="break-all text-warn">{hostKey?.change.new}</span>
             </div>
           </div>
-          <p className="text-[11px] text-fg3">
-            可在服务器上执行 ssh-keygen -lf /etc/ssh/ssh_host_*.pub.pub 对照（文件名随算法不同略有差异）。
-            确认无误后接受新指纹；如无法确认来源，请取消并核查网络环境。
-          </p>
+          <p className="text-[11px] text-fg3">{t("conn.hostKeyVerifyHint")}</p>
         </div>
       </Modal>
 
       {/* 删除确认 */}
       <Modal
         open={confirmDelete !== null}
-        title="删除连接配置"
+        title={t("conn.deleteTitle")}
         onClose={() => setConfirmDelete(null)}
         footer={
           <>
             <Button variant="outline" onClick={() => setConfirmDelete(null)}>
-              取消
+              {t("common.cancel")}
             </Button>
             <Button
               variant="danger"
@@ -839,14 +862,15 @@ export function ConnectionSettings() {
                 setConfirmDelete(null);
               }}
             >
-              删除
+              {t("containers.actRemove")}
             </Button>
           </>
         }
       >
         <p>
-          将删除连接「<span className="font-semibold text-fg">{confirmDelete?.name}</span>」的配置，
-          仅移除本应用中的记录，不影响远程主机上的 Docker。
+          {t("conn.deleteConfirmBefore")}
+          <span className="font-semibold text-fg">{confirmDelete?.name}</span>
+          {t("conn.deleteConfirmAfter")}
         </p>
       </Modal>
     </section>

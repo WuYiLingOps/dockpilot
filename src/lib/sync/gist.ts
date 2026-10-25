@@ -7,6 +7,8 @@
  */
 
 import { invoke } from "@tauri-apps/api/core";
+import { t } from "../i18n";
+import type { MsgKey } from "../i18n/zh";
 import { SYNC_CONSTANTS, type SyncedFile } from "../../types/sync";
 
 // ---------------------------------------------------------------------------
@@ -44,7 +46,7 @@ function authHeaders(token: string, extra: Record<string, string> = {}): Record<
  * 网络类失败自动重试，间隔 1s / 2s。仅对"请求根本没发出去/中途断开"重试，
  * HTTP 错误响应（401/404 等）原样返回交给调用方处理。
  */
-async function fetchWithRetry(url: string, init: RequestInit, what: string): Promise<Response> {
+async function fetchWithRetry(url: string, init: RequestInit, what: MsgKey): Promise<Response> {
   let lastError: unknown = null;
   for (let attempt = 0; attempt < 3; attempt++) {
     if (attempt > 0) await new Promise((r) => setTimeout(r, 1000 * attempt));
@@ -55,12 +57,14 @@ async function fetchWithRetry(url: string, init: RequestInit, what: string): Pro
     }
   }
   const detail = lastError instanceof Error ? lastError.message : String(lastError);
-  throw new Error(`${what}失败: 网络异常（已自动重试 3 次）: ${detail}。可稍后重试；若本机需要代理访问 GitHub，请设置 HTTPS_PROXY 环境变量后重启应用`);
+  throw new Error(
+    t("sync.opFailedNetwork", { what: t(what), detail }),
+  );
 }
 
-async function gistResponse<T>(res: Response, what: string): Promise<T> {
+async function gistResponse<T>(res: Response, what: MsgKey): Promise<T> {
   if (!res.ok) {
-    throw new Error(`${what}失败: ${res.status} ${res.statusText}`);
+    throw new Error(t("sync.opFailedStatus", { what: t(what), status: res.status, text: res.statusText }));
   }
   return (await res.json()) as T;
 }
@@ -71,8 +75,8 @@ async function gistResponse<T>(res: Response, what: string): Promise<T> {
 
 /** 在用户 Gist 列表中查找 DockPilot 同步库 */
 export async function findSyncGist(accessToken: string): Promise<string | null> {
-  const res = await fetchWithRetry(`${SYNC_CONSTANTS.GITHUB_API_BASE}/gists?per_page=100`, { headers: authHeaders(accessToken) }, "获取 Gist 列表");
-  const gists = await gistResponse<GitHubGist[]>(res, "获取 Gist 列表");
+  const res = await fetchWithRetry(`${SYNC_CONSTANTS.GITHUB_API_BASE}/gists?per_page=100`, { headers: authHeaders(accessToken) }, "sync.gistWhatList");
+  const gists = await gistResponse<GitHubGist[]>(res, "sync.gistWhatList");
   const syncGist = gists.find(
     (g) => g.description === SYNC_CONSTANTS.GIST_DESCRIPTION && g.files[SYNC_CONSTANTS.SYNC_FILE_NAME],
   );
@@ -92,9 +96,9 @@ export async function createSyncGist(accessToken: string, syncedFile: SyncedFile
         files: { [SYNC_CONSTANTS.SYNC_FILE_NAME]: { content: JSON.stringify(syncedFile, null, 2) } },
       }),
     },
-    "创建同步 Gist",
+    "sync.gistWhatCreate",
   );
-  const gist = await gistResponse<GitHubGist>(res, "创建同步 Gist");
+  const gist = await gistResponse<GitHubGist>(res, "sync.gistWhatCreate");
   return gist.id;
 }
 
@@ -109,9 +113,16 @@ export async function updateSyncGist(accessToken: string, gistId: string, synced
         files: { [SYNC_CONSTANTS.SYNC_FILE_NAME]: { content: JSON.stringify(syncedFile, null, 2) } },
       }),
     },
-    "更新同步 Gist",
+    "sync.gistWhatUpdate",
   );
-  if (!res.ok) throw new Error(`更新同步 Gist 失败: ${res.status} ${res.statusText}`);
+  if (!res.ok)
+    throw new Error(
+      t("sync.opFailedStatus", {
+        what: t("sync.gistWhatUpdate"),
+        status: res.status,
+        text: res.statusText,
+      }),
+    );
 }
 
 const utf8ByteLength = (value: string): number => new TextEncoder().encode(value).byteLength;
@@ -142,7 +153,7 @@ const parseSyncedFile = (raw: string): SyncedFile => {
     typeof parsed.meta.salt !== "string" ||
     typeof parsed.meta.iv !== "string"
   ) {
-    throw new Error("云端同步文件格式异常（缺少有效的 meta/payload，可能被手工修改或损坏）");
+    throw new Error(t("sync.gistCorrupt"));
   }
   return parsed;
 };
@@ -156,7 +167,7 @@ async function parseSyncedFileFromGistFile(
 
   if (gistFileNeedsRawFetch(file)) {
     if (!file.raw_url) {
-      throw new Error("同步文件被截断且没有 raw_url，内容可能超出 Gist 大小限制");
+      throw new Error(t("sync.gistTruncatedNoRaw"));
     }
     return parseSyncedFile(
       await invoke<string>("github_gist_raw_content", { accessToken, rawUrl: file.raw_url }),
@@ -182,10 +193,10 @@ export async function downloadSyncGist(accessToken: string, gistId: string): Pro
   const res = await fetchWithRetry(
     `${SYNC_CONSTANTS.GITHUB_API_BASE}/gists/${gistId}`,
     { headers: authHeaders(accessToken) },
-    "下载同步文件",
+    "sync.gistWhatDownload",
   );
   if (res.status === 404) return null;
-  const gist = await gistResponse<GitHubGist>(res, "下载同步文件");
+  const gist = await gistResponse<GitHubGist>(res, "sync.gistWhatDownload");
   return parseSyncedFileFromGistFile(accessToken, gist.files[SYNC_CONSTANTS.SYNC_FILE_NAME]);
 }
 
@@ -194,10 +205,16 @@ export async function deleteSyncGist(accessToken: string, gistId: string): Promi
   const res = await fetchWithRetry(
     `${SYNC_CONSTANTS.GITHUB_API_BASE}/gists/${gistId}`,
     { method: "DELETE", headers: authHeaders(accessToken) },
-    "删除同步 Gist",
+    "sync.gistWhatDelete",
   );
   if (!res.ok && res.status !== 404) {
-    throw new Error(`删除同步 Gist 失败: ${res.status} ${res.statusText}`);
+    throw new Error(
+      t("sync.opFailedStatus", {
+        what: t("sync.gistWhatDelete"),
+        status: res.status,
+        text: res.statusText,
+      }),
+    );
   }
 }
 
@@ -209,9 +226,9 @@ export async function getGistHistory(
   const res = await fetchWithRetry(
     `${SYNC_CONSTANTS.GITHUB_API_BASE}/gists/${gistId}`,
     { headers: authHeaders(accessToken) },
-    "获取 Gist 历史",
+    "sync.gistWhatHistory",
   );
-  const gist = await gistResponse<GitHubGist>(res, "获取 Gist 历史");
+  const gist = await gistResponse<GitHubGist>(res, "sync.gistWhatHistory");
   return (gist.history ?? []).map((h) => ({ version: h.version, date: new Date(h.committed_at) }));
 }
 
@@ -224,9 +241,9 @@ export async function downloadGistRevision(
   const res = await fetchWithRetry(
     `${SYNC_CONSTANTS.GITHUB_API_BASE}/gists/${gistId}/${sha}`,
     { headers: authHeaders(accessToken) },
-    "下载历史修订",
+    "sync.gistWhatDownloadRevision",
   );
   if (res.status === 404) return null;
-  const gist = await gistResponse<GitHubGist>(res, "下载历史修订");
+  const gist = await gistResponse<GitHubGist>(res, "sync.gistWhatDownloadRevision");
   return parseSyncedFileFromGistFile(accessToken, gist.files[SYNC_CONSTANTS.SYNC_FILE_NAME]);
 }

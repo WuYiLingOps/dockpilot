@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { ChevronDown, ChevronUp, Copy, X } from "lucide-react";
 import type { ComposeOutput } from "../../types/compose";
 import { copyText } from "../../lib/clipboard";
+import { useT } from "../../lib/i18n";
 import { IconButton, Spinner, cn } from "../ui";
 
 /**
@@ -28,6 +29,7 @@ export function OutputPanel({
   const [collapsed, setCollapsed] = useState(false);
   const boxRef = useRef<HTMLDivElement>(null);
   const stickRef = useRef(true);
+  const t = useT();
 
   // 用户上滚即暂停跟随，滚回底部恢复
   const onScroll = () => {
@@ -66,24 +68,28 @@ export function OutputPanel({
         )}
         <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-fg2">
           {label}
-          {running ? " · 进行中…" : failed ? " · 已失败" : " · 已完成"}
+          {running
+            ? t("compose.statusRunning")
+            : failed
+              ? t("compose.statusFailed")
+              : t("compose.statusDone")}
         </span>
         {running && onCancel && (
-          <IconButton title="取消操作" onClick={onCancel}>
+          <IconButton title={t("compose.cancelOp")} onClick={onCancel}>
             <X size={14} />
           </IconButton>
         )}
-        <IconButton title="复制输出" onClick={copyAll}>
+        <IconButton title={t("compose.copyOutput")} onClick={copyAll}>
           <Copy size={14} />
         </IconButton>
         <IconButton
-          title={collapsed ? "展开" : "折叠"}
+          title={collapsed ? t("compose.expand") : t("compose.collapse")}
           onClick={() => setCollapsed((c) => !c)}
         >
           {collapsed ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
         </IconButton>
         {onClose && !running && (
-          <IconButton title="关闭" onClick={onClose}>
+          <IconButton title={t("common.close")} onClick={onClose}>
             <X size={14} />
           </IconButton>
         )}
@@ -95,7 +101,7 @@ export function OutputPanel({
           className="max-h-56 min-h-24 flex-1 overflow-auto bg-canvas px-3 py-2 font-mono text-[11.5px] leading-5"
         >
           {lines.length === 0 ? (
-            <div className="text-fg3">等待输出…</div>
+            <div className="text-fg3">{t("compose.waitingOutput")}</div>
           ) : (
             lines.map((l, i) => (
               <div

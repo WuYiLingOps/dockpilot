@@ -2,6 +2,8 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ClipboardPaste, Plus, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { useT } from "../../lib/i18n";
+import type { MsgKey } from "../../lib/i18n/zh";
 import { api } from "../../lib/api";
 import type { ContainerSpec, PortMappingSpec, VolumeMountSpec } from "../../types/docker";
 import { Button, Checkbox, IconButton, Input, Modal, Select } from "../ui";
@@ -11,11 +13,11 @@ type PortRow = { host: string; container: string; proto: "tcp" | "udp" };
 type VolumeRow = { host: string; container: string; readOnly: boolean };
 type KVRow = { key: string; value: string };
 
-const RESTART_OPTIONS = [
-  { value: "no", label: "不重启" },
-  { value: "always", label: "始终重启（always）" },
-  { value: "unless-stopped", label: "除非手动停止（unless-stopped）" },
-  { value: "on-failure", label: "失败时重启（on-failure）" },
+const RESTART_OPTIONS: { value: string; labelKey: MsgKey }[] = [
+  { value: "no", labelKey: "cc.policyNo" },
+  { value: "always", labelKey: "cc.policyAlways" },
+  { value: "unless-stopped", labelKey: "cc.policyUnlessStopped" },
+  { value: "on-failure", labelKey: "cc.policyOnFailure" },
 ];
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
@@ -49,6 +51,7 @@ export function CreateContainerModal({
   /** 克隆容器入口：以该规格全量回填表单（优先于 initialImage） */
   initialSpec?: ContainerSpec | null;
 }) {
+  const t = useT();
   const qc = useQueryClient();
   const cancelPullRef = useRef<(() => void) | null>(null);
 
@@ -156,7 +159,7 @@ export function CreateContainerModal({
   const runImport = async () => {
     const cmd = importCmd.trim();
     if (!cmd) {
-      toast.error("请先粘贴 docker run 命令");
+      toast.error(t("cc.pasteFirst"));
       return;
     }
     setImporting(true);
@@ -165,9 +168,9 @@ export function CreateContainerModal({
       applySpec(spec);
       setImportOpen(false);
       setImportCmd("");
-      toast.success("已导入命令参数，请确认后创建");
+      toast.success(t("cc.imported"));
     } catch (e) {
-      toast.error(`解析失败: ${e instanceof Error ? e.message : e}`);
+      toast.error(t("cc.parseFailed", { err: e instanceof Error ? e.message : String(e) }));
     } finally {
       setImporting(false);
     }
@@ -203,11 +206,11 @@ export function CreateContainerModal({
   const submit = async () => {
     const img = image.trim();
     if (!img) {
-      toast.error("请填写镜像名");
+      toast.error(t("cc.imageRequired"));
       return;
     }
     if (autoRemove && restart !== "no") {
-      toast.error("自动移除与重启策略不能同时启用");
+      toast.error(t("cc.autoRemoveConflict"));
       return;
     }
     // 资源限制：空 = 不限制
@@ -215,7 +218,7 @@ export function CreateContainerModal({
     let memory_mb: number | null = null;
     if (memLimit.trim() !== "") {
       if (!Number.isFinite(memNum) || memNum <= 0) {
-        toast.error("内存上限必须是正数");
+        toast.error(t("uc.memPositive"));
         return;
       }
       memory_mb = memUnit === "GB" ? memNum * 1024 : memNum;
@@ -224,7 +227,7 @@ export function CreateContainerModal({
     if (cpuLimit.trim() !== "") {
       const c = Number(cpuLimit);
       if (!Number.isFinite(c) || c <= 0) {
-        toast.error("CPU 核数必须是正数");
+        toast.error(t("uc.cpuPositive"));
         return;
       }
       cpus = c;
@@ -232,7 +235,7 @@ export function CreateContainerModal({
     // 行校验：全空行忽略，半填行报错
     const portRows = ports.filter((r) => r.host !== "" || r.container !== "");
     if (portRows.some((r) => r.host === "" || r.container === "")) {
-      toast.error("端口映射存在未填写完整的行");
+      toast.error(t("cc.portRowsIncomplete"));
       return;
     }
     const badPort = portRows.some((r) => {
@@ -241,12 +244,12 @@ export function CreateContainerModal({
       return !Number.isInteger(h) || h < 1 || h > 65535 || !Number.isInteger(c) || c < 1 || c > 65535;
     });
     if (badPort) {
-      toast.error("端口必须是 1-65535 的数字");
+      toast.error(t("cc.portRange"));
       return;
     }
     const volumeRows = volumes.filter((r) => r.host.trim() !== "" || r.container.trim() !== "");
     if (volumeRows.some((r) => r.host.trim() === "" || r.container.trim() === "")) {
-      toast.error("卷挂载存在未填写完整的行");
+      toast.error(t("cc.volumeRowsIncomplete"));
       return;
     }
     const kv = (rows: KVRow[]) =>
@@ -286,7 +289,7 @@ export function CreateContainerModal({
     try {
       // 与 Docker Desktop 一致：镜像不在本地时先拉取再运行
       if (imageMissing) {
-        setPullStatus(`本地没有 ${img}，正在拉取…`);
+        setPullStatus(t("cc.pulling", { image: img }));
         await new Promise<void>((resolve, reject) => {
           cancelPullRef.current = api.pullImage(img, (p) => {
             if (p.error) {
@@ -312,25 +315,25 @@ export function CreateContainerModal({
         if (h.state === "exited" || h.state === "dead") {
           toast.warning(
             h.oom_killed
-              ? "容器已创建但随即因内存不足（OOM）退出，请查看容器日志与资源限制"
-              : `容器已创建但随即退出（退出码 ${h.exit_code}），请到容器详情查看日志排查`,
+              ? t("cc.createdThenOOM")
+              : t("cc.createdThenExited", { code: h.exit_code }),
             { duration: 10000 },
           );
         } else if (h.state === "restarting") {
-          toast.warning("容器已创建但陷入重启循环（启动即失败），建议停止后排查配置", {
+          toast.warning(t("cc.restartLoop"), {
             duration: 10000,
           });
         } else {
-          toast.success("容器已创建并启动");
+          toast.success(t("cc.createdAndStarted"));
         }
       } catch {
-        toast.success("容器已创建并启动");
+        toast.success(t("cc.createdAndStarted"));
       }
       void qc.invalidateQueries({ queryKey: ["containers"] });
       void qc.invalidateQueries({ queryKey: ["dockerInfo"] });
       onClose();
     } catch (e) {
-      toast.error(`创建容器失败: ${e instanceof Error ? e.message : e}`);
+      toast.error(t("cc.createFailed", { err: e instanceof Error ? e.message : String(e) }));
     } finally {
       setSubmitting(false);
       setPullStatus(null);
@@ -345,7 +348,11 @@ export function CreateContainerModal({
     </Button>
   );
   const delBtn = (onClick: () => void) => (
-    <IconButton title="移除此行" onClick={onClick} className="hover:bg-err/10 hover:text-err">
+    <IconButton
+      title={t("cc.removeRow")}
+      onClick={onClick}
+      className="hover:bg-err/10 hover:text-err"
+    >
       <Trash2 size={13} />
     </IconButton>
   );
@@ -355,32 +362,32 @@ export function CreateContainerModal({
   return (
     <Modal
       open={open}
-      title="创建并运行容器"
+      title={t("cc.title")}
       onClose={close}
       size="lg"
       footer={
         <>
           <Button variant="outline" onClick={close}>
-            取消
+            {t("common.cancel")}
           </Button>
           <Button
             variant="primary"
             disabled={submitting || image.trim() === ""}
             onClick={() => void submit()}
           >
-            {submitting ? "创建中…" : "创建并启动"}
+            {submitting ? t("cc.creating") : t("cc.createAndStart")}
           </Button>
         </>
       }
     >
       <div className="max-h-[62vh] space-y-4 overflow-y-auto pr-1">
-        <Section title="基础">
+        <Section title={t("cc.basics")}>
           <div className="grid grid-cols-[1.6fr_1fr] gap-2">
             <div>
               <Input
                 value={image}
                 onChange={(e) => setImage(e.target.value)}
-                placeholder="镜像，如 nginx:latest"
+                placeholder={t("cc.imagePlaceholder")}
                 disabled={submitting}
                 list="docker-local-images"
                 className={inputCls}
@@ -391,13 +398,13 @@ export function CreateContainerModal({
                 ))}
               </datalist>
               {imageMissing && (
-                <p className="mt-1 text-[11px] text-warn">该镜像不在本地，提交时将自动拉取</p>
+                <p className="mt-1 text-[11px] text-warn">{t("cc.imageMissingHint")}</p>
               )}
             </div>
             <Input
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="容器名（可选，留空自动生成）"
+              placeholder={t("cc.namePlaceholder")}
               disabled={submitting}
               className={inputCls}
             />
@@ -407,7 +414,7 @@ export function CreateContainerModal({
               <textarea
                 value={importCmd}
                 onChange={(e) => setImportCmd(e.target.value)}
-                placeholder="粘贴完整命令，如：docker run -d -p 8080:80 --name web nginx:latest"
+                placeholder={t("cc.pastePlaceholder")}
                 rows={3}
                 disabled={importing}
                 data-no-drag
@@ -415,12 +422,12 @@ export function CreateContainerModal({
               />
               <div className="flex items-center gap-2">
                 <Button variant="primary" className="h-7 px-2 text-[12px]" disabled={importing} onClick={() => void runImport()}>
-                  {importing ? "解析中…" : "解析并填充"}
+                  {importing ? t("cc.parsing") : t("cc.parseAndFill")}
                 </Button>
                 <Button variant="ghost" className="h-7 px-2 text-[12px]" onClick={() => setImportOpen(false)}>
-                  收起
+                  {t("cc.collapse")}
                 </Button>
-                <span className="text-[11px] text-fg3">支持 -p/-v/-e/-l/--name/--restart/--memory/--cpus 等常用选项</span>
+                <span className="text-[11px] text-fg3">{t("cc.supportedFlags")}</span>
               </div>
             </div>
           ) : (
@@ -431,19 +438,19 @@ export function CreateContainerModal({
               className="mt-1.5 inline-flex items-center gap-1 text-[12px] text-fg3 transition-colors hover:text-accent"
             >
               <ClipboardPaste size={12} />
-              从 docker run 命令导入
+              {t("cc.importFromRun")}
             </button>
           )}
         </Section>
 
-        <Section title={`端口映射（${ports.length}）`}>
+        <Section title={t("cc.portsSection", { n: ports.length })}>
           <div className="space-y-1.5">
             {ports.map((r, i) => (
               <div key={i} className={`${row} grid-cols-[1fr_1fr_76px_28px]`}>
                 <Input
                   value={r.host}
                   onChange={(e) => setPorts(patch(ports, i, { host: e.target.value }))}
-                  placeholder="宿主机端口"
+                  placeholder={t("cc.hostPort")}
                   type="number"
                   min={1}
                   max={65535}
@@ -453,7 +460,7 @@ export function CreateContainerModal({
                 <Input
                   value={r.container}
                   onChange={(e) => setPorts(patch(ports, i, { container: e.target.value }))}
-                  placeholder="容器端口"
+                  placeholder={t("cc.containerPort")}
                   type="number"
                   min={1}
                   max={65535}
@@ -474,45 +481,45 @@ export function CreateContainerModal({
                 {delBtn(() => setPorts(ports.filter((_, j) => j !== i)))}
               </div>
             ))}
-            {addBtn("添加端口映射", () =>
+            {addBtn(t("cc.addPort"), () =>
               setPorts([...ports, { host: "", container: "", proto: "tcp" }]),
             )}
           </div>
         </Section>
 
-        <Section title={`卷挂载（${volumes.length}）`}>
+        <Section title={t("cc.volumesSection", { n: volumes.length })}>
           <div className="space-y-1.5">
             {volumes.map((r, i) => (
               <div key={i} className={`${row} grid-cols-[1.3fr_1fr_auto_28px]`}>
                 <Input
                   value={r.host}
                   onChange={(e) => setVolumes(patch(volumes, i, { host: e.target.value }))}
-                  placeholder="宿主路径，如 /srv/data"
+                  placeholder={t("cc.hostPath")}
                   disabled={submitting}
                   className={inputCls}
                 />
                 <Input
                   value={r.container}
                   onChange={(e) => setVolumes(patch(volumes, i, { container: e.target.value }))}
-                  placeholder="容器路径，如 /var/www"
+                  placeholder={t("cc.containerPath")}
                   disabled={submitting}
                   className={inputCls}
                 />
                 <Checkbox
-                  label="只读"
+                  label={t("cc.readonly")}
                   checked={r.readOnly}
                   onChange={(v) => setVolumes(patch(volumes, i, { readOnly: v }))}
                 />
                 {delBtn(() => setVolumes(volumes.filter((_, j) => j !== i)))}
               </div>
             ))}
-            {addBtn("添加卷挂载", () =>
+            {addBtn(t("cc.addVolume"), () =>
               setVolumes([...volumes, { host: "", container: "", readOnly: false }]),
             )}
           </div>
         </Section>
 
-        <Section title={`环境变量（${env.length}）`}>
+        <Section title={t("cc.envSection", { n: env.length })}>
           <div className="space-y-1.5">
             {env.map((r, i) => (
               <div key={i} className={`${row} grid-cols-[1fr_1.2fr_28px]`}>
@@ -533,13 +540,13 @@ export function CreateContainerModal({
                 {delBtn(() => setEnv(env.filter((_, j) => j !== i)))}
               </div>
             ))}
-            {addBtn("添加环境变量", () => setEnv([...env, { key: "", value: "" }]))}
+            {addBtn(t("cc.addEnv"), () => setEnv([...env, { key: "", value: "" }]))}
           </div>
         </Section>
 
         <details className="rounded-ctl border border-edge bg-panel2/40 px-3 py-2">
           <summary className="cursor-pointer select-none text-[12px] font-medium text-fg2">
-            高级选项
+            {t("cc.advanced")}
           </summary>
           <div className="mt-3 space-y-3">
             <div className="grid grid-cols-[1.3fr_1fr] gap-2">
@@ -547,7 +554,7 @@ export function CreateContainerModal({
                 <Input
                   value={memLimit}
                   onChange={(e) => setMemLimit(e.target.value)}
-                  placeholder="内存上限（可选）"
+                  placeholder={t("cc.memLimitPlaceholder")}
                   type="number"
                   min={4}
                   disabled={submitting}
@@ -558,7 +565,7 @@ export function CreateContainerModal({
                   onChange={(e) => setMemUnit(e.target.value as "MB" | "GB")}
                   disabled={submitting}
                   className="w-20 shrink-0 text-[12px]"
-                  title="内存单位"
+                  title={t("cc.memUnit")}
                 >
                   <option value="MB">MB</option>
                   <option value="GB">GB</option>
@@ -567,7 +574,7 @@ export function CreateContainerModal({
               <Input
                 value={cpuLimit}
                 onChange={(e) => setCpuLimit(e.target.value)}
-                placeholder="CPU 核数（可选），如 1.5"
+                placeholder={t("cc.cpusPlaceholder")}
                 type="number"
                 step="0.1"
                 min={0.1}
@@ -579,14 +586,14 @@ export function CreateContainerModal({
               <Input
                 value={command}
                 onChange={(e) => setCommand(e.target.value)}
-                placeholder='命令覆盖（可选），如 sh -c "sleep 5"'
+                placeholder={t('cc.cmdPlaceholder')}
                 disabled={submitting}
                 className={inputCls}
               />
               <Input
                 value={workdir}
                 onChange={(e) => setWorkdir(e.target.value)}
-                placeholder="工作目录（可选），如 /app"
+                placeholder={t("cc.workdirPlaceholder")}
                 disabled={submitting}
                 className={inputCls}
               />
@@ -595,9 +602,9 @@ export function CreateContainerModal({
                 onChange={(e) => setNetwork(e.target.value)}
                 disabled={submitting}
                 className="text-[12px]"
-                title="容器接入的网络"
+                title={t("cc.networkTitle")}
               >
-                <option value="">网络（默认 bridge）</option>
+                <option value="">{t("cc.networkDefault")}</option>
                 {(networks.data ?? []).map((n) => (
                   <option key={n.id} value={n.name}>
                     {n.name}（{n.driver}）
@@ -607,7 +614,7 @@ export function CreateContainerModal({
               <Input
                 value={hostname}
                 onChange={(e) => setHostname(e.target.value)}
-                placeholder="主机名（可选）"
+                placeholder={t("cc.hostnamePlaceholder")}
                 disabled={submitting}
                 className={inputCls}
               />
@@ -615,7 +622,7 @@ export function CreateContainerModal({
 
             <div>
               <div className="mb-1.5 text-[12px] font-medium text-fg2">
-                标签（{labels.length}）
+                {t("cc.labelsSection", { n: labels.length })}
               </div>
               <div className="space-y-1.5">
                 {labels.map((r, i) => (
@@ -637,7 +644,7 @@ export function CreateContainerModal({
                     {delBtn(() => setLabels(labels.filter((_, j) => j !== i)))}
                   </div>
                 ))}
-                {addBtn("添加标签", () => setLabels([...labels, { key: "", value: "" }]))}
+                {addBtn(t("cc.addLabel"), () => setLabels([...labels, { key: "", value: "" }]))}
               </div>
             </div>
 
@@ -647,26 +654,26 @@ export function CreateContainerModal({
                 onChange={(e) => setRestart(e.target.value)}
                 disabled={submitting || autoRemove}
                 className="text-[12px]"
-                title={autoRemove ? "自动移除模式下不可配置重启策略" : "重启策略"}
+                title={autoRemove ? t("cc.autoRemovePolicyHint") : t("uc.restartPolicy")}
               >
                 {RESTART_OPTIONS.map((o) => (
                   <option key={o.value} value={o.value}>
-                    {o.label}
+                    {t(o.labelKey)}
                   </option>
                 ))}
               </Select>
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                 <Checkbox
-                  label="自动移除"
+                  label={t("cc.autoRemove")}
                   checked={autoRemove}
                   onChange={(v) => {
                     setAutoRemove(v);
                     if (v) setRestart("no");
                   }}
                 />
-                <Checkbox label="特权模式" checked={privileged} onChange={setPrivileged} />
+                <Checkbox label={t("cc.privileged")} checked={privileged} onChange={setPrivileged} />
                 <Checkbox label="TTY" checked={tty} onChange={setTty} />
-                <Checkbox label="保持标准输入" checked={stdin} onChange={setStdin} />
+                <Checkbox label={t("cc.stdin")} checked={stdin} onChange={setStdin} />
               </div>
             </div>
           </div>

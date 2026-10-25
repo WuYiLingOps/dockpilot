@@ -1,15 +1,17 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { useT } from "../../lib/i18n";
+import type { MsgKey } from "../../lib/i18n/zh";
 import { api } from "../../lib/api";
 import type { ContainerUpdateSpec } from "../../types/docker";
 import { Button, Input, Modal, Select, Spinner } from "../ui";
 
-const RESTART_OPTIONS = [
-  { value: "no", label: "不重启（no）" },
-  { value: "always", label: "始终重启（always）" },
-  { value: "unless-stopped", label: "除非手动停止（unless-stopped）" },
-  { value: "on-failure", label: "失败时重启（on-failure）" },
+const RESTART_OPTIONS: { value: string; labelKey: MsgKey }[] = [
+  { value: "no", labelKey: "uc.policyNo" },
+  { value: "always", labelKey: "uc.policyAlways" },
+  { value: "unless-stopped", labelKey: "uc.policyUnlessStopped" },
+  { value: "on-failure", labelKey: "uc.policyOnFailure" },
 ];
 
 /**
@@ -27,6 +29,7 @@ export function UpdateContainerModal({
   containerName: string;
   onClose: () => void;
 }) {
+  const t = useT();
   const qc = useQueryClient();
   const [restart, setRestart] = useState("no");
   const [memLimit, setMemLimit] = useState("");
@@ -57,7 +60,9 @@ export function UpdateContainerModal({
         }
         setCpuLimit(spec.cpus && spec.cpus > 0 ? String(spec.cpus) : "");
       })
-      .catch((e) => toast.error(`读取容器配置失败: ${e instanceof Error ? e.message : e}`))
+      .catch((e) =>
+        toast.error(t("containers.readSpecFailed", { err: e instanceof Error ? e.message : String(e) })),
+      )
       .finally(() => setLoading(false));
   }, [open, containerId]);
 
@@ -66,7 +71,7 @@ export function UpdateContainerModal({
     let memory_mb: number | null = null;
     if (memLimit.trim() !== "") {
       if (!Number.isFinite(memNum) || memNum <= 0) {
-        toast.error("内存上限必须是正数");
+        toast.error(t("uc.memPositive"));
         return;
       }
       memory_mb = memUnit === "GB" ? memNum * 1024 : memNum;
@@ -75,7 +80,7 @@ export function UpdateContainerModal({
     if (cpuLimit.trim() !== "") {
       const c = Number(cpuLimit);
       if (!Number.isFinite(c) || c <= 0) {
-        toast.error("CPU 核数必须是正数");
+        toast.error(t("uc.cpuPositive"));
         return;
       }
       cpus = c;
@@ -88,12 +93,12 @@ export function UpdateContainerModal({
     setSubmitting(true);
     try {
       await api.updateContainerConfig(containerId, spec);
-      toast.success("容器配置已更新");
+      toast.success(t("uc.updated"));
       void qc.invalidateQueries({ queryKey: ["containers"] });
       void qc.invalidateQueries({ queryKey: ["containerHealth"] });
       onClose();
     } catch (e) {
-      toast.error(`更新失败: ${e instanceof Error ? e.message : e}`);
+      toast.error(t("uc.updateFailed", { err: e instanceof Error ? e.message : String(e) }));
     } finally {
       setSubmitting(false);
     }
@@ -102,15 +107,15 @@ export function UpdateContainerModal({
   return (
     <Modal
       open={open}
-      title={`更新配置 — ${containerName}`}
+      title={t("uc.title", { name: containerName })}
       onClose={onClose}
       footer={
         <>
           <Button variant="outline" onClick={onClose}>
-            取消
+            {t("common.cancel")}
           </Button>
           <Button variant="primary" disabled={loading || submitting} onClick={() => void submit()}>
-            {submitting ? "更新中…" : "应用更改"}
+            {submitting ? t("uc.updating") : t("uc.apply")}
           </Button>
         </>
       }
@@ -122,27 +127,30 @@ export function UpdateContainerModal({
       ) : (
         <div className="space-y-3">
           <p className="text-[12px] text-fg3">
-            通过 docker update 在线生效，无需重建容器；留空表示保持不变。内存上限无法清除，且更新时 swap
-            会按 Docker 默认比例同步为 2 倍内存（daemon 限制）。
+            {t("uc.hint")}
           </p>
           <div>
-            <div className="mb-1.5 text-[12px] font-medium text-fg2">重启策略</div>
+            <div className="mb-1.5 text-[12px] font-medium text-fg2">
+              {t("uc.restartPolicy")}
+            </div>
             <Select value={restart} onChange={(e) => setRestart(e.target.value)} className="w-full">
               {RESTART_OPTIONS.map((o) => (
                 <option key={o.value} value={o.value}>
-                  {o.label}
+                  {t(o.labelKey)}
                 </option>
               ))}
             </Select>
           </div>
           <div className="grid grid-cols-2 gap-2">
             <div>
-              <div className="mb-1.5 text-[12px] font-medium text-fg2">内存上限</div>
+              <div className="mb-1.5 text-[12px] font-medium text-fg2">
+              {t("uc.memLimit")}
+            </div>
               <div className="flex gap-1.5">
                 <Input
                   value={memLimit}
                   onChange={(e) => setMemLimit(e.target.value)}
-                  placeholder="不限制"
+                  placeholder={t("uc.unlimited")}
                   type="number"
                   min={1}
                   className="w-full"
@@ -158,11 +166,13 @@ export function UpdateContainerModal({
               </div>
             </div>
             <div>
-              <div className="mb-1.5 text-[12px] font-medium text-fg2">CPU 核数</div>
+              <div className="mb-1.5 text-[12px] font-medium text-fg2">
+              {t("uc.cpuCores")}
+            </div>
               <Input
                 value={cpuLimit}
                 onChange={(e) => setCpuLimit(e.target.value)}
-                placeholder="不限制"
+                placeholder={t("uc.unlimited")}
                 type="number"
                 min={0.1}
                 step={0.1}

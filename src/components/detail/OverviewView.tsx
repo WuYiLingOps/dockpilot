@@ -3,8 +3,9 @@ import { useEffect, useId, useMemo, useState } from "react";
 import { Activity } from "lucide-react";
 import { api } from "../../lib/api";
 import { formatBytes, formatCores } from "../../lib/format";
+import { useT } from "../../lib/i18n";
 import type { ContainerHealthDto, StatsTick } from "../../types/docker";
-import { Badge, EmptyState, HEALTH_META } from "../ui";
+import { Badge, EmptyState, healthMeta } from "../ui";
 
 const MAX_POINTS = 60;
 
@@ -47,6 +48,7 @@ function Chart({
   format: (n: number) => string;
   legend?: boolean;
 }) {
+  const t = useT();
   const gid = useId();
   const w = 600;
   const h = 140;
@@ -150,7 +152,7 @@ function Chart({
         ) : (
           <span />
         )}
-        <span className="text-[11px] text-fg3">近 60 秒</span>
+        <span className="text-[11px] text-fg3">{t("res.last60s")}</span>
       </div>
     </div>
   );
@@ -173,6 +175,7 @@ function rates(cumulative: number[]): number[] {
 
 /** 健康检查状态卡片（未配置 healthcheck 时不渲染；不健康时展示最近一次检查输出） */
 function HealthCard({ id }: { id: string }) {
+  const t = useT();
   const { data } = useQuery({
     queryKey: ["containerHealth", id],
     queryFn: () => api.containerHealth(id),
@@ -182,20 +185,20 @@ function HealthCard({ id }: { id: string }) {
   const h: ContainerHealthDto | undefined = data;
   if (!h || h.status === "none") return null;
 
-  const meta = HEALTH_META[h.status];
+  const meta = healthMeta(h.status);
   const last = h.log[0];
   return (
     <div className="rounded-card border border-edge bg-panel p-4 shadow-[var(--app-shadow)]">
       <div className="flex items-center justify-between gap-2">
-        <span className="text-[12px] font-medium text-fg2">健康检查</span>
-        <Badge tone={meta?.tone ?? "neutral"}>
-          {meta?.label ?? h.status}
-          {h.failing_streak > 0 ? ` · 连续失败 ${h.failing_streak} 次` : ""}
+        <span className="text-[12px] font-medium text-fg2">{t("res.healthCheck")}</span>
+        <Badge tone={meta.tone}>
+          {meta.label}
+          {h.failing_streak > 0 ? t("res.failingStreak", { n: h.failing_streak }) : ""}
         </Badge>
       </div>
       {h.status === "unhealthy" && last && (
         <div className="mt-2 max-h-24 overflow-auto whitespace-pre-wrap break-all rounded-ctl bg-panel2 p-2.5 font-mono text-[11px] leading-4 text-fg2">
-          {last.output || "（检查命令无输出）"}
+          {last.output || t("res.noCheckOutput")}
         </div>
       )}
     </div>
@@ -204,6 +207,7 @@ function HealthCard({ id }: { id: string }) {
 
 /** 退出/未运行原因面板：把 inspect 的 State 信息翻译成可操作的提示 */
 function ExitInfo({ id }: { id: string }) {
+  const t = useT();
   const { data } = useQuery({
     queryKey: ["containerHealth", id],
     queryFn: () => api.containerHealth(id),
@@ -211,14 +215,17 @@ function ExitInfo({ id }: { id: string }) {
   });
   if (!data) return null;
   const desc = data.oom_killed
-    ? "容器因内存不足被系统杀死（OOM）。可调大内存限制后重新启动。"
+    ? t("res.oomDesc")
     : data.state === "restarting"
-      ? `正在重启循环中（最近退出码 ${data.exit_code}）——启动即失败且重启策略为 always / unless-stopped 时会出现，建议停止后排查配置。`
+      ? t("res.restartLoopDesc", { code: data.exit_code })
       : data.state === "created"
-        ? "容器已创建但从未成功启动。"
+        ? t("res.createdDesc")
         : data.exit_code !== 0
-          ? `容器已退出（退出码 ${data.exit_code}）${data.error ? `：${data.error}` : ""}。`
-          : "容器已正常退出（退出码 0），一次性任务属正常现象。";
+          ? t("res.exitedWithError", {
+              code: data.exit_code,
+              detail: data.error ? t("res.errorDetail", { err: data.error }) : "",
+            })
+          : t("res.exitedClean");
   const bad = data.oom_killed || data.state === "restarting" || data.exit_code !== 0;
   return (
     <div
@@ -227,14 +234,13 @@ function ExitInfo({ id }: { id: string }) {
       }`}
     >
       <div className="font-medium">{desc}</div>
-      <div className="mt-1 text-[12px] text-fg3">
-        退出前的输出请查看「日志」页签；若是克隆容器，请检查端口 / 卷挂载是否与原容器冲突。
-      </div>
+      <div className="mt-1 text-[12px] text-fg3">{t("res.exitHint")}</div>
     </div>
   );
 }
 
 export function OverviewView({ id, running }: { id: string; running: boolean }) {
+  const t = useT();
   const [ticks, setTicks] = useState<StatsTick[]>([]);
 
   useEffect(() => {
@@ -262,8 +268,8 @@ export function OverviewView({ id, running }: { id: string; running: boolean }) 
         <ExitInfo id={id} />
         <EmptyState
           icon={<Activity size={40} strokeWidth={1.5} />}
-          title="容器未运行"
-          desc="启动容器后即可查看实时资源占用"
+          title={t("process.notRunning")}
+          desc={t("res.startToSeeUsage")}
         />
       </div>
     );
@@ -279,41 +285,47 @@ export function OverviewView({ id, running }: { id: string; running: boolean }) 
           value={`${(latest?.cpu_percent ?? 0).toFixed(1)}%`}
           sub={
             latest && cpuLimit
-              ? `限额 ${formatCores(cpuLimit)} · 占 ${((latest.cpu_percent / (cpuLimit * 100)) * 100).toFixed(1)}%`
+              ? t("res.limitShare", {
+                  v: formatCores(cpuLimit),
+                  pct: ((latest.cpu_percent / (cpuLimit * 100)) * 100).toFixed(1),
+                })
               : undefined
           }
         />
         <StatCard
-          label="内存"
+          label={t("overview.mem")}
           value={formatBytes(latest?.mem_usage ?? 0)}
           sub={
             latest
-              ? `限额 ${formatBytes(latest.mem_limit)} · 占 ${(latest.mem_percent ?? 0).toFixed(1)}%`
+              ? t("res.limitShare", {
+                  v: formatBytes(latest.mem_limit),
+                  pct: (latest.mem_percent ?? 0).toFixed(1),
+                })
               : undefined
           }
         />
         <StatCard
-          label="网络累计"
+          label={t("res.netTotal")}
           value={`↓ ${formatBytes(latest?.net_rx ?? 0)}`}
           sub={`↑ ${formatBytes(latest?.net_tx ?? 0)}`}
         />
         <StatCard
-          label="磁盘 I/O 累计"
-          value={`读 ${formatBytes(latest?.block_read ?? 0)}`}
-          sub={`写 ${formatBytes(latest?.block_write ?? 0)}`}
+          label={t("res.diskTotal")}
+          value={`${t("overview.read")} ${formatBytes(latest?.block_read ?? 0)}`}
+          sub={`${t("overview.write")} ${formatBytes(latest?.block_write ?? 0)}`}
         />
       </div>
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         <Chart
-          label="CPU 使用率"
+          label={t("res.cpuUsage")}
           // 有限额时纵轴对齐限额口径（100% = 1 核），无限额时自适应峰值，避免多核用量被裁剪
           max={cpuLimit ? cpuLimit * 100 : undefined}
           format={(n) => `${n.toFixed(1)}%`}
           lines={[{ name: "CPU", color: "var(--app-accent)", series: cpu }]}
         />
         <Chart
-          label="内存使用率"
+          label={t("res.memUsage")}
           max={100}
           format={(n) => `${n.toFixed(1)}%`}
           lines={[{ name: "MEM", color: "var(--app-ok)", series: mem }]}
@@ -321,12 +333,12 @@ export function OverviewView({ id, running }: { id: string; running: boolean }) 
       </div>
 
       <Chart
-        label="网络速率"
+        label={t("res.netRate")}
         format={(n) => `${formatBytes(n)}/s`}
         legend
         lines={[
-          { name: "下载", color: "var(--app-accent)", series: rxRate },
-          { name: "上传", color: "var(--app-ok)", series: txRate },
+          { name: t("overview.down"), color: "var(--app-accent)", series: rxRate },
+          { name: t("overview.up"), color: "var(--app-ok)", series: txRate },
         ]}
       />
     </div>

@@ -15,6 +15,7 @@ import {
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { api } from "../lib/api";
+import { useT } from "../lib/i18n";
 import { activeConnection, useSettings } from "../lib/settings";
 import { copyText } from "../lib/clipboard";
 import { useComposeRun } from "../hooks/useComposeRun";
@@ -50,6 +51,7 @@ export function ComposeDetail({
 }) {
   const { data: settings } = useSettings();
   const run = useComposeRun();
+  const t = useT();
 
   const query = useQuery({
     queryKey: ["composeProjects"],
@@ -88,29 +90,28 @@ export function ComposeDetail({
   const saveYaml = useMutation({
     mutationFn: () => api.writeComposeFile(yamlPath!, yamlDraft),
     onSuccess: () => {
-      toast.success("compose 文件已保存（原文件已备份为 .bak）", {
+      toast.success(t("compose.fileSaved"), {
         action: {
-          label: "重新应用",
-          onClick: () => act("up", "重新应用"),
+          label: t("compose.reapply"),
+          onClick: () => act("up", t("compose.reapply")),
         },
       });
       setYamlEditing(false);
       void yamlContent.refetch();
     },
-    onError: (e) => toast.error(`保存失败: ${e}`),
+    onError: (e) => toast.error(t("compose.saveFailed", { err: String(e) })),
   });
 
   const act = (action: string, label: string, opts: ActionOpts = {}) =>
     run.start((o, e) => api.composeAction(project, action, opts, o, e), {
-      label: `${label}项目 ${project}`,
+      label: t("compose.projectActionLabel", { label, name: project }),
     });
 
-  const needCli =
-    cliReady
-      ? undefined
-      : activeConnection(settings).kind === "ssh"
-        ? "远程服务器未检测到 Docker Compose CLI"
-        : "需要安装 Docker Compose CLI";
+  const needCli = cliReady
+    ? undefined
+    : activeConnection(settings).kind === "ssh"
+      ? t("compose.cliMissingSsh")
+      : t("compose.cliMissingLocal");
 
   return (
     <>
@@ -118,7 +119,7 @@ export function ComposeDetail({
         {...withDragRegion()}
         className="flex h-12 shrink-0 items-center gap-2.5 border-b border-edge bg-panel px-3"
       >
-        <IconButton title="返回项目列表" onClick={onBack} data-no-drag>
+        <IconButton title={t("cd.back")} onClick={onBack} data-no-drag>
           <ChevronLeft size={17} />
         </IconButton>
         {p ? (
@@ -128,7 +129,12 @@ export function ComposeDetail({
             </h1>
             <span className="inline-flex items-center gap-1.5 text-[12px] font-medium text-fg2">
               <StatusDot state={projectState(p)} />
-              {p.total_count === 0 ? "未运行（本地跟踪）" : `${p.running_count}/${p.total_count} 运行`}
+              {p.total_count === 0
+                ? t("compose.notRunningTracked")
+                : t("compose.runningShort", {
+                    running: p.running_count,
+                    total: p.total_count,
+                  })}
             </span>
             <span
               className="hidden min-w-0 max-w-[24rem] shrink-[4] truncate font-mono text-[11px] text-fg3 lg:inline"
@@ -145,25 +151,25 @@ export function ComposeDetail({
             variant="tinted"
             disabled={!cliReady || run.running}
             title={needCli}
-            onClick={() => act("up", "启动")}
+            onClick={() => act("up", t("containers.actStart"))}
           >
             <Play size={14} />
-            启动
+            {t("containers.actStart")}
           </Button>
-          <IconButton title={needCli ?? "停止全部服务"} disabled={!cliReady || run.running} onClick={() => act("stop", "停止")}>
+          <IconButton title={needCli ?? t("compose.stopTitle")} disabled={!cliReady || run.running} onClick={() => act("stop", t("containers.actStop"))}>
             <Square size={15} />
           </IconButton>
-          <IconButton title={needCli ?? "重启全部服务"} disabled={!cliReady || run.running} onClick={() => act("restart", "重启")}>
+          <IconButton title={needCli ?? t("compose.restartAllTitle")} disabled={!cliReady || run.running} onClick={() => act("restart", t("containers.actRestart"))}>
             <RotateCw size={15} />
           </IconButton>
-          <IconButton title={needCli ?? "构建镜像"} disabled={!cliReady || run.running} onClick={() => act("build", "构建")}>
+          <IconButton title={needCli ?? t("compose.buildTitle")} disabled={!cliReady || run.running} onClick={() => act("build", t("compose.buildLabel"))}>
             <Hammer size={15} />
           </IconButton>
-          <IconButton title={needCli ?? "拉取镜像"} disabled={!cliReady || run.running} onClick={() => act("pull", "拉取镜像")}>
+          <IconButton title={needCli ?? t("img.pullImage")} disabled={!cliReady || run.running} onClick={() => act("pull", t("img.pullImage"))}>
             <Download size={15} />
           </IconButton>
           <IconButton
-            title={needCli ?? "下线项目（停止并删除容器）"}
+            title={needCli ?? t("compose.downTitle")}
             disabled={!cliReady || run.running}
             className="hover:bg-err/10 hover:text-err"
             onClick={() => setDownOpen(true)}
@@ -171,7 +177,7 @@ export function ComposeDetail({
             <Trash2 size={15} />
           </IconButton>
           <span className="mx-1 h-4 w-px bg-edge" />
-          <IconButton title="查看 compose 配置" onClick={() => { setYamlIndex(0); setYamlOpen(true); }}>
+          <IconButton title={t("compose.viewConfig")} onClick={() => { setYamlIndex(0); setYamlOpen(true); }}>
             <FileText size={15} />
           </IconButton>
         </div>
@@ -190,17 +196,19 @@ export function ComposeDetail({
               <div
                 className={`${GRID} h-8 border-b border-edge bg-panel2/60 px-4 text-[11px] font-medium text-fg3`}
               >
-                <div>状态</div>
-                <div>服务</div>
-                <div>镜像</div>
-                <div>端口</div>
+                <div>{t("containers.thState")}</div>
+                <div>{t("compose.thServices")}</div>
+                <div>{t("nav.images")}</div>
+                <div>{t("containers.thPorts")}</div>
                 <div />
               </div>
               {p.services.length === 0 ? (
                 <div className="px-4 py-10 text-center text-[12px] leading-5 text-fg3">
-                  项目未运行，暂无容器信息。
+                  {t("compose.noContainersHint")}
                   <br />
-                  点上方「启动」以 docker compose up 拉起全部服务，或点 <FileText size={12} className="inline" /> 查看 compose 配置。
+                  {t("compose.startHintBefore")}
+                  <FileText size={12} className="inline" />
+                  {t("compose.startHintAfter")}
                 </div>
               ) : (
                 p.services.map((s) => (
@@ -233,9 +241,9 @@ export function ComposeDetail({
                   >
                     {(s.state === "exited" || s.state === "created" || s.state === "dead") && (
                       <IconButton
-                        title={needCli ?? "启动服务"}
+                        title={needCli ?? t("compose.serviceStartTitle")}
                         disabled={!cliReady || run.running}
-                        onClick={() => act("start", "启动服务", { services: [s.name] })}
+                        onClick={() => act("start", t("compose.serviceStart"), { services: [s.name] })}
                       >
                         <Play size={14} />
                       </IconButton>
@@ -243,23 +251,23 @@ export function ComposeDetail({
                     {s.state === "running" && (
                       <>
                         <IconButton
-                          title={needCli ?? "停止服务"}
+                          title={needCli ?? t("compose.serviceStopTitle")}
                           disabled={!cliReady || run.running}
-                          onClick={() => act("stop", "停止服务", { services: [s.name] })}
+                          onClick={() => act("stop", t("compose.serviceStop"), { services: [s.name] })}
                         >
                           <Square size={14} />
                         </IconButton>
                         <IconButton
-                          title={needCli ?? "重启服务"}
+                          title={needCli ?? t("compose.serviceRestartTitle")}
                           disabled={!cliReady || run.running}
-                          onClick={() => act("restart", "重启服务", { services: [s.name] })}
+                          onClick={() => act("restart", t("compose.serviceRestart"), { services: [s.name] })}
                         >
                           <RotateCw size={14} />
                         </IconButton>
                         <IconButton
-                          title={needCli ?? "暂停服务"}
+                          title={needCli ?? t("compose.servicePauseTitle")}
                           disabled={!cliReady || run.running}
-                          onClick={() => act("pause", "暂停服务", { services: [s.name] })}
+                          onClick={() => act("pause", t("compose.servicePause"), { services: [s.name] })}
                         >
                           <Pause size={14} />
                         </IconButton>
@@ -267,9 +275,9 @@ export function ComposeDetail({
                     )}
                     {s.state === "paused" && (
                       <IconButton
-                        title={needCli ?? "恢复服务"}
+                        title={needCli ?? t("compose.serviceUnpauseTitle")}
                         disabled={!cliReady || run.running}
-                        onClick={() => act("unpause", "恢复服务", { services: [s.name] })}
+                        onClick={() => act("unpause", t("compose.serviceUnpause"), { services: [s.name] })}
                       >
                         <Play size={14} />
                       </IconButton>
@@ -299,37 +307,38 @@ export function ComposeDetail({
       {/* 下线确认 */}
       <Modal
         open={downOpen}
-        title="下线项目"
+        title={t("compose.downConfirmTitle")}
         onClose={() => setDownOpen(false)}
         footer={
           <>
             <Button variant="outline" onClick={() => setDownOpen(false)}>
-              取消
+              {t("common.cancel")}
             </Button>
             <Button
               variant="danger"
               onClick={() => {
                 setDownOpen(false);
-                act("down", "下线", { removeVolumes: downVolumes, removeImages: downImages });
+                act("down", t("compose.downLabel"), { removeVolumes: downVolumes, removeImages: downImages });
               }}
             >
-              确认下线
+              {t("compose.downConfirm")}
             </Button>
           </>
         }
       >
         <p>
-          确定下线项目 <span className="font-mono text-fg">{project}</span> 吗？
-          将停止并删除该项目创建的所有容器与默认网络。
+          {t("compose.downConfirmBefore")}{" "}
+          <span className="font-mono text-fg">{project}</span>
+          {t("compose.downConfirmAfter")}
         </p>
         <div className="mt-2.5 space-y-1.5">
           <Checkbox
-            label="同时删除数据卷（--volumes，数据将不可恢复）"
+            label={t("compose.downVolumes")}
             checked={downVolumes}
             onChange={setDownVolumes}
           />
           <Checkbox
-            label="同时删除项目本地构建的镜像（--rmi local）"
+            label={t("compose.downImages")}
             checked={downImages}
             onChange={setDownImages}
           />
@@ -339,7 +348,7 @@ export function ComposeDetail({
       {/* compose 配置查看 / 编辑 */}
       <Modal
         open={yamlOpen}
-        title="compose 配置"
+        title={t("compose.configTitle")}
         size="lg"
         onClose={() => {
           setYamlEditing(false);
@@ -349,7 +358,7 @@ export function ComposeDetail({
           yamlEditing ? (
             <>
               <span className="mr-auto self-center text-[11px] text-fg3">
-                保存前会自动校验语法并备份原文件（Ctrl+S 保存）
+                {t("compose.saveHint")}
               </span>
               <Button
                 variant="outline"
@@ -358,14 +367,14 @@ export function ComposeDetail({
                   setYamlDraft("");
                 }}
               >
-                取消
+                {t("common.cancel")}
               </Button>
               <Button
                 variant="primary"
                 disabled={!yamlDirty || saveYaml.isPending}
                 onClick={() => saveYaml.mutate()}
               >
-                {saveYaml.isPending ? "保存中…" : "保存"}
+                {saveYaml.isPending ? t("common.saving") : t("common.save")}
               </Button>
             </>
           ) : undefined
@@ -391,12 +400,12 @@ export function ComposeDetail({
             </span>
             {yamlEditing ? (
               <span className="shrink-0 text-[11px] text-fg3">
-                {yamlDirty ? "有未保存的修改" : "内容未变化"}
+                {yamlDirty ? t("compose.unsavedChanges") : t("compose.noChanges")}
               </span>
             ) : (
               <div className="flex shrink-0 items-center gap-0.5">
                 <IconButton
-                  title="编辑此文件"
+                  title={t("compose.editFile")}
                   disabled={yamlContent.isLoading || yamlContent.isError}
                   onClick={() => {
                     setYamlDraft(yamlContent.data ?? "");
@@ -406,7 +415,7 @@ export function ComposeDetail({
                   <Pencil size={14} />
                 </IconButton>
                 {yamlContent.data && (
-                  <IconButton title="复制内容" onClick={() => void copyText(yamlContent.data!)}>
+                  <IconButton title={t("compose.copyContent")} onClick={() => void copyText(yamlContent.data!)}>
                     <Copy size={14} />
                   </IconButton>
                 )}

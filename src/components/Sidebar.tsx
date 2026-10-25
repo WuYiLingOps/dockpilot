@@ -17,7 +17,14 @@ import {
 } from "lucide-react";
 import { useCallback, useState } from "react";
 import { api } from "../lib/api";
-import { activeConnection, useSettings, useSwitchConnection } from "../lib/settings";
+import { useT } from "../lib/i18n";
+import type { MsgKey } from "../lib/i18n/zh";
+import {
+  activeConnection,
+  displayConnName,
+  useSettings,
+  useSwitchConnection,
+} from "../lib/settings";
 import type { ConnectionKind } from "../types/settings";
 import { SidebarTopBar } from "./TitleBar";
 import { cn, IconButton, Spinner, StatusDot } from "./ui";
@@ -31,14 +38,14 @@ export type PageKey =
   | "cleanup"
   | "settings";
 
-const NAV: { key: PageKey; label: string; icon: typeof Boxes }[] = [
-  { key: "overview", label: "系统概览", icon: LayoutDashboard },
-  { key: "containers", label: "容器", icon: Boxes },
-  { key: "images", label: "镜像", icon: ImageIcon },
-  { key: "compose", label: "编排", icon: Layers },
-  { key: "storage", label: "存储和网络", icon: HardDrive },
-  { key: "cleanup", label: "空间清理", icon: Eraser },
-  { key: "settings", label: "设置", icon: Settings },
+const NAV: { key: PageKey; labelKey: MsgKey; icon: typeof Boxes }[] = [
+  { key: "overview", labelKey: "nav.overview", icon: LayoutDashboard },
+  { key: "containers", labelKey: "nav.containers", icon: Boxes },
+  { key: "images", labelKey: "nav.images", icon: ImageIcon },
+  { key: "compose", labelKey: "nav.compose", icon: Layers },
+  { key: "storage", labelKey: "nav.storage", icon: HardDrive },
+  { key: "cleanup", labelKey: "nav.cleanup", icon: Eraser },
+  { key: "settings", labelKey: "nav.settings", icon: Settings },
 ];
 
 const KIND_ICON: Record<ConnectionKind, typeof Boxes> = {
@@ -72,6 +79,7 @@ function ConnectionFooter({
   const [open, setOpen] = useState(false);
   const { data: settings } = useSettings();
   const switchConn = useSwitchConnection();
+  const t = useT();
   const info = useQuery({
     queryKey: ["dockerInfo"],
     queryFn: api.dockerInfo,
@@ -82,11 +90,17 @@ function ConnectionFooter({
   const connections = settings?.connections ?? [];
   const active = activeConnection(settings);
   const ActiveIcon = KIND_ICON[active.kind] ?? House;
+  const activeName = displayConnName(active.name);
   const statusText = info.data
-    ? `${active.name} · Docker ${info.data.version} · ${info.data.running} 运行 · ${info.data.containers} 容器`
+    ? t("sidebar.connStatus", {
+        name: activeName,
+        version: info.data.version,
+        running: info.data.running,
+        total: info.data.containers,
+      })
     : info.isError
-      ? "Docker 未连接"
-      : "正在连接 Docker…";
+      ? t("sidebar.dockerDisconnected")
+      : t("sidebar.dockerConnecting");
 
   // 折叠态下面板固定宽度、在图标栏上方居中弹出，避免被 56px 容器压扁
   const dropdown = open && (
@@ -100,7 +114,7 @@ function ConnectionFooter({
           collapsed ? "left-14 w-60" : "left-3 right-3",
         )}
       >
-        <div className="px-2 py-1 text-[11px] text-fg3">切换连接</div>
+        <div className="px-2 py-1 text-[11px] text-fg3">{t("sidebar.switchConnection")}</div>
         {connections.map((c) => {
           const Icon = KIND_ICON[c.kind] ?? House;
           const isActive = c.id === settings?.active_connection_id;
@@ -110,7 +124,7 @@ function ConnectionFooter({
               key={c.id}
               type="button"
               data-no-drag
-              title={isActive ? "当前连接" : `切换到 ${c.name}`}
+              title={isActive ? t("sidebar.currentConnection") : t("sidebar.switchTo", { name: displayConnName(c.name) })}
               onClick={() => {
                 if (isActive) {
                   setOpen(false);
@@ -128,7 +142,9 @@ function ConnectionFooter({
               ) : (
                 <Icon size={13} className="shrink-0" />
               )}
-              <span className="min-w-0 flex-1 truncate text-left">{c.name}</span>
+              <span className="min-w-0 flex-1 truncate text-left">
+                {displayConnName(c.name)}
+              </span>
               {isActive && <Check size={13} className="shrink-0" />}
             </button>
           );
@@ -144,7 +160,7 @@ function ConnectionFooter({
           className="flex w-full items-center gap-2 rounded-btn px-2 py-1.5 text-[12px] text-fg2 transition-colors hover:bg-hover hover:text-fg"
         >
           <Settings size={13} className="shrink-0" />
-          管理连接…
+          {t("sidebar.manageConnections")}
         </button>
       </div>
     </>
@@ -153,7 +169,12 @@ function ConnectionFooter({
   if (collapsed) {
     return (
       <div className="relative flex flex-col items-center gap-1 border-t border-edge py-2">
-        <IconButton title={statusText} aria-label="切换连接" data-no-drag onClick={() => setOpen((v) => !v)}>
+        <IconButton
+          title={statusText}
+          aria-label={t("sidebar.switchConnection")}
+          data-no-drag
+          onClick={() => setOpen((v) => !v)}
+        >
           {info.data ? (
             <ActiveIcon size={16} />
           ) : (
@@ -167,7 +188,11 @@ function ConnectionFooter({
           )}
         </IconButton>
         {onExpand && (
-          <IconButton title="展开侧栏" aria-label="展开侧栏" onClick={onExpand}>
+          <IconButton
+            title={t("sidebar.expandSidebar")}
+            aria-label={t("sidebar.expandSidebar")}
+            onClick={onExpand}
+          >
             <PanelLeftOpen size={15} />
           </IconButton>
         )}
@@ -187,9 +212,9 @@ function ConnectionFooter({
         {info.data ? (
           <>
             <StatusDot state="running" />
-            <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-fg2" title={active.name}>
+            <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-fg2" title={activeName}>
               <ActiveIcon size={11} className="mr-1 inline align-[-1px] text-fg3" />
-              {active.name}
+              {activeName}
             </span>
           </>
         ) : (
@@ -202,7 +227,7 @@ function ConnectionFooter({
               }
             />
             <span className="min-w-0 flex-1 truncate text-[12px] text-fg2">
-              {info.isError ? "Docker 未连接" : "正在连接 Docker…"}
+              {info.isError ? t("sidebar.dockerDisconnected") : t("sidebar.dockerConnecting")}
             </span>
           </>
         )}
@@ -213,7 +238,11 @@ function ConnectionFooter({
       </button>
       <div className="pl-4 pt-0.5 text-[11px] text-fg3">
         {info.data
-          ? `Docker ${info.data.version} · ${info.data.running} 运行 · ${info.data.containers} 容器`
+          ? t("sidebar.dockerStats", {
+              version: info.data.version,
+              running: info.data.running,
+              total: info.data.containers,
+            })
           : ""}
       </div>
 
@@ -232,6 +261,7 @@ export function Sidebar({
   /** 侧栏底部「管理连接…」：唤起独立的连接管理弹窗（连接管理已从设置中独立） */
   onOpenConnections: () => void;
 }) {
+  const t = useT();
   const [collapsed, setCollapsed] = useState(loadCollapsed);
   const toggleCollapsed = useCallback(() => {
     setCollapsed((v) => {
@@ -280,7 +310,9 @@ export function Sidebar({
       <SidebarTopBar collapsed={collapsed} onToggleCollapse={toggleCollapsed} />
 
       <nav className={cn("mt-1.5 flex-1 space-y-0.5", collapsed ? "px-2" : "px-3")}>
-        {NAV.map(({ key, label, icon: Icon }) => (
+        {NAV.map(({ key, labelKey, icon: Icon }) => {
+          const label = t(labelKey);
+          return (
           <button
             key={key}
             type="button"
@@ -308,7 +340,8 @@ export function Sidebar({
               </span>
             )}
           </button>
-        ))}
+          );
+        })}
       </nav>
 
       <ConnectionFooter

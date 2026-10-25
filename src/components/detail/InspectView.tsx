@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { api } from "../../lib/api";
 import { copyText } from "../../lib/clipboard";
+import { useT } from "../../lib/i18n";
 import { Button, ErrorNote, SearchInput, Spinner } from "../ui";
 
 /**
@@ -18,6 +19,7 @@ export function InspectView({ kind, id }: { kind: string; id: string }) {
   });
   const [filter, setFilter] = useState("");
   const [copied, setCopied] = useState(false);
+  const t = useT();
 
   const text = useMemo(
     () => (query.data ? JSON.stringify(query.data, null, 2) : ""),
@@ -36,9 +38,9 @@ export function InspectView({ kind, id }: { kind: string; id: string }) {
     if (await copyText(text)) {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
-      toast.success("已复制完整 JSON");
+      toast.success(t("inspect.copied"));
     } else {
-      toast.error("复制失败");
+      toast.error(t("common.copyFailed"));
     }
   };
 
@@ -56,13 +58,17 @@ export function InspectView({ kind, id }: { kind: string; id: string }) {
   return (
     <div className="flex h-full flex-col">
       <div className="flex shrink-0 items-center gap-2 px-4 py-2">
-        <SearchInput value={filter} onChange={setFilter} placeholder="过滤 JSON 行…" />
+        <SearchInput
+          value={filter}
+          onChange={setFilter}
+          placeholder={t("inspect.filterPlaceholder")}
+        />
         <Button variant="outline" onClick={copy} disabled={!text}>
           {copied ? <Check size={14} /> : <Copy size={14} />}
-          复制
+          {t("common.copy")}
         </Button>
         <Button variant="ghost" onClick={() => query.refetch()}>
-          刷新
+          {t("common.refresh")}
         </Button>
       </div>
       <div className="min-h-0 flex-1 overflow-auto px-4 pb-4">
@@ -73,8 +79,8 @@ export function InspectView({ kind, id }: { kind: string; id: string }) {
         ) : (
           <div className="flex h-full flex-col items-center justify-center gap-1.5 text-center">
             <Braces size={28} className="text-fg3/70" />
-            <div className="text-[13px] font-medium text-fg2">无匹配行</div>
-            <div className="text-xs text-fg3">换个关键字试试</div>
+            <div className="text-[13px] font-medium text-fg2">{t("inspect.noMatch")}</div>
+            <div className="text-xs text-fg3">{t("inspect.noMatchHint")}</div>
           </div>
         )}
       </div>

@@ -32,6 +32,8 @@ import {
   useAppUpdateStore,
 } from "../../lib/appUpdate";
 import { formatBytes, timeAgo } from "../../lib/format";
+import { useT } from "../../lib/i18n";
+import type { MsgKey } from "../../lib/i18n/zh";
 import { useSettings, useUpdateSettings } from "../../lib/settings";
 import { useIsWindows } from "../../lib/platform";
 import { useTheme, type ThemeMode } from "../../lib/theme";
@@ -56,83 +58,83 @@ export type SettingsCategory =
   | "diagnostics"
   | "about";
 
-/** 分类定义：label + keywords 供左侧搜索匹配 */
+/** 分类定义：label + keywords 供左侧搜索匹配（keywords 中英并收，两种界面语言均可命中） */
 const CATEGORIES: {
   key: SettingsCategory;
-  label: string;
-  desc: string;
+  labelKey: MsgKey;
+  descKey: MsgKey;
   icon: LucideIcon;
   keywords: string[];
 }[] = [
   {
     key: "app",
-    label: "应用",
-    desc: "刷新间隔、通知与关闭行为",
+    labelKey: "settings.catApp",
+    descKey: "settings.catAppDesc",
     icon: AppWindow,
-    keywords: ["刷新", "轮询", "间隔", "通知", "桌面通知", "关闭", "托盘", "后台", "最小化", "更新", "升级", "检查更新"],
+    keywords: ["刷新", "轮询", "间隔", "通知", "桌面通知", "关闭", "托盘", "后台", "最小化", "更新", "升级", "检查更新", "refresh", "interval", "notification", "close", "tray", "update"],
   },
   {
     key: "appearance",
-    label: "外观",
-    desc: "深浅色主题",
+    labelKey: "settings.catAppearance",
+    descKey: "settings.catAppearanceDesc",
     icon: Palette,
-    keywords: ["主题", "深色", "浅色", "暗色", "亮色", "跟随系统", "dark", "light"],
+    keywords: ["主题", "深色", "浅色", "暗色", "亮色", "跟随系统", "dark", "light", "theme"],
   },
   {
     key: "terminal",
-    label: "终端与日志",
-    desc: "终端 Shell 与容器日志默认值",
+    labelKey: "settings.catTerminal",
+    descKey: "settings.catTerminalDesc",
     icon: Terminal,
-    keywords: ["终端", "shell", "bash", "sh", "ash", "日志", "回看", "时间戳", "tail"],
+    keywords: ["终端", "shell", "bash", "sh", "ash", "日志", "回看", "时间戳", "tail", "terminal", "log"],
   },
   {
     key: "sshkeys",
-    label: "SSH 凭证",
-    desc: "钥匙串私钥管理与跨设备同步",
+    labelKey: "settings.catSshKeys",
+    descKey: "settings.catSshKeysDesc",
     icon: KeyRound,
-    keywords: ["ssh", "凭证", "钥匙串", "密钥", "私钥", "指纹", "导入"],
+    keywords: ["ssh", "凭证", "钥匙串", "密钥", "私钥", "指纹", "导入", "key", "identity", "fingerprint"],
   },
   {
     key: "registries",
-    label: "镜像仓库",
-    desc: "推送用的仓库凭据管理",
+    labelKey: "settings.catRegistries",
+    descKey: "settings.catRegistriesDesc",
     icon: Package,
-    keywords: ["仓库", "凭据", "registry", "harbor", "阿里云", "acr", "推送", "密码"],
+    keywords: ["仓库", "凭据", "registry", "harbor", "阿里云", "acr", "推送", "密码", "push", "credential"],
   },
   {
     key: "mirror",
-    label: "镜像加速",
-    desc: "daemon.json 编辑与镜像源测速（Linux）",
+    labelKey: "settings.catMirror",
+    descKey: "settings.catMirrorDesc",
     icon: Gauge,
-    keywords: ["加速", "镜像源", "镜像站", "daemon", "daemon.json", "mirror", "测速", "源"],
+    keywords: ["加速", "镜像源", "镜像站", "daemon", "daemon.json", "mirror", "测速", "源", "registry mirror"],
   },
   {
     key: "sync",
-    label: "同步与云",
-    desc: "多设备配置云同步",
+    labelKey: "settings.catSync",
+    descKey: "settings.catSyncDesc",
     icon: CloudUpload,
-    keywords: ["同步", "云", "gist", "github", "多设备", "备份", "合并"],
+    keywords: ["同步", "云", "gist", "github", "多设备", "备份", "合并", "sync", "cloud", "backup", "merge"],
   },
   {
     key: "diagnostics",
-    label: "故障诊断",
-    desc: "使用日志、崩溃详情与诊断包",
+    labelKey: "settings.catDiagnostics",
+    descKey: "settings.catDiagnosticsDesc",
     icon: Activity,
-    keywords: ["诊断", "日志", "崩溃", "闪退", "调试", "debug", "导出", "诊断包", "异常退出"],
+    keywords: ["诊断", "日志", "崩溃", "闪退", "调试", "debug", "导出", "诊断包", "异常退出", "diagnostics", "crash", "log"],
   },
   {
     key: "about",
-    label: "关于",
-    desc: "版本与项目信息",
+    labelKey: "settings.catAbout",
+    descKey: "settings.catAboutDesc",
     icon: Info,
-    keywords: ["关于", "版本", "更新", "github", "引擎", "反馈", "issue", "star"],
+    keywords: ["关于", "版本", "更新", "github", "引擎", "反馈", "issue", "star", "about", "version", "update"],
   },
 ];
 
-const THEME_OPTIONS: { value: ThemeMode; label: string }[] = [
-  { value: "system", label: "跟随系统" },
-  { value: "light", label: "浅色" },
-  { value: "dark", label: "深色" },
+const THEME_OPTIONS: { value: ThemeMode; labelKey: MsgKey }[] = [
+  { value: "system", labelKey: "theme.system" },
+  { value: "light", labelKey: "theme.light" },
+  { value: "dark", labelKey: "theme.dark" },
 ];
 
 const GITHUB_URL = "https://github.com/WuYiLingOps/dockpilot";
@@ -171,6 +173,7 @@ function LinkRow({
 /** 软件更新区块（关于分组）：手动检查入口、状态展示与应用内下载/自动更新（进度条 + 重启生效） */
 function UpdateCheckSection() {
   const st = useAppUpdateStore();
+  const t = useT();
   const checking = st.status === "checking";
   const downloading = st.status === "downloading";
   const installing = st.status === "installing";
@@ -184,30 +187,32 @@ function UpdateCheckSection() {
   const statusText = () => {
     switch (st.status) {
       case "checking":
-        return "正在检查…";
+        return t("upd.checking");
       case "available":
-        return st.latest ? `发现新版本 v${st.latest.latest_version}` : "发现新版本";
+        return st.latest
+          ? t("upd.availableVersion", { version: st.latest.latest_version })
+          : t("upd.available");
       case "downloading": {
-        if (!progress) return "正在下载更新包…";
+        if (!progress) return t("upd.downloading");
         const done = `${formatBytes(progress.downloaded)}${
           progress.total > 0 ? ` / ${formatBytes(progress.total)}` : ""
         }`;
         return pct !== null
-          ? `正在下载更新包 ${pct}%（${done}）`
-          : `正在下载更新包（${done}）`;
+          ? t("upd.downloadingPct", { pct, done })
+          : t("upd.downloadingDone", { done });
       }
       case "downloaded":
-        return "更新包已就绪";
+        return t("upd.downloaded");
       case "installing":
-        return "正在应用更新，完成后将自动重启…";
+        return t("upd.installing");
       case "up-to-date":
-        return "已是最新版本";
+        return t("upd.upToDate");
       case "error":
-        return st.error ?? "检查失败";
+        return st.error ?? t("upd.checkFailed");
       case "idle":
         return st.lastCheckAt
-          ? `上次检查：${timeAgo(Math.floor(st.lastCheckAt / 1000))}`
-          : "检查 GitHub 最新版本";
+          ? t("upd.lastCheck", { time: timeAgo(Math.floor(st.lastCheckAt / 1000)) })
+          : t("upd.lastCheckNever");
     }
   };
 
@@ -218,7 +223,7 @@ function UpdateCheckSection() {
           {busy ? <Spinner className="h-3.5 w-3.5" /> : <RefreshCw size={15} />}
         </div>
         <div className="min-w-0 flex-1">
-          <div className="text-[13px] font-medium text-fg">软件更新</div>
+          <div className="text-[13px] font-medium text-fg">{t("upd.title")}</div>
           <div
             className={cn(
               "truncate text-[11px]",
@@ -232,34 +237,34 @@ function UpdateCheckSection() {
         {installing ? (
           <Button variant="outline" disabled>
             <Spinner className="h-3 w-3" />
-            更新中…
+            {t("upd.updating")}
           </Button>
         ) : st.status === "downloaded" ? (
           <>
             <Button variant="tinted" onClick={() => void installAppUpdate()}>
               <Download size={13} />
-              应用更新
+              {t("upd.installUpdate")}
             </Button>
             {/* 自动更新失败（如无 polkit 授权代理）时的兜底出口；便携版给出手动替换指引 */}
             <Button variant="outline" onClick={() => void openDownloadedInstaller()}>
-              打开更新包
+              {t("upd.openPackage")}
             </Button>
           </>
         ) : st.status === "available" && st.latest ? (
           st.latest.download ? (
             <Button variant="tinted" onClick={() => void downloadAndOpen()}>
               <Download size={13} />
-              下载更新
+              {t("upd.downloadUpdate")}
             </Button>
           ) : (
             // 未匹配到当前平台附件：回落跳转 Releases 页
             <Button variant="tinted" onClick={openReleasePage}>
-              前往下载
+              {t("upd.goDownload")}
             </Button>
           )
         ) : (
           <Button variant="outline" disabled={busy} onClick={() => void checkNow(true)}>
-            {checking ? "检查中…" : downloading ? "下载中…" : "检查更新"}
+            {checking ? t("upd.checking") : downloading ? t("upd.downloadingShort") : t("upd.checkNow")}
           </Button>
         )}
       </div>
@@ -269,6 +274,7 @@ function UpdateCheckSection() {
 
 /** 关于分组（自带查询：应用版本 / Docker 引擎） */
 function AboutCard() {
+  const t = useT();
   const version = useQuery({
     queryKey: ["appVersion"],
     queryFn: async () => {
@@ -307,15 +313,15 @@ function AboutCard() {
       <div className="px-1 pt-2">
         <LinkRow
           icon={Bug}
-          title="反馈问题"
-          desc="报告 Bug 或提出建议"
+          title={t("about.feedback")}
+          desc={t("about.feedbackDesc")}
           url="https://github.com/WuYiLingOps/dockpilot/issues"
         />
-        <LinkRow icon={Code2} title="GitHub" desc="源代码，欢迎 Star" url={GITHUB_URL} />
+        <LinkRow icon={Code2} title="GitHub" desc={t("about.sourceDesc")} url={GITHUB_URL} />
         <LinkRow
           icon={FileText}
-          title="更新内容"
-          desc="查看发布说明"
+          title={t("about.releaseNotes")}
+          desc={t("about.releaseNotesDesc")}
           url="https://github.com/WuYiLingOps/dockpilot/releases"
         />
         <div className="flex w-full items-center gap-3 rounded-btn px-3 py-2.5">
@@ -323,9 +329,11 @@ function AboutCard() {
             <Container size={15} />
           </div>
           <div className="min-w-0">
-            <div className="text-[13px] font-medium text-fg">Docker 引擎</div>
+            <div className="text-[13px] font-medium text-fg">{t("about.dockerEngine")}</div>
             <div className="truncate text-[11px] text-fg3">
-              {info.data ? `${info.data.version} (${info.data.os}/${info.data.arch})` : "未连接"}
+              {info.data
+                ? `${info.data.version} (${info.data.os}/${info.data.arch})`
+                : t("about.notConnected")}
             </div>
           </div>
         </div>
@@ -355,6 +363,7 @@ export function SettingsDialog({
   const { data: settings } = useSettings();
   const update = useUpdateSettings();
   const { setMode } = useTheme();
+  const t = useT();
 
   useEffect(() => {
     if (open && initialCategory) setActive(initialCategory);
@@ -381,7 +390,10 @@ export function SettingsDialog({
   const q = search.trim().toLowerCase();
   const visible = available.filter(
     (c) =>
-      !q || `${c.label} ${c.desc} ${c.keywords.join(" ")}`.toLowerCase().includes(q),
+      !q ||
+      `${t(c.labelKey)} ${t(c.descKey)} ${c.keywords.join(" ")}`
+        .toLowerCase()
+        .includes(q),
   );
   // 搜索把当前分类过滤掉时自动跳到第一个匹配项
   useEffect(() => {
@@ -403,34 +415,34 @@ export function SettingsDialog({
     switch (active) {
       case "app":
         return (
-          <Card title="应用">
-            <Row label="容器列表刷新间隔">
+          <Card title={t("settings.catApp")}>
+            <Row label={t("settings.containersRefresh")}>
               <Select
                 value={String(settings?.containers_refresh_secs ?? 10)}
                 className="w-36"
                 onChange={(e) => patch({ containers_refresh_secs: Number(e.target.value) })}
               >
-                <option value="5">5 秒</option>
-                <option value="10">10 秒</option>
-                <option value="30">30 秒</option>
-                <option value="60">1 分钟</option>
+                <option value="5">{t("settings.secs", { n: 5 })}</option>
+                <option value="10">{t("settings.secs", { n: 10 })}</option>
+                <option value="30">{t("settings.secs", { n: 30 })}</option>
+                <option value="60">{t("settings.min", { n: 1 })}</option>
               </Select>
             </Row>
-            <Row label="镜像列表刷新间隔">
+            <Row label={t("settings.imagesRefresh")}>
               <Select
                 value={String(settings?.images_refresh_secs ?? 20)}
                 className="w-36"
                 onChange={(e) => patch({ images_refresh_secs: Number(e.target.value) })}
               >
-                <option value="10">10 秒</option>
-                <option value="20">20 秒</option>
-                <option value="60">1 分钟</option>
-                <option value="120">2 分钟</option>
+                <option value="10">{t("settings.secs", { n: 10 })}</option>
+                <option value="20">{t("settings.secs", { n: 20 })}</option>
+                <option value="60">{t("settings.min", { n: 1 })}</option>
+                <option value="120">{t("settings.min", { n: 2 })}</option>
               </Select>
             </Row>
             <Row
-              label="容器异常桌面通知"
-              desc="容器非零退出、内存不足（OOM）或健康检查失败时发送系统通知"
+              label={t("settings.abnormalNotify")}
+              desc={t("settings.abnormalNotifyDesc")}
             >
               <Switch
                 checked={settings?.notifications_enabled ?? true}
@@ -438,8 +450,8 @@ export function SettingsDialog({
               />
             </Row>
             <Row
-              label="自动检查更新"
-              desc="启动时联网检查新版本，仅提醒不自动下载；手动「检查更新」不受此开关限制"
+              label={t("settings.autoCheckUpdates")}
+              desc={t("settings.autoCheckUpdatesDesc")}
             >
               <Switch
                 checked={settings?.auto_check_updates ?? true}
@@ -447,8 +459,8 @@ export function SettingsDialog({
               />
             </Row>
             <Row
-              label="关闭窗口时"
-              desc="每次询问为首次关闭时弹窗；最小化后应用在后台运行，容器异常通知不受影响，可从系统托盘恢复窗口或退出"
+              label={t("settings.closeAction")}
+              desc={t("settings.closeActionDesc")}
             >
               <Select
                 value={settings?.close_action ?? "ask"}
@@ -457,17 +469,17 @@ export function SettingsDialog({
                   patch({ close_action: e.target.value as AppSettings["close_action"] })
                 }
               >
-                <option value="ask">每次询问</option>
-                <option value="minimize">最小化到托盘</option>
-                <option value="exit">退出应用</option>
+                <option value="ask">{t("closePrompt.ask")}</option>
+                <option value="minimize">{t("closePrompt.minimize")}</option>
+                <option value="exit">{t("closePrompt.exit")}</option>
               </Select>
             </Row>
           </Card>
         );
       case "appearance":
         return (
-          <Card title="外观">
-            <Row label="主题" desc="深浅色跟随或固定">
+          <Card title={t("settings.catAppearance")}>
+            <Row label={t("theme.rowLabel")} desc={t("theme.rowDesc")}>
               <Select
                 value={settings?.theme ?? "system"}
                 className="w-36"
@@ -475,35 +487,52 @@ export function SettingsDialog({
               >
                 {THEME_OPTIONS.map((o) => (
                   <option key={o.value} value={o.value}>
-                    {o.label}
+                    {t(o.labelKey)}
                   </option>
                 ))}
+              </Select>
+            </Row>
+            <Row
+              label={t("settings.appearance.language")}
+              desc={t("settings.appearance.languageDesc")}
+            >
+              <Select
+                value={settings?.language ?? "system"}
+                className="w-36"
+                onChange={(e) =>
+                  patch({ language: e.target.value as AppSettings["language"] })
+                }
+              >
+                <option value="system">{t("settings.appearance.languageSystem")}</option>
+                {/* 语言名称按惯例以各自语言原文展示，不随界面语言翻译 */}
+                <option value="zh">简体中文</option>
+                <option value="en">English</option>
               </Select>
             </Row>
           </Card>
         );
       case "terminal":
         return (
-          <Card title="终端与日志">
-            <Row label="日志默认回看行数">
+          <Card title={t("settings.catTerminal")}>
+            <Row label={t("settings.logTail")}>
               <Select
                 value={String(settings?.logs_default_tail ?? 1000)}
                 className="w-36"
                 onChange={(e) => patch({ logs_default_tail: Number(e.target.value) })}
               >
-                <option value="100">100 行</option>
-                <option value="1000">1000 行</option>
-                <option value="5000">5000 行</option>
-                <option value="10000">10000 行</option>
+                <option value="100">{t("logs.tail", { n: 100 })}</option>
+                <option value="1000">{t("logs.tail", { n: 1000 })}</option>
+                <option value="5000">{t("logs.tail", { n: 5000 })}</option>
+                <option value="10000">{t("logs.tail", { n: 10000 })}</option>
               </Select>
             </Row>
-            <Row label="日志默认显示时间戳" desc="打开日志页时自动开启">
+            <Row label={t("settings.logTimestamps")} desc={t("settings.logTimestampsDesc")}>
               <Switch
                 checked={settings?.logs_timestamps ?? false}
                 onChange={(v) => patch({ logs_timestamps: v })}
               />
             </Row>
-            <Row label="终端默认 Shell" desc="Alpine 镜像的容器建议使用 sh 或 ash">
+            <Row label={t("settings.terminalShell")} desc={t("settings.terminalShellDesc")}>
               <Select
                 value={settings?.terminal_shell ?? "bash"}
                 className="w-36"
@@ -516,7 +545,7 @@ export function SettingsDialog({
                 <option value="ash">ash</option>
               </Select>
             </Row>
-            <Row label="终端字号" desc="重开终端页后生效">
+            <Row label={t("settings.terminalFont")} desc={t("settings.terminalFontDesc")}>
               <Select
                 value={String(settings?.terminal_font_size ?? 12.5)}
                 className="w-36"
@@ -529,7 +558,7 @@ export function SettingsDialog({
                 ))}
               </Select>
             </Row>
-            <Row label="终端回滚行数" desc="可向上翻看的历史行数上限">
+            <Row label={t("settings.terminalScrollback")} desc={t("settings.terminalScrollbackDesc")}>
               <Select
                 value={String(settings?.terminal_scrollback ?? 1000)}
                 className="w-36"
@@ -537,7 +566,7 @@ export function SettingsDialog({
               >
                 {[500, 1000, 5000, 10000].map((n) => (
                   <option key={n} value={String(n)}>
-                    {n} 行
+                    {t("logs.tail", { n })}
                   </option>
                 ))}
               </Select>
@@ -571,14 +600,14 @@ export function SettingsDialog({
         {/* 左侧：搜索 + 分类导航 */}
         <div className="flex w-52 shrink-0 flex-col border-r border-edge bg-panel2/40">
           <div className="p-3 pb-2">
-            <SearchInput value={search} onChange={setSearch} placeholder="搜索设置" />
+            <SearchInput value={search} onChange={setSearch} placeholder={t("settings.searchPlaceholder")} />
           </div>
           <nav className="flex-1 space-y-0.5 overflow-auto px-2 pb-3" data-no-drag>
-            {visible.map(({ key, label, icon: Icon }) => (
+            {visible.map(({ key, labelKey, icon: Icon }) => (
               <button
                 key={key}
                 type="button"
-                title={label}
+                title={t(labelKey)}
                 onClick={() => setActive(key)}
                 className={cn(
                   "flex w-full items-center gap-2.5 rounded-btn px-2.5 py-2 text-[13px] font-medium transition-colors duration-150",
@@ -591,12 +620,12 @@ export function SettingsDialog({
                   size={15}
                   className={cn("shrink-0", active === key ? "" : "text-fg3")}
                 />
-                <span className="min-w-0 flex-1 truncate text-left">{label}</span>
+                <span className="min-w-0 flex-1 truncate text-left">{t(labelKey)}</span>
               </button>
             ))}
             {visible.length === 0 && (
               <div className="px-2 py-6 text-center text-[12px] text-fg3">
-                没有匹配「{search.trim()}」的设置项
+                {t("settings.noMatch", { query: search.trim() })}
               </div>
             )}
           </nav>
@@ -606,10 +635,10 @@ export function SettingsDialog({
         <div className="flex min-w-0 flex-1 flex-col">
           <div className="flex h-12 shrink-0 items-center justify-between border-b border-edge px-4">
             <div className="min-w-0">
-              <h2 className="text-[14px] font-semibold text-fg">{activeDef.label}</h2>
-              <p className="truncate text-[11px] text-fg3">{activeDef.desc}</p>
+              <h2 className="text-[14px] font-semibold text-fg">{t(activeDef.labelKey)}</h2>
+              <p className="truncate text-[11px] text-fg3">{t(activeDef.descKey)}</p>
             </div>
-            <IconButton title="关闭（Esc）" onClick={onClose}>
+            <IconButton title={t("appLog.closeHint")} onClick={onClose}>
               <X size={16} />
             </IconButton>
           </div>

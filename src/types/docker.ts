@@ -164,7 +164,12 @@ export interface LogChunk {
 /** 终端输出帧（exec_attach 推送）：data 为正常输出流，ended 为会话结束通知 */
 export type ExecFrame =
   | { type: "data"; text: string }
-  | { type: "ended"; reason: string };
+  | {
+      type: "ended";
+      reason: string;
+      /** 稳定原因代号（"start_failed" | "conn_switched" | "conn_lost" | "process_exited"），逻辑判断用 code 而非比较 reason 文案 */
+      code: string;
+    };
 
 export interface DockerEventDto {
   kind: string;
@@ -191,6 +196,8 @@ export interface PullProgress {
   id: string | null;
   progress: string | null;
   error: string | null;
+  /** 取消哨兵：取消以稳定布尔表达，不比较 error 文案 */
+  cancelled: boolean;
   done: boolean;
 }
 

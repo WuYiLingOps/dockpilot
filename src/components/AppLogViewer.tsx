@@ -6,6 +6,8 @@ import { api } from "../lib/api";
 import { withDragRegion } from "../lib/drag";
 import { copyText } from "../lib/clipboard";
 import { formatBytes } from "../lib/format";
+import { t, useT } from "../lib/i18n";
+import type { MsgKey } from "../lib/i18n/zh";
 import type { AppLogEntry, LogFileMeta } from "../types/diagnostics";
 import { Button, CheckDot, IconButton, Input, SegmentedControl, Select } from "./ui";
 import { cn } from "./ui";
@@ -15,11 +17,11 @@ const POLL_MS = 2000;
 
 type LevelFilter = "all" | "info" | "warn" | "error";
 
-const LEVEL_FILTERS: { key: LevelFilter; label: string; min: number }[] = [
-  { key: "all", label: "全部", min: 5 },
-  { key: "info", label: "Info+", min: 3 },
-  { key: "warn", label: "警告", min: 2 },
-  { key: "error", label: "错误", min: 1 },
+const LEVEL_FILTERS: { key: LevelFilter; labelKey: MsgKey; min: number }[] = [
+  { key: "all", labelKey: "appLog.levelAll", min: 5 },
+  { key: "info", labelKey: "appLog.levelInfo", min: 3 },
+  { key: "warn", labelKey: "appLog.levelWarn", min: 2 },
+  { key: "error", labelKey: "appLog.levelError", min: 1 },
 ];
 
 /** 级别序数：ERROR=1 … TRACE=5（与后端 LogEntry 约定一致） */
@@ -39,9 +41,9 @@ function levelNum(level: string): number {
 }
 
 function fileLabel(name: string): string {
-  if (name === "dockpilot.log") return "当前会话";
+  if (name === "dockpilot.log") return t("appLog.currentSession");
   const label = name.replace(/^dockpilot_/, "").replace(/\.log$/, "").replace("_", " ");
-  return `归档 ${label}`;
+  return t("appLog.archive", { name: label });
 }
 
 function levelClass(level: string): string {
@@ -57,6 +59,7 @@ function levelClass(level: string): string {
  * 首屏尾部加载，跟随模式下按字节 offset 每 2s 增量拉取。
  */
 export function AppLogViewer({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const t = useT();
   const [files, setFiles] = useState<LogFileMeta[]>([]);
   const [file, setFile] = useState("dockpilot.log");
   const [level, setLevel] = useState<LevelFilter>("all");
@@ -93,7 +96,7 @@ export function AppLogViewer({ open, onClose }: { open: boolean; onClose: () => 
         setFiles(list);
         if (list[0]) setFile(list[0].name);
       })
-      .catch((e) => toast.error(`读取日志列表失败: ${e}`));
+      .catch((e) => toast.error(t("appLog.listFailed", { err: String(e) })));
   }, [open]);
 
   // 切换文件：重置并尾部加载
@@ -112,7 +115,7 @@ export function AppLogViewer({ open, onClose }: { open: boolean; onClose: () => 
         offsetRef.current = page?.next_offset ?? 0;
         setEntries(page?.entries ?? []);
       })
-      .catch((e) => toast.error(`读取日志失败: ${e}`))
+      .catch((e) => toast.error(t("appLog.readFailed", { err: String(e) })))
       .finally(() => alive && setLoading(false));
     return () => {
       alive = false;
@@ -167,16 +170,16 @@ export function AppLogViewer({ open, onClose }: { open: boolean; onClose: () => 
     if (exporting) return;
     try {
       const path = await save({
-        title: "导出使用日志",
+        title: t("appLog.exportDialogTitle"),
         defaultPath: file,
-        filters: [{ name: "日志文件", extensions: ["log", "txt"] }],
+        filters: [{ name: t("appLog.exportFilterName"), extensions: ["log", "txt"] }],
       });
       if (!path) return;
       setExporting(true);
       const size = await api.exportAppLogFile(file, path);
-      toast.success(`已导出 ${formatBytes(size)} 日志到 ${path}`);
+      toast.success(t("appLog.exported", { size: formatBytes(size), path }));
     } catch (e) {
-      toast.error(`导出日志失败: ${e}`);
+      toast.error(t("appLog.exportFailed", { err: String(e) }));
     } finally {
       setExporting(false);
     }
@@ -197,10 +200,10 @@ export function AppLogViewer({ open, onClose }: { open: boolean; onClose: () => 
         className="flex h-12 shrink-0 items-center justify-between border-b border-edge bg-panel pl-4 pr-3"
       >
         <div className="flex min-w-0 items-baseline gap-2.5">
-          <h1 className="truncate text-[15px] font-semibold text-fg">使用日志</h1>
-          <p className="truncate text-xs text-fg3">DockPilot 自身运行与操作记录</p>
+          <h1 className="truncate text-[15px] font-semibold text-fg">{t("appLog.title")}</h1>
+          <p className="truncate text-xs text-fg3">{t("appLog.subtitle")}</p>
         </div>
-        <IconButton title="关闭（Esc）" onClick={onClose} data-no-drag>
+        <IconButton title={t("appLog.closeHint")} onClick={onClose} data-no-drag>
           <X size={16} />
         </IconButton>
       </div>
@@ -222,7 +225,7 @@ export function AppLogViewer({ open, onClose }: { open: boolean; onClose: () => 
           ))}
         </Select>
         <SegmentedControl
-          options={LEVEL_FILTERS.map(({ key, label }) => ({ key, label }))}
+          options={LEVEL_FILTERS.map(({ key, labelKey }) => ({ key, label: t(labelKey) }))}
           value={level}
           onChange={setLevel}
         />
@@ -230,28 +233,28 @@ export function AppLogViewer({ open, onClose }: { open: boolean; onClose: () => 
           type="button"
           role="checkbox"
           aria-checked={follow}
-          title="自动滚动到最新日志"
+          title={t("appLog.followTitle")}
           onClick={() => setFollow(!follow)}
           className="inline-flex cursor-pointer select-none items-center gap-1.5 text-[12px] text-fg2 hover:text-fg"
         >
           <CheckDot checked={follow} />
-          跟随
+          {t("appLog.follow")}
         </button>
         <Input
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
-          placeholder="过滤关键字"
+          placeholder={t("appLog.filterPlaceholder")}
           className="ml-auto h-7 w-44"
         />
         <Button
           variant="ghost"
           className="h-7"
-          title="把当前会话/归档的日志文件复制到所选位置"
+          title={t("appLog.exportTitle")}
           disabled={exporting}
           onClick={() => void exportLog()}
         >
           <Download size={14} />
-          导出
+          {t("appLog.export")}
         </Button>
       </div>
 
@@ -266,16 +269,16 @@ export function AppLogViewer({ open, onClose }: { open: boolean; onClose: () => 
         className="min-h-0 flex-1 overflow-auto px-4 py-3 font-mono text-[12px] leading-5"
       >
         {loading ? (
-          <div className="pt-8 text-center text-fg3">正在读取日志…</div>
+          <div className="pt-8 text-center text-fg3">{t("appLog.loading")}</div>
         ) : shown.length === 0 ? (
           <div className="pt-8 text-center text-fg3">
-            {entries.length === 0 ? "暂无日志" : "没有匹配过滤条件的条目"}
+            {entries.length === 0 ? t("appLog.empty") : t("appLog.noMatch")}
           </div>
         ) : (
           shown.map((e, i) => (
             <div
               key={i}
-              title="点击复制该条日志"
+              title={t("appLog.copyHint")}
               onClick={() =>
                 void copyText(`[${e.ts}][${e.target}][${e.level}] ${e.message}`)
               }
@@ -293,10 +296,10 @@ export function AppLogViewer({ open, onClose }: { open: boolean; onClose: () => 
 
       <div className="flex h-8 shrink-0 items-center gap-3 border-t border-edge bg-panel px-4 text-[11px] text-fg3">
         <span>
-          {shown.length}/{entries.length} 条
-          {entries.length >= MAX_LINES ? `（内存上限 ${MAX_LINES} 条，完整内容请导出）` : ""}
+          {t("appLog.counts", { shown: shown.length, total: entries.length })}
+          {entries.length >= MAX_LINES ? t("appLog.memoryCap", { n: MAX_LINES }) : ""}
         </span>
-        <span className="ml-auto">{follow ? "跟随中 · 每 2s 刷新" : "已暂停跟随"}</span>
+        <span className="ml-auto">{follow ? t("appLog.following") : t("appLog.pausedFollow")}</span>
       </div>
     </div>
   );

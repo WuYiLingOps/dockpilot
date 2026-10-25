@@ -1,6 +1,7 @@
 import { listen } from "@tauri-apps/api/event";
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
+import { useT } from "../lib/i18n";
 import type { CloseAction } from "../types/settings";
 import { Button, CheckDot, Modal } from "./ui";
 
@@ -14,6 +15,7 @@ export function ClosePromptDialog() {
   const [open, setOpen] = useState(false);
   const [remember, setRemember] = useState(true);
   const [busy, setBusy] = useState(false);
+  const t = useT();
 
   useEffect(() => {
     let unlisten: (() => void) | undefined;
@@ -38,27 +40,27 @@ export function ClosePromptDialog() {
   return (
     <Modal
       open={open}
-      title="关闭 DockPilot"
+      title={t("closePrompt.title")}
       onClose={() => setOpen(false)}
       footer={
         <>
           <Button variant="outline" disabled={busy} onClick={() => decide("exit")}>
-            退出应用
+            {t("closePrompt.exit")}
           </Button>
           <Button variant="primary" disabled={busy} onClick={() => decide("minimize")}>
-            最小化到托盘
+            {t("closePrompt.minimize")}
           </Button>
         </>
       }
     >
-      <p>最小化到托盘后应用在后台运行，容器异常桌面通知不受影响，可随时从托盘恢复窗口或退出。</p>
+      <p>{t("closePrompt.desc")}</p>
       <button
         type="button"
         onClick={() => setRemember(!remember)}
         className="mt-4 flex items-center gap-2 text-left text-[12px] text-fg2 transition-colors hover:text-fg"
       >
         <CheckDot checked={remember} />
-        记住我的选择（可随时在「设置 → 后台与关闭」中修改）
+        {t("closePrompt.remember")}
       </button>
     </Modal>
   );

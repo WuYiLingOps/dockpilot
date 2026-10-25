@@ -14,6 +14,7 @@ import type { AppSettings, RegistryProfile } from "../../types/settings";
 import { pickSyncedSettings, type SyncPayload } from "../../types/sync";
 import { api } from "../api";
 import { applog } from "../applog";
+import { t } from "../i18n";
 
 /** 上传/比较用的载荷视图：剔除设备本地字段 */
 export function toSyncPayload(settings: AppSettings): SyncPayload {
@@ -41,7 +42,7 @@ export async function buildSyncPayload(settings: AppSettings): Promise<SyncPaylo
     return { ...payload, ssh_credentials };
   } catch (e) {
     applog.warn(
-      `导出 SSH 凭证失败，本次同步不携带凭证: ${e instanceof Error ? e.message : String(e)}`,
+      `${t("sync.sshExportFailed")}: ${e instanceof Error ? e.message : String(e)}`,
     );
     return payload;
   }

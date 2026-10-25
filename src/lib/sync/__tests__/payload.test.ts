@@ -6,6 +6,7 @@ import { applySyncPayload, payloadFingerprint, toSyncPayload } from "../payload"
 
 const localSettings = (): AppSettings => ({
   theme: "dark",
+  language: "system",
   docker_socket: "/legacy/sock",
   connections: [
     { id: "local", name: "本地", kind: "local", socket_path: "", host: "", cert_path: "", key_path: "", key_id: "", identity_id: "", remote_socket: "", auth: "key", secret_backend: "" },

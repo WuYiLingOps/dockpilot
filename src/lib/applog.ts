@@ -4,6 +4,7 @@
  * 供设置 → 故障诊断的「使用日志查看器」浏览。
  */
 import { error as pluginError, info as pluginInfo, warn as pluginWarn } from "@tauri-apps/plugin-log";
+import { t } from "./i18n";
 
 function normalize(e: unknown): string {
   if (e instanceof Error) return e.message;
@@ -30,11 +31,13 @@ export function installGlobalErrorHandlers() {
     return true;
   };
   window.addEventListener("error", (e) => {
-    const msg = `未捕获异常: ${e.message} (${e.filename}:${e.lineno})`;
+    const msg = t("log.uncaughtException", {
+      msg: `${e.message} (${e.filename}:${e.lineno})`,
+    });
     if (remember(msg)) applog.error(msg);
   });
   window.addEventListener("unhandledrejection", (e) => {
-    const msg = `未处理的 Promise 拒绝: ${normalize(e.reason)}`;
+    const msg = t("log.unhandledRejection", { reason: normalize(e.reason) });
     if (remember(msg)) applog.error(msg);
   });
 }

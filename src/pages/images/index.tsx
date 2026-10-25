@@ -14,6 +14,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { toast } from "sonner";
 import { api } from "../../lib/api";
+import { useT } from "../../lib/i18n";
 import { useSettings } from "../../lib/settings";
 import {
   formatBytes,
@@ -55,6 +56,7 @@ export function Images({
   onSearch: (v: string) => void;
 }) {
   const qc = useQueryClient();
+  const t = useT();
   const [pendingDelete, setPendingDelete] = useState<ImageDto | null>(null);
   const [forceDelete, setForceDelete] = useState(false);
   const [pullOpen, setPullOpen] = useState(false);
@@ -97,12 +99,12 @@ export function Images({
     mutationFn: (v: { img: ImageDto; force: boolean }) =>
       api.removeImage(v.img.id, v.force),
     onSuccess: () => {
-      toast.success("镜像已删除");
+      toast.success(t("img.removed"));
       setPendingDelete(null);
       void qc.invalidateQueries({ queryKey: ["images"] });
       void qc.invalidateQueries({ queryKey: ["dockerInfo"] });
     },
-    onError: (e) => toast.error(`删除镜像失败: ${e}`),
+    onError: (e) => toast.error(t("img.removeFailed", { err: String(e) })),
   });
 
   const list = query.data ?? [];
@@ -165,9 +167,9 @@ export function Images({
     let path: string | null;
     try {
       path = await save({
-        title: "导出镜像",
+        title: t("img.exportDialogTitle"),
         defaultPath: defaultExportName(imgs),
-        filters: [{ name: "tar 归档", extensions: ["tar"] }],
+        filters: [{ name: t("img.tarFilter"), extensions: ["tar"] }],
       });
     } catch {
       return; // 非桌面环境（浏览器 mock）无保存对话框
@@ -180,7 +182,7 @@ export function Images({
       label:
         imgs.length === 1
           ? imgs[0].tags[0] || shortId(imgs[0].id)
-          : `${imgs.length} 个镜像`,
+          : t("img.nImages", { n: imgs.length }),
       // 批量导出因共享层去重，tar 总量小于大小之和，无法预估百分比
       total:
         imgs.length === 1 && imgs[0].tags.length > 0 ? imgs[0].size : null,
@@ -191,9 +193,9 @@ export function Images({
       if (p.done) {
         exportCancelRef.current = null;
         setExportState(null);
-        if (p.cancelled) toast.info("导出已取消");
-        else if (p.error) toast.error(`导出镜像失败: ${p.error}`);
-        else toast.success(`镜像已导出到 ${path}`);
+        if (p.cancelled) toast.info(t("img.exportCancelled"));
+        else if (p.error) toast.error(t("img.exportFailed", { err: p.error }));
+        else toast.success(t("img.exportedTo", { path }));
       }
     });
   };
@@ -211,7 +213,7 @@ export function Images({
     try {
       file = await open({
         multiple: false,
-        filters: [{ name: "tar 归档", extensions: ["tar"] }],
+        filters: [{ name: t("img.tarFilter"), extensions: ["tar"] }],
       });
     } catch {
       return; // 非桌面环境（浏览器 mock）无文件对话框
@@ -231,10 +233,10 @@ export function Images({
       if (p.done) {
         importCancelRef.current = null;
         setImportPath(null);
-        if (p.error === "已取消") toast.info("导入已取消");
-        else if (p.error) toast.error(`导入镜像失败: ${p.error}`);
+        if (p.cancelled) toast.info(t("img.importCancelled"));
+        else if (p.error) toast.error(t("img.importFailed", { err: p.error }));
         else {
-          toast.success("镜像导入完成");
+          toast.success(t("img.importDone"));
           void qc.invalidateQueries({ queryKey: ["images"] });
           void qc.invalidateQueries({ queryKey: ["dockerInfo"] });
         }
@@ -256,15 +258,17 @@ export function Images({
 
   return (
     <>
-      <PageHeader title="镜像" desc={`${list.length} 个本地镜像`}>
+      <PageHeader title={t("nav.images")} desc={t("img.pageDesc", { n: list.length })}>
         <SearchInput value={search} onChange={onSearch} className="w-44" />
         <Select
           value={groupFilter}
           onChange={(e) => setGroupFilter(e.target.value)}
           className="w-52"
-          title="按镜像来源筛选"
+          title={t("img.groupFilterTitle")}
         >
-          <option value="">全部来源（{list.length}）</option>
+          <option value="">
+            {t("img.allSources", { n: list.length })}
+          </option>
           {groups.map(([g, count]) => (
             <option key={g} value={g}>
               {imageGroupLabel(g)}（{count}）
@@ -273,14 +277,14 @@ export function Images({
         </Select>
         <Button variant="outline" onClick={() => void startImport()}>
           <FileUp size={15} />
-          导入镜像
+          {t("img.importImage")}
         </Button>
         <Button variant="primary" onClick={() => setPullOpen(true)}>
           <Download size={15} />
-          拉取镜像
+          {t("img.pullImage")}
         </Button>
         <IconButton
-          title="刷新"
+          title={t("common.refresh")}
           onClick={() => void query.refetch()}
           className="h-8 w-8"
         >
@@ -297,11 +301,13 @@ export function Images({
       ) : filtered.length === 0 ? (
         <EmptyState
           icon={<ImageIcon size={40} strokeWidth={1.5} />}
-          title={keyword || groupFilter ? "没有匹配的镜像" : "本地没有镜像"}
+          title={
+            keyword || groupFilter ? t("img.emptySearch") : t("img.empty")
+          }
           desc={
             keyword || groupFilter
-              ? "换个关键字或切换来源筛选试试"
-              : "点击右上角「拉取镜像」获取一个镜像"
+              ? t("img.emptySearchHint")
+              : t("img.emptyHint")
           }
         />
       ) : (
@@ -312,12 +318,16 @@ export function Images({
                 className={`${GRID} h-8 border-b border-edge bg-panel2/60 px-4 text-[11px] font-medium text-fg3`}
               >
                 <div>
-                  <CheckDot checked={allVisibleSelected} onClick={toggleAll} title="全选" />
+                  <CheckDot
+                    checked={allVisibleSelected}
+                    onClick={toggleAll}
+                    title={t("img.selectAll")}
+                  />
                 </div>
-                <div>标签</div>
-                <div>镜像 ID</div>
-                <div>大小</div>
-                <div>创建时间</div>
+                <div>{t("img.thTags")}</div>
+                <div>{t("img.thId")}</div>
+                <div>{t("img.thSize")}</div>
+                <div>{t("containers.thCreated")}</div>
                 <div />
               </div>
               {filtered.map((img) => {
@@ -333,7 +343,9 @@ export function Images({
                       <CheckDot
                         checked={selected.has(img.id)}
                         onClick={() => toggleOne(img.id)}
-                        title={`选择 ${main || shortId(img.id)}`}
+                        title={t("img.selectOne", {
+                          name: main || shortId(img.id),
+                        })}
                       />
                     </div>
                     <div className="min-w-0">
@@ -347,10 +359,10 @@ export function Images({
                         <button
                           type="button"
                           onClick={() => setTagsView(img)}
-                          title="查看并管理该镜像的全部标签"
+                          title={t("img.viewAllTags")}
                           className="text-left text-[11px] text-fg3 underline decoration-dotted underline-offset-2 transition-colors hover:text-fg2"
                         >
-                          还有 {rest.length} 个标签
+                          {t("img.moreTags", { n: rest.length })}
                         </button>
                       )}
                     </div>
@@ -363,8 +375,8 @@ export function Images({
                       <IconButton
                         title={
                           img.tags.length === 0
-                            ? "该镜像没有标签，无法按名运行"
-                            : `用 ${main} 创建并运行容器`
+                            ? t("img.noTagRun")
+                            : t("img.runTitle", { name: main })
                         }
                         disabled={img.tags.length === 0}
                         onClick={() => setRunImage(main)}
@@ -372,7 +384,9 @@ export function Images({
                         <Play size={14} />
                       </IconButton>
                       <IconButton
-                        title={`为 ${main || shortId(img.id)} 添加标签`}
+                        title={t("img.tagOneTitle", {
+                          name: main || shortId(img.id),
+                        })}
                         onClick={() => setTagTarget(img)}
                       >
                         <Tag size={14} />
@@ -380,8 +394,8 @@ export function Images({
                       <IconButton
                         title={
                           img.tags.length === 0
-                            ? "该镜像没有标签，无法推送"
-                            : `推送 ${main} 到镜像仓库`
+                            ? t("img.noTagPush")
+                            : t("img.pushTitle", { name: main })
                         }
                         disabled={img.tags.length === 0}
                         onClick={() => setPushTarget(img)}
@@ -391,15 +405,15 @@ export function Images({
                       <IconButton
                         title={
                           img.tags.length === 0
-                            ? "导出为无标签镜像归档"
-                            : `导出 ${main} 为 tar 归档`
+                            ? t("img.exportDangling")
+                            : t("img.exportOneTitle", { name: main })
                         }
                         onClick={() => void startExport([img])}
                       >
                         <FileDown size={14} />
                       </IconButton>
                       <IconButton
-                        title="删除"
+                        title={t("containers.actRemove")}
                         disabled={remove.isPending}
                         className="hover:bg-err/10 hover:text-err"
                         onClick={() => {
@@ -422,11 +436,11 @@ export function Images({
               data-no-drag
             >
               <span className="text-[12px] text-fg3">
-                已选 {selected.size} 个镜像
+                {t("img.selectedCount", { n: selected.size })}
               </span>
               <div className="flex items-center gap-2">
                 <Button variant="outline" onClick={() => setSelected(new Set())}>
-                  取消选择
+                  {t("img.clearSelection")}
                 </Button>
                 <Button
                   variant="outline"
@@ -435,18 +449,18 @@ export function Images({
                     const tagged = selectedImages.filter((i) => i.tags.length > 0);
                     const skipped = selectedImages.length - tagged.length;
                     if (tagged.length === 0) {
-                      toast.error("所选镜像均无标签，无法推送（可先在标签管理中打标签）");
+                      toast.error(t("img.noneTaggedForPush"));
                       return;
                     }
                     if (skipped > 0) {
-                      toast.info(`${skipped} 个无标签镜像已跳过`);
+                      toast.info(t("img.skippedUntagged", { n: skipped }));
                     }
                     setPushList(tagged);
                     setBatchPushOpen(true);
                   }}
                 >
                   <CloudUpload size={14} />
-                  推送所选
+                  {t("img.pushSelected")}
                 </Button>
                 <Button
                   variant="primary"
@@ -454,7 +468,7 @@ export function Images({
                   onClick={() => void startExport(selectedImages)}
                 >
                   <FileDown size={14} />
-                  导出所选
+                  {t("img.exportSelected")}
                 </Button>
               </div>
             </div>
@@ -464,12 +478,12 @@ export function Images({
 
       <Modal
         open={pendingDelete !== null}
-        title="删除镜像"
+        title={t("img.deleteConfirmTitle")}
         onClose={() => setPendingDelete(null)}
         footer={
           <>
             <Button variant="outline" onClick={() => setPendingDelete(null)}>
-              取消
+              {t("common.cancel")}
             </Button>
             <Button
               variant="danger"
@@ -478,21 +492,21 @@ export function Images({
                 pendingDelete && remove.mutate({ img: pendingDelete, force: forceDelete })
               }
             >
-              确认删除
+              {t("containers.confirmDelete")}
             </Button>
           </>
         }
       >
         <p>
-          确定删除镜像{" "}
+          {t("img.deleteConfirmBefore")}{" "}
           <span className="font-mono text-fg">
             {pendingDelete?.tags[0] || shortId(pendingDelete?.id ?? "")}
           </span>{" "}
-          吗？
+          {t("img.deleteConfirmAfter")}
         </p>
         <div className="mt-3">
           <Checkbox
-            label="强制删除（被容器占用的镜像需要勾选）"
+            label={t("img.forceDelete")}
             checked={forceDelete}
             onChange={setForceDelete}
           />
@@ -503,11 +517,11 @@ export function Images({
 
       <Modal
         open={exportState !== null}
-        title="导出镜像"
+        title={t("img.exportDialogTitle")}
         onClose={cancelExport}
         footer={
           <Button variant="outline" onClick={cancelExport}>
-            取消导出
+            {t("img.cancelExport")}
           </Button>
         }
       >
@@ -533,7 +547,10 @@ export function Images({
                   />
                 </div>
                 <div className="text-[11px] tabular-nums text-fg3">
-                  已写入 {formatBytes(exportWritten)} / {formatBytes(exportState.total)}
+                  {t("img.exportProgress", {
+                    written: formatBytes(exportWritten),
+                    total: formatBytes(exportState.total),
+                  })}
                 </div>
               </>
             ) : (
@@ -542,13 +559,13 @@ export function Images({
                   <div className="h-full w-1/3 animate-pulse rounded-full bg-accent" />
                 </div>
                 <div className="text-[11px] tabular-nums text-fg3">
-                  已写入 {formatBytes(exportWritten)}
+                  {t("img.exportWritten", { written: formatBytes(exportWritten) })}
                 </div>
               </>
             )}
             {exportState.dangling && (
               <div className="text-[11px] leading-4 text-warn">
-                所选镜像中包含无标签镜像，导入后将显示为无标签（&lt;none&gt;）镜像
+                {t("img.exportDanglingNote")}
               </div>
             )}
           </div>
@@ -557,11 +574,11 @@ export function Images({
 
       <Modal
         open={importPath !== null}
-        title="导入镜像"
+        title={t("img.importImage")}
         onClose={closeImport}
         footer={
           <Button variant="outline" onClick={closeImport}>
-            取消导入
+            {t("img.cancelImport")}
           </Button>
         }
       >
@@ -571,7 +588,7 @@ export function Images({
           className="mt-3 h-44 overflow-auto rounded-ctl border border-edge bg-panel2 p-2.5 font-mono text-[11px] leading-4 text-fg2"
         >
           {importLines.length === 0 ? (
-            <div className="text-fg3">正在上传镜像归档…</div>
+            <div className="text-fg3">{t("img.uploadingArchive")}</div>
           ) : (
             importLines.map((l, i) => (
               <div key={i} className="whitespace-pre-wrap break-all">

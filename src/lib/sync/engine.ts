@@ -23,6 +23,8 @@
 
 import { getAppVersion } from "../platform";
 import { applog } from "../applog";
+import { t } from "../i18n";
+import type { MsgKey } from "../i18n/zh";
 import type { AppSettings } from "../../types/settings";
 import type {
   ConflictInfo,
@@ -464,7 +466,7 @@ interface UploadOpts {
 /** 加密并上传本地载荷；过收缩护栏；成功后先写 base 再写锚点 */
 async function uploadPayload(payload: SyncPayload, opts: UploadOpts): Promise<SyncResult> {
   if (!masterPassword) {
-    return { success: false, action: "none", error: "同步密码未解锁" };
+    return { success: false, action: "none", error: t("sync.locked") };
   }
 
   const shrink = detectSuspiciousShrink(payload, opts.base, null);
@@ -527,13 +529,13 @@ export interface SyncOptions {
 
 export async function syncNow(settings: AppSettings, opts: SyncOptions): Promise<SyncResult> {
   if (!accessToken) {
-    return { success: false, action: "none", error: "未连接 GitHub" };
+    return { success: false, action: "none", error: t("sync.notConnected") };
   }
   if (!masterPassword) {
-    return { success: false, action: "none", error: "同步密码未解锁" };
+    return { success: false, action: "none", error: t("sync.locked") };
   }
   if (state.syncing) {
-    return { success: false, action: "none", error: "同步正在进行中" };
+    return { success: false, action: "none", error: t("sync.syncInProgress") };
   }
 
   const seq = ++syncSeq;
@@ -555,37 +557,37 @@ export async function syncNow(settings: AppSettings, opts: SyncOptions): Promise
     state.syncState = "ERROR";
     state.lastError = message;
     notify();
-    applog.error(`云同步异常（${opts.reason}）：${message}`);
+    applog.error(t("log.syncException", { reason: opts.reason, message }));
     return { success: false, action: "none", error: message };
   }
 }
 
-const SYNC_ACTION_LABEL: Record<SyncResult["action"], string> = {
-  upload: "已上传本地数据",
-  download: "已拉取云端数据",
-  merge: "已合并云端数据",
-  none: "云端与本地一致",
+const SYNC_ACTION_KEY: Record<SyncResult["action"], MsgKey> = {
+  upload: "sync.localPushed",
+  download: "sync.downloaded",
+  merge: "sync.merged",
+  none: "sync.alreadyInSync",
 };
 
 /** 同步结果写入应用日志：成功 Info / 失败 Error / 需用户决策（冲突、护栏、空库确认）Warn */
 function logSyncOutcome(reason: SyncOptions["reason"], r: SyncResult): void {
   if (r.success) {
     applog.info(
-      `云同步完成（${reason}）：${SYNC_ACTION_LABEL[r.action]}${r.version != null ? `（v${r.version}）` : ""}`,
+      `${t("sync.logDone", { reason })}: ${t(SYNC_ACTION_KEY[r.action])}${r.version != null ? ` (v${r.version})` : ""}`,
     );
     return;
   }
   if (!r.error) return;
   if (r.conflictDetected || r.shrinkBlocked || r.error === "empty-vault-guard") {
-    applog.warn(`云同步暂停（${reason}）：${r.error}`);
+    applog.warn(`${t("sync.logPaused", { reason })}: ${r.error}`);
   } else {
-    applog.error(`云同步失败（${reason}）：${r.error}`);
+    applog.error(`${t("sync.logFailed", { reason })}: ${r.error}`);
   }
 }
 
 async function runSync(settings: AppSettings, opts: SyncOptions, seq: number): Promise<SyncResult> {
   const assertCurrent = () => {
-    if (seq !== syncSeq) throw new Error("同步已被更新的操作取代");
+    if (seq !== syncSeq) throw new Error(t("sync.superseded"));
   };
 
   // 1. 确保 Gist 可用
@@ -686,7 +688,9 @@ async function runSync(settings: AppSettings, opts: SyncOptions, seq: number): P
       success: false,
       action: "none",
       conflictDetected: true,
-      error: `解密失败（同步密码可能不同）: ${decryptError instanceof Error ? decryptError.message : String(decryptError)}`,
+      error: t("sync.decryptFailedHint", {
+        err: decryptError instanceof Error ? decryptError.message : String(decryptError),
+      }),
     };
   }
   assertCurrent();
@@ -775,13 +779,13 @@ export async function resolveConflictUseRemote(
 ): Promise<SyncResult> {
   const file = conflictRemoteFile;
   if (!file || !accessToken) {
-    return { success: false, action: "none", error: "无冲突的远端数据" };
+    return { success: false, action: "none", error: t("sync.noConflictRemote") };
   }
   let payload: SyncPayload;
   try {
     payload = await decryptPayload(file, cloudPassword);
   } catch {
-    return { success: false, action: "none", error: "云端密码不正确，解密失败" };
+    return { success: false, action: "none", error: t("sync.remotePasswordWrong") };
   }
   try {
     // 对齐云端密码：下次上传以新密码加密，另一台设备可继续解密
@@ -817,7 +821,7 @@ export async function resolveConflictUseLocal(settings: AppSettings): Promise<Sy
 export async function restoreRemoteFromBlocked(applyLocal: (p: SyncPayload) => Promise<void>): Promise<SyncResult> {
   const file = blockedRemoteFile;
   if (!file || !accessToken) {
-    return { success: false, action: "none", error: "无远端数据可恢复" };
+    return { success: false, action: "none", error: t("sync.noBlockedRemote") };
   }
   try {
     const payload = await decryptPayload(file, masterPassword!);
@@ -837,10 +841,10 @@ export async function restoreRemoteFromBlocked(applyLocal: (p: SyncPayload) => P
  * baseVersion 未指定时优先用最近下载的远端版本，避免云端版本号回退。 */
 export async function forcePushLocal(settings: AppSettings, baseVersion?: number): Promise<SyncResult> {
   if (!accessToken || !masterPassword) {
-    return { success: false, action: "none", error: "未连接或未解锁" };
+    return { success: false, action: "none", error: t("sync.notConnectedOrLocked") };
   }
   if (state.syncing) {
-    return { success: false, action: "none", error: "同步正在进行中" };
+    return { success: false, action: "none", error: t("sync.syncInProgress") };
   }
   ++syncSeq;
   state.syncing = true;
@@ -864,7 +868,7 @@ export async function forcePushLocal(settings: AppSettings, baseVersion?: number
       state.emptyVaultPending = null;
     } else {
       state.syncState = "ERROR";
-      state.lastError = result.error ?? "推送失败";
+      state.lastError = result.error ?? t("sync.pushFailed");
     }
     notify();
     return result;
@@ -881,7 +885,7 @@ export async function forcePushLocal(settings: AppSettings, baseVersion?: number
 export async function confirmEmptyVaultRestore(applyLocal: (p: SyncPayload) => Promise<void>): Promise<SyncResult> {
   const pending = state.emptyVaultPending;
   if (!pending) {
-    return { success: false, action: "none", error: "无待恢复数据" };
+    return { success: false, action: "none", error: t("sync.noPendingRestore") };
   }
   state.emptyVaultPending = null;
   await adoptRemote(pending.payload, pending.remoteFile, state.gistId ?? "", applyLocal);
@@ -935,20 +939,18 @@ export async function fetchHistory(): Promise<Array<{ sha: string; date: number 
 /** 下载并解密指定修订，返回摘要预览（不含恢复） */
 export async function previewRevision(sha: string): Promise<RevisionPreview> {
   if (!accessToken || !masterPassword) {
-    throw new Error("需先连接 GitHub 并解锁同步密码");
+    throw new Error(t("sync.requiresSetup"));
   }
   const gistId = await ensureGistId();
-  if (!gistId) throw new Error("未找到同步 Gist");
+  if (!gistId) throw new Error(t("sync.gistMissingShort"));
   const file = await gist.downloadGistRevision(accessToken, gistId, sha);
-  if (!file) throw new Error("该修订不包含同步文件");
+  if (!file) throw new Error(t("sync.revisionNoFile"));
   let payload: SyncPayload;
   try {
     payload = await decryptPayload(file, masterPassword);
   } catch {
     // WebKit 的解密失败报错是含混的 OperationError，翻译成可行动的提示
-    throw new Error(
-      "解密失败：该修订可能使用了与当前不同的同步密码（修改密码只影响之后的上传），无法预览或恢复",
-    );
+    throw new Error(t("sync.revisionDecryptFailedPreview"));
   }
   return {
     sha,
@@ -971,17 +973,17 @@ export async function restoreRevision(
   applyLocal: (p: SyncPayload) => Promise<void>,
 ): Promise<SyncResult> {
   if (!accessToken || !masterPassword) {
-    return { success: false, action: "none", error: "未连接 GitHub 或同步密码未解锁" };
+    return { success: false, action: "none", error: t("sync.notConnectedOrLocked") };
   }
   if (state.syncing) {
-    return { success: false, action: "none", error: "同步正在进行中" };
+    return { success: false, action: "none", error: t("sync.syncInProgress") };
   }
   if (state.syncState === "CONFLICT" || state.syncState === "BLOCKED") {
-    return { success: false, action: "none", error: "请先处理当前的冲突/阻塞状态" };
+    return { success: false, action: "none", error: t("sync.resolveConflictFirst") };
   }
   const gistId = await ensureGistId();
   if (!gistId) {
-    return { success: false, action: "none", error: "未找到同步 Gist" };
+    return { success: false, action: "none", error: t("sync.gistMissingShort") };
   }
 
   ++syncSeq;
@@ -991,15 +993,13 @@ export async function restoreRevision(
   try {
     const file = await gist.downloadGistRevision(accessToken, gistId, sha);
     if (!file) {
-      throw new Error("该修订不包含同步文件");
+      throw new Error(t("sync.revisionNoFile"));
     }
     let payload: SyncPayload;
     try {
       payload = await decryptPayload(file, masterPassword);
     } catch {
-      throw new Error(
-        "解密失败：该修订可能使用了与当前不同的同步密码（修改密码只影响之后的上传），无法恢复",
-      );
+      throw new Error(t("sync.revisionDecryptFailed"));
     }
 
     // 以当前云端版本 + 1 作为恢复后的新版本推送（追加式，历史不被改写）。

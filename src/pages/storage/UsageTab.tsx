@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { Database, Eraser } from "lucide-react";
 import { formatBytes, rfc3339ToUnix, shortId, timeAgo } from "../../lib/format";
+import { useT } from "../../lib/i18n";
 import type { SystemDfDto } from "../../types/docker";
 import {
   Badge,
@@ -13,12 +14,12 @@ import { Panel, StatCell } from "./shared";
 
 type UsageScope = "all" | "containers" | "images" | "volumes" | "cache";
 
-const USAGE_SCOPES: { key: UsageScope; label: string }[] = [
-  { key: "all", label: "全部" },
-  { key: "images", label: "镜像" },
-  { key: "containers", label: "容器" },
-  { key: "volumes", label: "存储卷" },
-  { key: "cache", label: "构建缓存" },
+const USAGE_SCOPES: { key: UsageScope; labelKey: "st.usageAll" | "st.usageImages" | "st.usageContainers" | "st.usageVolumes" | "st.usageCache" }[] = [
+  { key: "all", labelKey: "st.usageAll" },
+  { key: "images", labelKey: "st.usageImages" },
+  { key: "containers", labelKey: "st.usageContainers" },
+  { key: "volumes", labelKey: "st.usageVolumes" },
+  { key: "cache", labelKey: "st.usageCache" },
 ];
 
 export function UsageTab({
@@ -30,6 +31,7 @@ export function UsageTab({
   dfError: string | null;
   onRetry: () => void;
 }) {
+  const t = useT();
   const [scope, setScope] = useState<UsageScope>("all");
 
   const treemapItems = useMemo(() => {
@@ -62,33 +64,39 @@ export function UsageTab({
     <div className="flex-1 space-y-3 overflow-auto p-4 pt-2">
       <Panel
         icon={Eraser}
-        title="占用分布"
-        extra={<SegmentedControl options={USAGE_SCOPES} value={scope} onChange={setScope} />}
+        title={t("st.usageTitle")}
+        extra={
+          <SegmentedControl
+            options={USAGE_SCOPES.map(({ key, labelKey }) => ({ key, label: t(labelKey) }))}
+            value={scope}
+            onChange={setScope}
+          />
+        }
       >
         <Treemap items={treemapItems} height={250} />
         <div className="mt-4 grid grid-cols-2 content-start gap-x-8 gap-y-5 sm:grid-cols-4">
           <StatCell
-            label="镜像"
+            label={t("st.usageImages")}
             value={formatBytes(dfd.images_size)}
-            sub={`${dfd.images_count} 个`}
+            sub={t("st.nItems", { n: dfd.images_count })}
             color={CHART_COLORS[0]}
           />
           <StatCell
-            label="容器"
+            label={t("st.usageContainers")}
             value={formatBytes(dfd.containers_size)}
-            sub={`${dfd.containers_count} 个`}
+            sub={t("st.nItems", { n: dfd.containers_count })}
             color={CHART_COLORS[1]}
           />
           <StatCell
-            label="存储卷"
+            label={t("st.usageVolumes")}
             value={formatBytes(dfd.volumes_size)}
-            sub={`${dfd.volumes_count} 个 · 不含挂载目录`}
+            sub={t("st.nItemsNoBind", { n: dfd.volumes_count })}
             color={CHART_COLORS[2]}
           />
           <StatCell
-            label="构建缓存"
+            label={t("st.usageCache")}
             value={formatBytes(dfd.build_cache_size)}
-            sub={`${dfd.build_cache.length} 条`}
+            sub={t("st.nEntries", { n: dfd.build_cache.length })}
             color={CHART_COLORS[3]}
           />
         </div>
@@ -96,15 +104,18 @@ export function UsageTab({
 
       <Panel
         icon={Database}
-        title="构建缓存明细"
+        title={t("st.cacheDetail")}
         extra={
           <span className="text-[11px] text-fg3">
-            共 {dfd.build_cache.length} 条 · {formatBytes(dfd.build_cache_size)}
+            {t("st.cacheDetailTotal", {
+              n: dfd.build_cache.length,
+              size: formatBytes(dfd.build_cache_size),
+            })}
           </span>
         }
       >
         {dfd.build_cache.length === 0 ? (
-          <p className="py-4 text-center text-[12px] text-fg3">暂无构建缓存</p>
+          <p className="py-4 text-center text-[12px] text-fg3">{t("st.noCache")}</p>
         ) : (
           <div className="space-y-1">
             {dfd.build_cache.map((b) => (
@@ -116,8 +127,8 @@ export function UsageTab({
                   {b.description || shortId(b.id)}
                 </span>
                 <Badge>{b.typ || "cache"}</Badge>
-                {b.shared && <Badge tone="accent">共享</Badge>}
-                {b.in_use ? <Badge tone="ok">使用中</Badge> : <Badge tone="warn">未使用</Badge>}
+                {b.shared && <Badge tone="accent">{t("st.shared")}</Badge>}
+                {b.in_use ? <Badge tone="ok">{t("st.inUse")}</Badge> : <Badge tone="warn">{t("st.unused")}</Badge>}
                 <span className="w-16 shrink-0 text-right text-[11px] text-fg3">
                   {timeAgo(rfc3339ToUnix(b.created_at))}
                 </span>
@@ -129,7 +140,7 @@ export function UsageTab({
           </div>
         )}
         <div className="mt-3 border-t border-edge/60 pt-3 text-[11px] text-fg3">
-          可在「空间清理」页回收未使用的构建缓存与镜像。
+          {t("st.cacheCleanupHint")}
         </div>
       </Panel>
     </div>

@@ -1,5 +1,6 @@
 import { Plus, X, type LucideIcon } from "lucide-react";
 import type { KeyValueSpec } from "../../types/docker";
+import { useT } from "../../lib/i18n";
 import { Button, IconButton, Input, cn } from "../../components/ui";
 
 /** 卷/网络名称约束，与后端 conn.rs 的校验一致 */
@@ -85,13 +86,14 @@ export function KVEditor({
   rows: KeyValueSpec[];
   onChange: (rows: KeyValueSpec[]) => void;
 }) {
+  const t = useT();
   return (
     <div className="space-y-1.5">
       {rows.map((r, i) => (
         <div key={i} className="flex items-center gap-1.5">
           <Input
             className="h-7 flex-1 font-mono text-[12px]"
-            placeholder="键"
+            placeholder={t("st.keyPlaceholder")}
             value={r.key}
             onChange={(e) =>
               onChange(rows.map((x, j) => (j === i ? { ...x, key: e.target.value } : x)))
@@ -99,14 +101,14 @@ export function KVEditor({
           />
           <Input
             className="h-7 flex-1 font-mono text-[12px]"
-            placeholder="值"
+            placeholder={t("st.valuePlaceholder")}
             value={r.value}
             onChange={(e) =>
               onChange(rows.map((x, j) => (j === i ? { ...x, value: e.target.value } : x)))
             }
           />
           <IconButton
-            title="移除标签"
+            title={t("st.removeLabel")}
             onClick={() => onChange(rows.filter((_, j) => j !== i))}
           >
             <X size={13} />
@@ -119,7 +121,7 @@ export function KVEditor({
         onClick={() => onChange([...rows, { key: "", value: "" }])}
       >
         <Plus size={13} />
-        添加标签
+        {t("st.addLabel")}
       </Button>
     </div>
   );

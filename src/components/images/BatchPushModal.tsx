@@ -2,6 +2,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Check, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../../lib/api";
+import { useT } from "../../lib/i18n";
 import { useRegistries } from "../../lib/registries";
 import { shortId } from "../../lib/format";
 import type { ImageDto } from "../../types/docker";
@@ -44,6 +45,7 @@ export function BatchPushModal({
   onClose: () => void;
 }) {
   const qc = useQueryClient();
+  const t = useT();
   const { data: registries } = useRegistries();
   const [registryId, setRegistryId] = useState("");
   const [rows, setRows] = useState<PushRow[]>([]);
@@ -83,7 +85,7 @@ export function BatchPushModal({
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
       if (row.status === "done") continue;
-      patchRow(i, { status: "running", note: "准备推送…" });
+      patchRow(i, { status: "running", note: t("push.preparingShort") });
       // 等当前镜像推送结束；取消时终止整批
       const outcome = await new Promise<"done" | "cancelled">((resolve) => {
         cancelRef.current = api.pushImage(row.source, registryId, row.repository, row.tag, (p) => {
@@ -94,13 +96,13 @@ export function BatchPushModal({
           if (p.done) {
             cancelRef.current = null;
             if (p.cancelled) {
-              patchRow(i, { status: "cancelled", note: "已取消" });
+              patchRow(i, { status: "cancelled", note: t("push.cancelled") });
               resolve("cancelled");
             } else if (p.error) {
               patchRow(i, { status: "error", note: p.error });
               resolve("done");
             } else {
-              patchRow(i, { status: "done", note: "推送完成" });
+              patchRow(i, { status: "done", note: t("push.rowDone") });
               resolve("done");
             }
           }
@@ -128,32 +130,37 @@ export function BatchPushModal({
   return (
     <Modal
       open
-      title={`批量推送（${imgs.length} 个镜像 · 约 ${Math.round(totalBytes / 1024 / 1024)} MB）`}
+      title={t("push.batchTitle", {
+        n: imgs.length,
+        mb: Math.round(totalBytes / 1024 / 1024),
+      })}
       onClose={close}
       footer={
         <>
           <Button variant="outline" onClick={close}>
-            {running ? "取消推送" : "关闭"}
+            {running ? t("push.cancelPush") : t("common.close")}
           </Button>
           <Button
             variant="primary"
             disabled={running || !registryId || rows.length === 0 || list.length === 0}
             onClick={() => void start()}
           >
-            {running ? `推送中… ${doneCount}/${rows.length}` : `开始推送（${rows.length}）`}
+            {running
+              ? t("push.batchProgress", { done: doneCount, total: rows.length })
+              : t("push.batchStart", { n: rows.length })}
           </Button>
         </>
       }
     >
       <div className="mb-3 flex items-center gap-2">
-        <span className="shrink-0 text-[12px] text-fg3">仓库凭据</span>
+        <span className="shrink-0 text-[12px] text-fg3">{t("push.credentialLabel")}</span>
         <Select
           value={registryId}
           onChange={(e) => setRegistryId(e.target.value)}
           className="min-w-0 flex-1"
           disabled={running || list.length === 0}
         >
-          {list.length === 0 && <option value="">暂无凭据</option>}
+          {list.length === 0 && <option value="">{t("push.noCredentialsOption")}</option>}
           {list.map((r) => (
             <option key={r.id} value={r.id}>
               {r.name}（{r.registry}）
@@ -177,24 +184,26 @@ export function BatchPushModal({
                 {r.source}
               </span>
               <div className="flex shrink-0 items-center gap-1 text-[11px]">
-                {r.status === "pending" && <span className="text-fg3">等待</span>}
+                {r.status === "pending" && <span className="text-fg3">{t("push.rowPending")}</span>}
                 {r.status === "running" && (
                   <>
                     <Spinner className="h-3 w-3" />
-                    <span className="text-fg3">推送中</span>
+                    <span className="text-fg3">{t("push.rowRunning")}</span>
                   </>
                 )}
                 {r.status === "done" && (
                   <span className="flex items-center gap-0.5 text-ok">
-                    <Check size={12} /> 完成
+                    <Check size={12} /> {t("push.rowDoneBadge")}
                   </span>
                 )}
                 {r.status === "error" && (
                   <span className="flex items-center gap-0.5 text-err">
-                    <X size={12} /> 失败
+                    <X size={12} /> {t("push.rowFailedBadge")}
                   </span>
                 )}
-                {r.status === "cancelled" && <span className="text-warn">已取消</span>}
+                {r.status === "cancelled" && (
+                  <span className="text-warn">{t("push.cancelled")}</span>
+                )}
               </div>
             </div>
             {/* 次行：目标仓库名:标签（可编辑） */}
@@ -204,7 +213,7 @@ export function BatchPushModal({
                 onChange={(e) => patchRow(i, { repository: e.target.value })}
                 disabled={running || r.status !== "pending"}
                 spellCheck={false}
-                aria-label="目标仓库名"
+                aria-label={t("push.targetRepoAria")}
                 data-no-drag
                 className="h-7 min-w-0 flex-1 rounded-ctl border border-edge-strong bg-panel px-2 font-mono text-[11.5px] text-fg outline-none focus:border-accent disabled:opacity-60"
               />
@@ -214,7 +223,7 @@ export function BatchPushModal({
                 onChange={(e) => patchRow(i, { tag: e.target.value })}
                 disabled={running || r.status !== "pending"}
                 spellCheck={false}
-                aria-label="目标标签"
+                aria-label={t("push.targetTagAria")}
                 data-no-drag
                 className="h-7 w-24 shrink-0 rounded-ctl border border-edge-strong bg-panel px-2 font-mono text-[11.5px] text-fg outline-none focus:border-accent disabled:opacity-60"
               />
@@ -237,13 +246,11 @@ export function BatchPushModal({
       {(running || failCount > 0) && (
         <p className="mt-2 text-[11px] leading-4 text-fg3">
           {running
-            ? "按顺序逐个推送，失败会跳过并继续下一个；关闭弹窗即取消剩余队列。"
-            : `完成 ${doneCount} · 失败 ${failCount}；失败原因见对应行内（悬停源镜像可看完整引用）。`}
+            ? t("push.batchRunningHint")
+            : t("push.batchSummary", { done: doneCount, failed: failCount })}
         </p>
       )}
-      <p className="mt-1.5 text-[11px] text-fg3">
-        仓库名可编辑；目标引用与本地不同时后端会自动打标签。共享层不会重复上传。
-      </p>
+      <p className="mt-1.5 text-[11px] text-fg3">{t("push.batchFootnote")}</p>
     </Modal>
   );
 }

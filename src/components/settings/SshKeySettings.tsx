@@ -13,6 +13,7 @@ import { toast } from "sonner";
 import { api } from "../../lib/api";
 import { copyText } from "../../lib/clipboard";
 import { timeAgo } from "../../lib/format";
+import { useT } from "../../lib/i18n";
 import { useSettings } from "../../lib/settings";
 import type { SshIdentity, SshKeyEntry } from "../../types/settings";
 import { Badge, Button, IconButton, Input, Modal, Select, Spinner } from "../ui";
@@ -42,6 +43,7 @@ interface IdentityDraft {
 
 export function SshKeySettings() {
   const qc = useQueryClient();
+  const t = useT();
   const { data: settings } = useSettings();
   const sshKeys = settings?.ssh_keys ?? [];
   const sshIdentities = settings?.ssh_identities ?? [];
@@ -76,11 +78,11 @@ export function SshKeySettings() {
   const saveKeyDraft = async () => {
     if (!keyDraft) return;
     if (!keyDraft.label.trim()) {
-      toast.error("请填写私钥名称");
+      toast.error(t("ssh.labelRequired"));
       return;
     }
     if (!keyDraft.id && !keyDraft.path.trim() && !keyDraft.pemText.trim()) {
-      toast.error("请选择私钥文件或粘贴私钥内容");
+      toast.error(t("ssh.keyMaterialRequired"));
       return;
     }
     setKeySaving(true);
@@ -96,11 +98,14 @@ export function SshKeySettings() {
       );
       await refresh();
       toast.success(
-        `已保存「${entry.label}」${entry.fingerprint ? `（${entry.fingerprint}）` : ""}`,
+        t("ssh.keySaved", {
+          label: entry.label,
+          fp: entry.fingerprint ? `（${entry.fingerprint}）` : "",
+        }),
       );
       setKeyDraft(null);
     } catch (e) {
-      toast.error(`保存私钥失败: ${e}`);
+      toast.error(t("ssh.keySaveFailed", { err: String(e) }));
     } finally {
       setKeySaving(false);
     }
@@ -110,9 +115,9 @@ export function SshKeySettings() {
     try {
       await api.deleteSshKeyEntry(entry.id);
       await refresh();
-      toast.success(`已删除「${entry.label}」`);
+      toast.success(t("ssh.deleted", { label: entry.label }));
     } catch (e) {
-      toast.error(`删除失败: ${e}`);
+      toast.error(t("ssh.deleteFailed", { err: String(e) }));
     } finally {
       setConfirmDeleteKey(null);
     }
@@ -121,11 +126,11 @@ export function SshKeySettings() {
   const saveIdentityDraft = async () => {
     if (!identityDraft) return;
     if (!identityDraft.label.trim()) {
-      toast.error("请填写身份名称");
+      toast.error(t("ssh.identityLabelRequired"));
       return;
     }
     if (!identityDraft.username.trim()) {
-      toast.error("请填写用户名");
+      toast.error(t("ssh.usernameRequired"));
       return;
     }
     setIdentitySaving(true);
@@ -138,10 +143,10 @@ export function SshKeySettings() {
         identityDraft.keyId || null,
       );
       await refresh();
-      toast.success(`已保存身份「${entry.label}」`);
+      toast.success(t("ssh.identitySaved", { label: entry.label }));
       setIdentityDraft(null);
     } catch (e) {
-      toast.error(`保存身份失败: ${e}`);
+      toast.error(t("ssh.identitySaveFailed", { err: String(e) }));
     } finally {
       setIdentitySaving(false);
     }
@@ -151,9 +156,9 @@ export function SshKeySettings() {
     try {
       await api.deleteSshIdentity(entry.id);
       await refresh();
-      toast.success(`已删除身份「${entry.label}」`);
+      toast.success(t("ssh.identityDeleted", { label: entry.label }));
     } catch (e) {
-      toast.error(`删除失败: ${e}`);
+      toast.error(t("ssh.deleteFailed", { err: String(e) }));
     } finally {
       setConfirmDeleteIdentity(null);
     }
@@ -162,15 +167,15 @@ export function SshKeySettings() {
   return (
     <section className="overflow-hidden rounded-card border border-edge bg-panel shadow-[var(--app-shadow)]">
       <div className="flex items-center justify-between border-b border-edge/60 bg-panel2/40 px-4 py-2.5">
-        <div className="text-[13px] font-semibold text-fg">SSH 凭证</div>
+        <div className="text-[13px] font-semibold text-fg">{t("settings.catSshKeys")}</div>
         <span className="text-[11px] text-fg3">
-          加密存于本机密钥库，随云同步跨设备；供多个 SSH 连接复用
+          {t("ssh.sectionDesc")}
         </span>
       </div>
 
       {/* ------------------------------------------------ 钥匙串私钥 */}
       <div className="flex items-center justify-between px-4 pb-1 pt-3">
-        <span className="text-[12px] font-medium text-fg2">钥匙串私钥</span>
+        <span className="text-[12px] font-medium text-fg2">{t("ssh.keysSection")}</span>
         <Button
           variant="outline"
           onClick={() =>
@@ -178,12 +183,12 @@ export function SshKeySettings() {
           }
         >
           <Plus size={13} />
-          导入私钥
+          {t("ssh.importKey")}
         </Button>
       </div>
       {sshKeys.length === 0 ? (
         <div className="px-4 pb-3 pt-1 text-[12px] text-fg3">
-          尚未导入私钥。导入后可被多个 SSH 连接复用（连接编辑 → 私钥来源 → 钥匙串）。
+          {t("ssh.keysEmpty")}
         </div>
       ) : (
         <div className="divide-y divide-edge/60 px-4 pb-2">
@@ -198,13 +203,13 @@ export function SshKeySettings() {
                   <div className="flex items-center gap-2">
                     <span className="truncate text-[13px] font-medium text-fg">{k.label}</span>
                     {refs > 0 ? (
-                      <Badge tone="accent">{refs} 个连接引用</Badge>
+                      <Badge tone="accent">{t("ssh.nRefs", { n: refs })}</Badge>
                     ) : (
-                      <Badge tone="neutral">未使用</Badge>
+                      <Badge tone="neutral">{t("st.unused")}</Badge>
                     )}
                   </div>
                   <div className="truncate font-mono text-[11px] text-fg3">
-                    {k.fingerprint || "指纹未计算"}
+                    {k.fingerprint || t("ssh.noFingerprint")}
                   </div>
                 </div>
                 <span className="hidden shrink-0 text-[11px] text-fg3 xl:inline">
@@ -213,16 +218,16 @@ export function SshKeySettings() {
                 <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
                   {k.public_key && (
                     <IconButton
-                      title="复制公钥（可粘贴到服务器 authorized_keys）"
+                      title={t("ssh.copyPubKeyTitle")}
                       onClick={() => {
-                        void copyText(k.public_key).then(() => toast.success("公钥已复制"));
+                        void copyText(k.public_key).then(() => toast.success(t("ssh.pubKeyCopied")));
                       }}
                     >
                       <Copy size={13} />
                     </IconButton>
                   )}
                   <IconButton
-                    title="重命名 / 替换私钥"
+                    title={t("ssh.renameKeyTitle")}
                     onClick={() =>
                       setKeyDraft({
                         id: k.id,
@@ -235,7 +240,7 @@ export function SshKeySettings() {
                   >
                     <Pencil size={13} />
                   </IconButton>
-                  <IconButton title="删除" onClick={() => setConfirmDeleteKey(k)}>
+                  <IconButton title={t("containers.actRemove")} onClick={() => setConfirmDeleteKey(k)}>
                     <Trash2 size={13} />
                   </IconButton>
                 </div>
@@ -247,7 +252,7 @@ export function SshKeySettings() {
 
       {/* ------------------------------------------------ 身份 */}
       <div className="flex items-center justify-between border-t border-edge/60 px-4 pb-1 pt-3">
-        <span className="text-[12px] font-medium text-fg2">身份</span>
+        <span className="text-[12px] font-medium text-fg2">{t("ssh.identitiesSection")}</span>
         <Button
           variant="outline"
           onClick={() =>
@@ -255,12 +260,12 @@ export function SshKeySettings() {
           }
         >
           <Plus size={13} />
-          新建身份
+          {t("ssh.newIdentity")}
         </Button>
       </div>
       {sshIdentities.length === 0 ? (
         <div className="px-4 pb-3 pt-1 text-[12px] text-fg3">
-          身份 = 用户名 + 密码（或关联一把钥匙串私钥）。连接引用身份后，用户名与认证自动套用。
+          {t("ssh.identitiesEmpty")}
         </div>
       ) : (
         <div className="divide-y divide-edge/60 px-4 pb-2">
@@ -275,14 +280,16 @@ export function SshKeySettings() {
                   <div className="flex items-center gap-2">
                     <span className="truncate text-[13px] font-medium text-fg">{i.label}</span>
                     {refs > 0 ? (
-                      <Badge tone="accent">{refs} 个连接引用</Badge>
+                      <Badge tone="accent">{t("ssh.nRefs", { n: refs })}</Badge>
                     ) : (
-                      <Badge tone="neutral">未使用</Badge>
+                      <Badge tone="neutral">{t("st.unused")}</Badge>
                     )}
                   </div>
                   <div className="truncate text-[11px] text-fg3">
                     {i.username} ·{" "}
-                    {i.key_id ? `钥匙串私钥：${keyLabel(i.key_id) || "已删除"}` : "密码认证"}
+                    {i.key_id
+                      ? t("ssh.usesKey", { key: keyLabel(i.key_id) || t("ssh.keyDeleted") })
+                      : t("ssh.passwordAuth")}
                   </div>
                 </div>
                 <span className="hidden shrink-0 text-[11px] text-fg3 xl:inline">
@@ -290,7 +297,7 @@ export function SshKeySettings() {
                 </span>
                 <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
                   <IconButton
-                    title="编辑身份"
+                    title={t("reg.edit")}
                     onClick={() =>
                       setIdentityDraft({
                         id: i.id,
@@ -303,7 +310,7 @@ export function SshKeySettings() {
                   >
                     <Pencil size={13} />
                   </IconButton>
-                  <IconButton title="删除" onClick={() => setConfirmDeleteIdentity(i)}>
+                  <IconButton title={t("containers.actRemove")} onClick={() => setConfirmDeleteIdentity(i)}>
                     <Trash2 size={13} />
                   </IconButton>
                 </div>
@@ -314,20 +321,19 @@ export function SshKeySettings() {
       )}
 
       <div className="border-t border-edge/60 px-4 py-3 text-[11px] leading-4 text-fg3">
-        凭证内容加密存于本机密钥库，随云同步跨设备；删除前需先在连接中解除引用。
-        密码与钥匙串私钥的同步跟随「同步与云 → 同步 SSH 凭证」开关。
+        {t("ssh.footerNote")}
       </div>
 
       {/* ------------------------------------------------ 导入 / 编辑私钥 */}
       <Modal
         open={keyDraft !== null}
-        title={keyDraft?.id ? "编辑钥匙串私钥" : "导入私钥到钥匙串"}
+        title={keyDraft?.id ? t("ssh.editKeyTitle") : t("ssh.importKeyTitle")}
         onClose={() => setKeyDraft(null)}
         footer={
           <>
             <div className="flex-1" />
             <Button variant="outline" onClick={() => setKeyDraft(null)}>
-              取消
+              {t("common.cancel")}
             </Button>
             <Button
               variant="primary"
@@ -335,40 +341,40 @@ export function SshKeySettings() {
               disabled={keySaving || !keyDraft}
             >
               {keySaving ? <Spinner className="h-3.5 w-3.5" /> : null}
-              {keyDraft?.id ? "保存" : "导入"}
+              {keyDraft?.id ? t("common.save") : t("ssh.import")}
             </Button>
           </>
         }
       >
         <div className="flex flex-col gap-3">
           <label className="block">
-            <span className="mb-1 block text-[12px] text-fg3">名称</span>
+            <span className="mb-1 block text-[12px] text-fg3">{t("st.name")}</span>
             <Input
               value={keyDraft?.label ?? ""}
               onChange={(e) => setKeyDraft((d) => (d ? { ...d, label: e.target.value } : d))}
-              placeholder="如：腾讯云 / 家庭服务器"
+              placeholder={t("ssh.keyNamePlaceholder")}
               autoFocus
             />
           </label>
           <label className="block">
-            <span className="mb-1 block text-[12px] text-fg3">私钥文件（与粘贴二选一）</span>
+            <span className="mb-1 block text-[12px] text-fg3">{t("ssh.keyFileLabel")}</span>
             <div className="flex gap-2">
               <Input
                 value={keyDraft?.path ?? ""}
                 onChange={(e) =>
                   setKeyDraft((d) => (d ? { ...d, path: e.target.value, pemText: "" } : d))
                 }
-                placeholder="选择或输入私钥路径（~/.ssh/id_rsa 等）"
+                placeholder={t("ssh.keyPathPlaceholder")}
                 className="flex-1 font-mono"
                 spellCheck={false}
               />
               <Button variant="outline" onClick={() => void pickKeyFile()}>
-                选择文件
+                {t("compose.chooseFile")}
               </Button>
             </div>
           </label>
           <label className="block">
-            <span className="mb-1 block text-[12px] text-fg3">或粘贴私钥内容</span>
+            <span className="mb-1 block text-[12px] text-fg3">{t("ssh.pastePemLabel")}</span>
             <textarea
               value={keyDraft?.pemText ?? ""}
               onChange={(e) =>
@@ -381,18 +387,17 @@ export function SshKeySettings() {
             />
           </label>
           <label className="block">
-            <span className="mb-1 block text-[12px] text-fg3">私钥口令（可选）</span>
+            <span className="mb-1 block text-[12px] text-fg3">{t("ssh.passphraseLabel")}</span>
             <Input
               type="password"
               value={keyDraft?.passphrase ?? ""}
               onChange={(e) => setKeyDraft((d) => (d ? { ...d, passphrase: e.target.value } : d))}
-              placeholder={keyDraft?.id ? "留空保持不变" : "私钥有口令时填写"}
+              placeholder={keyDraft?.id ? t("ssh.passphraseKeep") : t("ssh.passphraseIfAny")}
               autoComplete="off"
             />
           </label>
           <div className="rounded-ctl border border-edge bg-panel2/50 px-2.5 py-2 text-[11px] leading-4 text-fg3">
-            导入时校验私钥有效性、计算公钥指纹并推导公钥；私钥内容加密存于本机密钥库，
-            连接时内存解析（不落临时文件）。
+            {t("ssh.importNote")}
           </div>
         </div>
       </Modal>
@@ -400,12 +405,12 @@ export function SshKeySettings() {
       {/* 删除私钥确认 */}
       <Modal
         open={confirmDeleteKey !== null}
-        title="删除钥匙串私钥"
+        title={t("ssh.deleteKeyTitle")}
         onClose={() => setConfirmDeleteKey(null)}
         footer={
           <>
             <Button variant="outline" onClick={() => setConfirmDeleteKey(null)}>
-              取消
+              {t("common.cancel")}
             </Button>
             <Button
               variant="danger"
@@ -413,19 +418,21 @@ export function SshKeySettings() {
                 if (confirmDeleteKey) void removeKey(confirmDeleteKey);
               }}
             >
-              删除
+              {t("containers.actRemove")}
             </Button>
           </>
         }
       >
         <p className="text-[12px] leading-5 text-fg2">
-          将删除私钥「
+          {t("ssh.deleteKeyBefore")}
           <span className="font-semibold text-fg">{confirmDeleteKey?.label}</span>
-          」的本机内容（{confirmDeleteKey?.fingerprint || "指纹未计算"}）。
+          {t("ssh.deleteKeyAfter", {
+            fp: confirmDeleteKey?.fingerprint || t("ssh.noFingerprint"),
+          })}
           {confirmDeleteKey && keyRefCount(confirmDeleteKey.id) > 0 && (
             <span className="text-err">
               {" "}
-              该私钥正被 {keyRefCount(confirmDeleteKey.id)} 个连接引用，删除将被拒绝——请先在这些连接中改用其他私钥来源。
+              {t("ssh.deleteKeyRefused", { n: keyRefCount(confirmDeleteKey.id) })}
             </span>
           )}
         </p>
@@ -434,13 +441,13 @@ export function SshKeySettings() {
       {/* ------------------------------------------------ 新建 / 编辑身份 */}
       <Modal
         open={identityDraft !== null}
-        title={identityDraft?.id ? "编辑身份" : "新建身份"}
+        title={identityDraft?.id ? t("ssh.editIdentityTitle") : t("ssh.newIdentityTitle")}
         onClose={() => setIdentityDraft(null)}
         footer={
           <>
             <div className="flex-1" />
             <Button variant="outline" onClick={() => setIdentityDraft(null)}>
-              取消
+              {t("common.cancel")}
             </Button>
             <Button
               variant="primary"
@@ -448,53 +455,53 @@ export function SshKeySettings() {
               disabled={identitySaving || !identityDraft}
             >
               {identitySaving ? <Spinner className="h-3.5 w-3.5" /> : null}
-              保存
+              {t("common.save")}
             </Button>
           </>
         }
       >
         <div className="flex flex-col gap-3">
           <label className="block">
-            <span className="mb-1 block text-[12px] text-fg3">名称</span>
+            <span className="mb-1 block text-[12px] text-fg3">{t("st.name")}</span>
             <Input
               value={identityDraft?.label ?? ""}
               onChange={(e) => setIdentityDraft((d) => (d ? { ...d, label: e.target.value } : d))}
-              placeholder="如：腾讯云 root / 家庭服务器"
+              placeholder={t("ssh.identityNamePlaceholder")}
               autoFocus
             />
           </label>
           <label className="block">
-            <span className="mb-1 block text-[12px] text-fg3">用户名</span>
+            <span className="mb-1 block text-[12px] text-fg3">{t("push.username")}</span>
             <Input
               value={identityDraft?.username ?? ""}
               onChange={(e) =>
                 setIdentityDraft((d) => (d ? { ...d, username: e.target.value } : d))
               }
-              placeholder="SSH 登录用户名"
+              placeholder={t("ssh.usernamePlaceholder")}
               spellCheck={false}
             />
           </label>
           <label className="block">
-            <span className="mb-1 block text-[12px] text-fg3">密码</span>
+            <span className="mb-1 block text-[12px] text-fg3">{t("reg.authPassword")}</span>
             <Input
               type="password"
               value={identityDraft?.password ?? ""}
               onChange={(e) =>
                 setIdentityDraft((d) => (d ? { ...d, password: e.target.value } : d))
               }
-              placeholder={identityDraft?.id ? "留空保持不变（关联私钥时可不填）" : "留空则需关联一把私钥"}
+              placeholder={identityDraft?.id ? t("ssh.passwordKeepWithKey") : t("ssh.passwordNeedsKey")}
               autoComplete="off"
             />
           </label>
           {sshKeys.length > 0 && (
             <label className="block">
-              <span className="mb-1 block text-[12px] text-fg3">关联钥匙串私钥（可选）</span>
+              <span className="mb-1 block text-[12px] text-fg3">{t("ssh.linkKeyLabel")}</span>
               <Select
                 value={identityDraft?.keyId ?? ""}
                 onChange={(e) => setIdentityDraft((d) => (d ? { ...d, keyId: e.target.value } : d))}
                 className="w-full"
               >
-                <option value="">不关联（使用密码认证）</option>
+                <option value="">{t("ssh.linkKeyNone")}</option>
                 {sshKeys.map((k) => (
                   <option key={k.id} value={k.id}>
                     {k.label}
@@ -502,7 +509,7 @@ export function SshKeySettings() {
                 ))}
               </Select>
               <span className="mt-1 block text-[11px] text-fg3">
-                关联后，引用此身份的连接将以该私钥认证（密码不再使用）
+                {t("ssh.linkKeyNote")}
               </span>
             </label>
           )}
@@ -512,12 +519,12 @@ export function SshKeySettings() {
       {/* 删除身份确认 */}
       <Modal
         open={confirmDeleteIdentity !== null}
-        title="删除 SSH 身份"
+        title={t("ssh.deleteIdentityTitle")}
         onClose={() => setConfirmDeleteIdentity(null)}
         footer={
           <>
             <Button variant="outline" onClick={() => setConfirmDeleteIdentity(null)}>
-              取消
+              {t("common.cancel")}
             </Button>
             <Button
               variant="danger"
@@ -525,19 +532,19 @@ export function SshKeySettings() {
                 if (confirmDeleteIdentity) void removeIdentity(confirmDeleteIdentity);
               }}
             >
-              删除
+              {t("containers.actRemove")}
             </Button>
           </>
         }
       >
         <p className="text-[12px] leading-5 text-fg2">
-          将删除身份「
+          {t("ssh.deleteIdentityBefore")}
           <span className="font-semibold text-fg">{confirmDeleteIdentity?.label}</span>
-          」（{confirmDeleteIdentity?.username}）及其保存的密码。
+          {t("ssh.deleteIdentityAfter", { username: confirmDeleteIdentity?.username ?? "" })}
           {confirmDeleteIdentity && identityRefCount(confirmDeleteIdentity.id) > 0 && (
             <span className="text-err">
               {" "}
-              该身份正被 {identityRefCount(confirmDeleteIdentity.id)} 个连接引用，删除将被拒绝——请先在这些连接中解除身份。
+              {t("ssh.deleteIdentityRefused", { n: identityRefCount(confirmDeleteIdentity.id) })}
             </span>
           )}
         </p>

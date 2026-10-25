@@ -1,6 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { toast } from "sonner";
+import { useT } from "../../lib/i18n";
 import { api } from "../../lib/api";
 import { shortId } from "../../lib/format";
 import type { ImageDto } from "../../types/docker";
@@ -8,6 +9,7 @@ import { Button, Input, Modal, Spinner } from "../../components/ui";
 
 /** 行内「打标签」弹窗：为镜像添加一个新引用，新旧标签指向同一镜像（docker tag） */
 export function TagModal({ img, onClose }: { img: ImageDto; onClose: () => void }) {
+  const t = useT();
   const qc = useQueryClient();
   const [reference, setReference] = useState("");
   const [pending, setPending] = useState(false);
@@ -18,11 +20,11 @@ export function TagModal({ img, onClose }: { img: ImageDto; onClose: () => void 
     setPending(true);
     try {
       await api.tagImage(img.id, r);
-      toast.success(`已添加标签 ${r}`);
+      toast.success(t("img.tagAdded", { ref: r }));
       void qc.invalidateQueries({ queryKey: ["images"] });
       onClose();
     } catch (e) {
-      toast.error(`打标签失败: ${e}`);
+      toast.error(t("img.tagFailed", { err: String(e) }));
     } finally {
       setPending(false);
     }
@@ -31,12 +33,12 @@ export function TagModal({ img, onClose }: { img: ImageDto; onClose: () => void 
   return (
     <Modal
       open
-      title="添加标签"
+      title={t("img.tagTitle")}
       onClose={onClose}
       footer={
         <>
           <Button variant="outline" onClick={onClose}>
-            取消
+            {t("common.cancel")}
           </Button>
           <Button
             variant="primary"
@@ -44,23 +46,23 @@ export function TagModal({ img, onClose }: { img: ImageDto; onClose: () => void 
             onClick={() => void submit()}
           >
             {pending ? <Spinner className="h-3.5 w-3.5" /> : null}
-            添加
+            {t("img.add")}
           </Button>
         </>
       }
     >
       <p className="mb-3">
-        为镜像{" "}
+        {t("img.tagDescBefore")}{" "}
         <span className="font-mono text-fg">
           {img.tags[0] || shortId(img.id)}
         </span>{" "}
-        添加一个新标签。
+        {t("img.tagDescAfter")}
       </p>
       <Input
         value={reference}
         onChange={(e) => setReference(e.target.value)}
         onKeyDown={(e) => e.key === "Enter" && void submit()}
-        placeholder="myrepo/myimage:v1（缺省 tag 为 latest）"
+        placeholder={t("img.tagPlaceholder")}
         className="w-full font-mono"
         spellCheck={false}
         autoFocus

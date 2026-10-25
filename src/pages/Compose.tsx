@@ -13,6 +13,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import { api } from "../lib/api";
+import { t, useT } from "../lib/i18n";
 import { activeConnection, useSettings, useUpdateSettings } from "../lib/settings";
 import { copyText } from "../lib/clipboard";
 import { useComposeRun } from "../hooks/useComposeRun";
@@ -42,11 +43,11 @@ export function projectState(p: ComposeProjectDto): string {
 export function sourceLabel(source: string): string | null {
   switch (source) {
     case "remembered":
-      return "已记录";
+      return t("compose.sourceRemembered");
     case "registered":
-      return "手动添加";
+      return t("compose.sourceRegistered");
     case "scanned":
-      return "扫描";
+      return t("compose.sourceScanned");
     default:
       return null;
   }
@@ -66,6 +67,7 @@ export function Compose({
 }) {
   const { data: settings } = useSettings();
   const qc = useQueryClient();
+  const t = useT();
   const quickRun = useComposeRun();
   const [addOpen, setAddOpen] = useState(false);
   const [scanOpen, setScanOpen] = useState(false);
@@ -92,17 +94,21 @@ export function Compose({
   const cliReady = cli.data?.available === true;
   // SSH 连接的 compose 操作经 ssh 在远程服务器执行，CLI 缺失指的是远端未安装
   const isSsh = activeConnection(settings).kind === "ssh";
-  const cliMissingHint = isSsh ? "远程服务器未检测到 Docker Compose CLI" : "需要安装 Docker Compose CLI";
+  const cliMissingHint = isSsh
+    ? t("compose.cliMissingSsh")
+    : t("compose.cliMissingLocal");
 
-  const quickAction = (p: ComposeProjectDto, action: string, label: string) => {
+  const quickAction = (p: ComposeProjectDto, action: "up" | "stop") => {
     if (!cliReady) return;
+    const label = action === "up" ? t("containers.actStart") : t("containers.actStop");
+    const pending = action === "up" ? t("containers.starting") : t("containers.stopping");
     quickRun.start(
       (o, e) => api.composeAction(p.name, action, {}, o, e),
       {
-        label: `${label}项目 ${p.name}`,
+        label: t("compose.projectActionLabel", { label, name: p.name }),
         target: p.name,
         action,
-        pendingText: `${label}中…`,
+        pendingText: pending,
       },
     );
   };
@@ -110,24 +116,28 @@ export function Compose({
   const removeTracked = useMutation({
     mutationFn: (name: string) => api.removeTrackedComposeProject(name),
     onSuccess: () => {
-      toast.success("已移除跟踪记录（项目文件不受影响）");
+      toast.success(t("compose.trackedRemoved"));
       void qc.invalidateQueries({ queryKey: ["composeProjects"] });
     },
-    onError: (e) => toast.error(`移除失败: ${e}`),
+    onError: (e) => toast.error(t("compose.removeFailed", { err: String(e) })),
   });
 
   return (
     <>
-      <PageHeader title="编排" desc={`${projects.length} 个 compose 项目 · 点击行查看服务`}>
+      <PageHeader title={t("nav.compose")} desc={t("compose.pageDesc", { n: projects.length })}>
         <SearchInput value={search} onChange={onSearch} className="w-44" />
-        <IconButton title="扫描目录发现编排" onClick={() => setScanOpen(true)} className="h-8 w-8">
+        <IconButton
+          title={t("compose.scanButtonTitle")}
+          onClick={() => setScanOpen(true)}
+          className="h-8 w-8"
+        >
           <ScanSearch size={15} />
         </IconButton>
         <Button variant="tinted" className="h-8 shrink-0" onClick={() => setAddOpen(true)}>
           <Plus size={14} />
-          添加编排
+          {t("compose.addProject")}
         </Button>
-        <IconButton title="刷新" onClick={() => void query.refetch()} className="h-8 w-8">
+        <IconButton title={t("common.refresh")} onClick={() => void query.refetch()} className="h-8 w-8">
           <RefreshCw size={15} className={query.isFetching ? "animate-spin" : ""} />
         </IconButton>
       </PageHeader>
@@ -136,17 +146,15 @@ export function Compose({
         <div className="mx-4 mt-3 flex items-center gap-2 rounded-card border border-warn/30 bg-warn/10 px-3 py-2 text-[12px] text-warn">
           <TriangleAlert size={14} className="shrink-0" />
           <span className="min-w-0 flex-1">
-            {isSsh
-              ? "远程服务器未检测到 Docker Compose CLI：项目识别与查看不受影响，但无法执行启动/停止等编排操作（请在服务器上安装）。"
-              : "未检测到 Docker Compose CLI：项目识别与查看不受影响，但无法执行启动/停止等编排操作。"}
+            {isSsh ? t("compose.cliBannerSsh") : t("compose.cliBannerLocal")}
           </span>
           <Button
             variant="outline"
             className="h-7 shrink-0"
-            title={isSsh ? "复制到远程服务器上执行" : undefined}
+            title={isSsh ? t("compose.copyInstallTitle") : undefined}
             onClick={() => void copyText("sudo apt install docker-compose-plugin")}
           >
-            复制安装命令
+            {t("compose.copyInstallCmd")}
           </Button>
         </div>
       )}
@@ -160,13 +168,13 @@ export function Compose({
       ) : projects.length === 0 ? (
         <EmptyState
           icon={<Layers size={40} strokeWidth={1.5} />}
-          title={keyword ? "没有匹配的项目" : "还没有 Compose 项目"}
+          title={keyword ? t("compose.emptySearch") : t("compose.empty")}
           desc={
             keyword
-              ? "换个关键字试试"
+              ? t("inspect.noMatchHint")
               : isSsh
-                ? "通过「添加编排」注册远端 compose 文件，或在服务器上 docker compose up 启动项目"
-                : "通过「添加编排」注册 compose 文件或「扫描目录」自动发现，在终端 docker compose up 启动的项目也会自动出现"
+                ? t("compose.emptyHintSsh")
+                : t("compose.emptyHintLocal")
           }
         />
       ) : (
@@ -175,9 +183,9 @@ export function Compose({
             <div
               className={`${GRID} h-8 border-b border-edge bg-panel2/60 px-4 text-[11px] font-medium text-fg3`}
             >
-              <div>项目</div>
-              <div>目录</div>
-              <div>服务</div>
+              <div>{t("compose.thProject")}</div>
+              <div>{t("compose.thDir")}</div>
+              <div>{t("compose.thServices")}</div>
               <div />
             </div>
             {projects.map((p) => {
@@ -203,8 +211,15 @@ export function Compose({
                   </div>
                   <div className="mt-0.5 text-[11px] text-fg3">
                     {p.total_count === 0
-                      ? "未运行 · 本地跟踪"
-                      : `${p.running_count}/${p.total_count} 容器运行${p.config_files.length > 1 ? ` · ${p.config_files.length} 个配置文件` : ""}`}
+                      ? t("compose.notRunningLocal")
+                      : t("compose.runningSummary", {
+                          running: p.running_count,
+                          total: p.total_count,
+                          files:
+                            p.config_files.length > 1
+                              ? t("compose.configFiles", { n: p.config_files.length })
+                              : "",
+                        })}
                   </div>
                 </div>
                 <div className="min-w-0">
@@ -230,9 +245,9 @@ export function Compose({
                 >
                   {(p.total_count === 0 || p.running_count < p.total_count) && (
                     <IconButton
-                      title={cliReady ? "启动全部服务" : cliMissingHint}
+                      title={cliReady ? t("compose.upTitle") : cliMissingHint}
                       disabled={!cliReady || quickRun.running}
-                      onClick={() => quickAction(p, "up", "启动")}
+                      onClick={() => quickAction(p, "up")}
                     >
                       {pending && quickRun.action === "up" ? (
                         <Spinner className="h-3.5 w-3.5" />
@@ -243,9 +258,9 @@ export function Compose({
                   )}
                   {p.running_count > 0 && (
                     <IconButton
-                      title={cliReady ? "停止全部服务" : cliMissingHint}
+                      title={cliReady ? t("compose.stopTitle") : cliMissingHint}
                       disabled={!cliReady || quickRun.running}
-                      onClick={() => quickAction(p, "stop", "停止")}
+                      onClick={() => quickAction(p, "stop")}
                     >
                       {pending && quickRun.action === "stop" ? (
                         <Spinner className="h-3.5 w-3.5" />
@@ -256,7 +271,7 @@ export function Compose({
                   )}
                   {p.total_count === 0 && (
                     <IconButton
-                      title="移除跟踪记录（不影响项目文件）"
+                      title={t("compose.removeTrackedTitle")}
                       disabled={removeTracked.isPending}
                       onClick={() => removeTracked.mutate(p.name)}
                     >
@@ -295,26 +310,27 @@ function AddComposeModal({
   onClose: () => void;
 }) {
   const qc = useQueryClient();
+  const t = useT();
   const [path, setPath] = useState("");
   const [name, setName] = useState("");
 
   const submit = useMutation({
     mutationFn: () => api.addTrackedComposeProject(path.trim(), name.trim() || undefined),
     onSuccess: () => {
-      toast.success("编排已添加");
+      toast.success(t("compose.added"));
       setPath("");
       setName("");
       onClose();
       void qc.invalidateQueries({ queryKey: ["composeProjects"] });
     },
-    onError: (e) => toast.error(`添加失败: ${e}`),
+    onError: (e) => toast.error(t("compose.addFailed", { err: String(e) })),
   });
 
   const pickFile = async () => {
     try {
       const picked = await openFileDialog({
         multiple: false,
-        filters: [{ name: "Compose 文件", extensions: ["yaml", "yml"] }],
+        filters: [{ name: t("compose.composeFileFilter"), extensions: ["yaml", "yml"] }],
       });
       if (typeof picked === "string") setPath(picked);
     } catch {
@@ -325,31 +341,32 @@ function AddComposeModal({
   return (
     <Modal
       open={open}
-      title="添加编排"
+      title={t("compose.addProject")}
       onClose={onClose}
       footer={
         <>
           <Button variant="outline" onClick={onClose}>
-            取消
+            {t("common.cancel")}
           </Button>
           <Button
             variant="primary"
             disabled={!path.trim() || submit.isPending}
             onClick={() => submit.mutate()}
           >
-            {submit.isPending ? "添加中…" : "添加"}
+            {submit.isPending ? t("compose.adding") : t("img.add")}
           </Button>
         </>
       }
     >
       <p className="text-[12px] leading-5 text-fg2">
-        注册 compose 文件到本地跟踪列表，项目未运行时也可从这里启动。
-        {isSsh && " 当前为 SSH 连接，请填写远端服务器上的文件路径。"}
+        {t("compose.addDesc")}
+        {isSsh && t("compose.addDescSsh")}
       </p>
       <div className="mt-3 space-y-3">
         <div>
           <div className="mb-1 text-[12px] font-medium text-fg2">
-            compose 文件{isSsh ? "（远端绝对路径）" : "路径"}
+            {t("compose.filePathLabel")}
+            {isSsh ? t("compose.filePathRemote") : t("compose.filePathLocal")}
           </div>
           <div className="flex gap-1.5">
             <Input
@@ -361,14 +378,15 @@ function AddComposeModal({
             />
             {!isSsh && (
               <Button variant="outline" className="h-8 shrink-0" onClick={() => void pickFile()}>
-                选择文件
+                {t("compose.chooseFile")}
               </Button>
             )}
           </div>
         </div>
         <div>
           <div className="mb-1 text-[12px] font-medium text-fg2">
-            项目名<span className="font-normal text-fg3">（可选，留空自动从文件 name: 字段或目录名推导）</span>
+            {t("compose.nameLabel")}
+            <span className="font-normal text-fg3">{t("compose.nameHint")}</span>
           </div>
           <Input
             value={name}
@@ -386,6 +404,7 @@ function AddComposeModal({
 function ScanDirsModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { data: settings } = useSettings();
   const qc = useQueryClient();
+  const t = useT();
   const updateSettings = useUpdateSettings();
   const isSsh = activeConnection(settings).kind === "ssh";
   const connId = settings?.active_connection_id ?? "local";
@@ -396,21 +415,21 @@ function ScanDirsModal({ open, onClose }: { open: boolean; onClose: () => void }
   const scan = useMutation({
     mutationFn: () => api.scanComposeDirs(),
     onSuccess: (r) => {
-      if (r.found === 0) toast.info("扫描完成：未发现 compose 文件");
+      if (r.found === 0) toast.info(t("compose.scanDoneNone"));
       else
         toast.success(
-          `扫描完成：发现 ${r.found} 个文件，新增/更新 ${r.discovered} 个编排`,
+          t("compose.scanDone", { found: r.found, discovered: r.discovered }),
         );
       void qc.invalidateQueries({ queryKey: ["composeProjects"] });
     },
-    onError: (e) => toast.error(`扫描失败: ${e}`),
+    onError: (e) => toast.error(t("compose.scanFailed", { err: String(e) })),
   });
 
   const addDir = (p: string) => {
     const trimmed = p.trim().replace(/\/+$/, "");
     if (!trimmed || !settings) return;
     if (dirs.some((d) => d.path === trimmed)) {
-      toast.info("目录已在扫描列表中");
+      toast.info(t("compose.dirAlreadyTracked"));
       return;
     }
     updateSettings.mutate(
@@ -445,29 +464,29 @@ function ScanDirsModal({ open, onClose }: { open: boolean; onClose: () => void }
   return (
     <Modal
       open={open}
-      title="扫描目录"
+      title={t("compose.scanTitle")}
       onClose={onClose}
       footer={
         <>
           <span className="mr-auto self-center text-[11px] text-fg3">
-            扫描深度 3 层，发现的编排未运行时也会保留在列表
+            {t("compose.scanHint")}
           </span>
           <Button
             variant="outline"
             disabled={dirs.length === 0 || scan.isPending}
             onClick={() => scan.mutate()}
           >
-            {scan.isPending ? "扫描中…" : "立即扫描"}
+            {scan.isPending ? t("compose.scanning") : t("compose.scanNow")}
           </Button>
           <Button variant="primary" onClick={onClose}>
-            完成
+            {t("compose.finish")}
           </Button>
         </>
       }
     >
       <p className="text-[12px] leading-5 text-fg2">
-        配置若干目录，扫描其中的 compose 文件并纳入编排列表。
-        {isSsh && " 当前为 SSH 连接，目录位于远端服务器，扫描经 ssh 执行。"}
+        {t("compose.scanDesc")}
+        {isSsh && t("compose.scanDescSsh")}
       </p>
       <div className="mt-3 space-y-1.5">
         {dirs.map((d) => (
@@ -478,14 +497,14 @@ function ScanDirsModal({ open, onClose }: { open: boolean; onClose: () => void }
             <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-fg2" title={d.path}>
               {d.path}
             </span>
-            <IconButton title="删除此目录" onClick={() => removeDir(d.id)}>
+            <IconButton title={t("compose.deleteDir")} onClick={() => removeDir(d.id)}>
               <Trash2 size={13} />
             </IconButton>
           </div>
         ))}
         {dirs.length === 0 && (
           <div className="rounded-ctl border border-dashed border-edge px-2.5 py-3 text-center text-[12px] text-fg3">
-            还没有配置扫描目录
+            {t("compose.noScanDirs")}
           </div>
         )}
         <div className="flex gap-1.5 pt-1">
@@ -496,13 +515,13 @@ function ScanDirsModal({ open, onClose }: { open: boolean; onClose: () => void }
               onKeyDown={(e) => {
                 if (e.key === "Enter" && path.trim()) addDir(path);
               }}
-              placeholder="/srv/stacks（远端绝对路径）"
+              placeholder={t("compose.scanDirPlaceholder")}
               className="min-w-0 flex-1 font-mono"
               spellCheck={false}
             />
           ) : (
             <Button variant="outline" className="h-8 flex-1" onClick={() => void pickDir()}>
-              选择目录
+              {t("compose.chooseDir")}
             </Button>
           )}
           {isSsh && (
@@ -512,7 +531,7 @@ function ScanDirsModal({ open, onClose }: { open: boolean; onClose: () => void }
               disabled={!path.trim()}
               onClick={() => addDir(path)}
             >
-              添加
+              {t("img.add")}
             </Button>
           )}
         </div>

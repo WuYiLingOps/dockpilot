@@ -23,7 +23,13 @@ import {
 import { api } from "./lib/api";
 import { onOpenAppLogViewer } from "./lib/applog";
 import { useIsWindows } from "./lib/platform";
-import { activeConnection, useSettings, useSettingsThemeSync } from "./lib/settings";
+import {
+  activeConnection,
+  useSettings,
+  useSettingsLangSync,
+  useSettingsThemeSync,
+} from "./lib/settings";
+import { useT } from "./lib/i18n";
 import { useCloudSync } from "./hooks/useCloudSync";
 import { useAppUpdate } from "./hooks/useAppUpdate";
 import type { LastCrashInfo } from "./types/diagnostics";
@@ -42,33 +48,31 @@ function DisconnectedOverlay({
   onManage: () => void;
   windows: boolean;
 }) {
+  const t = useT();
   return (
     <div className="absolute inset-0 z-40 flex flex-col items-center justify-center gap-2 bg-canvas p-8 text-center">
       <div className="mb-3 flex h-16 w-16 items-center justify-center rounded-2xl bg-panel text-fg3 shadow-[var(--app-shadow)]">
         <Container size={30} strokeWidth={1.5} />
       </div>
-      <div className="text-[15px] font-semibold text-fg">无法连接 Docker 引擎</div>
+      <div className="text-[15px] font-semibold text-fg">{t("app.disconnectedTitle")}</div>
       <p className="max-w-md break-all text-[12px] text-fg3">{message}</p>
       {windows ? (
-        <p className="max-w-md text-[12px] text-fg3">
-          Windows 版仅支持远程连接（SSH 隧道 / TLS / TCP），
-          点击下方「连接设置」打开「Docker 连接管理」添加并测试远程主机连接。
-        </p>
+        <p className="max-w-md text-[12px] text-fg3">{t("app.windowsHint")}</p>
       ) : (
         <p className="max-w-md text-[12px] text-fg3">
-          本地连接请确认 Docker 服务已启动且当前用户已加入 docker 组
-          （<span className="mx-1 font-mono text-fg2">sudo usermod -aG docker $USER</span>）；
-          远程连接可在侧栏底部切换，或点击下方「连接设置」打开「Docker 连接管理」测试并修改配置。
+          {t("app.linuxHintBefore")}
+          <span className="mx-1 font-mono text-fg2">sudo usermod -aG docker $USER</span>
+          {t("app.linuxHintAfter")}
         </p>
       )}
       <div className="mt-3 flex gap-2">
         <Button variant="primary" onClick={onRetry} disabled={retrying}>
           <RefreshCw size={14} className={retrying ? "animate-spin" : ""} />
-          重新连接
+          {t("app.retryConnect")}
         </Button>
         <Button variant="outline" onClick={onManage}>
           <SettingsIcon size={14} />
-          连接设置
+          {t("app.connectionSettings")}
         </Button>
       </div>
     </div>
@@ -86,10 +90,14 @@ function CrashBanner({
   onDismiss: () => void;
 }) {
   const when = info.timestamp ? new Date(info.timestamp).toLocaleString() : "";
+  const t = useT();
   const text =
     info.kind === "panic"
-      ? `上次异常退出：${info.location ?? "未知位置"} — ${info.message ?? "未知错误"}`
-      : "上次未正常退出且未捕获到原因，如反复出现请到 设置 → 故障诊断 导出诊断包";
+      ? t("app.crashPanic", {
+          location: info.location ?? t("app.crashUnknownLocation"),
+          message: info.message ?? t("app.crashUnknownMessage"),
+        })
+      : t("app.crashUnclean");
   return (
     <div
       className="flex shrink-0 items-center gap-2 border-b border-edge bg-warn/10 px-4 py-1.5 text-[12px] text-fg2"
@@ -105,14 +113,14 @@ function CrashBanner({
         onClick={onOpenLogs}
         className="shrink-0 cursor-pointer rounded-btn px-1.5 py-0.5 text-[12px] text-fg2 transition-colors hover:bg-hover hover:text-fg"
       >
-        查看日志
+        {t("app.viewLogs")}
       </button>
       <button
         type="button"
         onClick={onDismiss}
         className="shrink-0 cursor-pointer rounded-btn px-1.5 py-0.5 text-[12px] text-fg3 transition-colors hover:bg-hover hover:text-fg"
       >
-        知道了
+        {t("app.dismiss")}
       </button>
     </div>
   );
@@ -139,6 +147,8 @@ export default function App() {
   const isWindows = useIsWindows();
 
   useSettingsThemeSync();
+  // 界面语言同步（内存 + 首帧缓存 + 后端上报），与主题同步并列
+  useSettingsLangSync();
   const { data: settings } = useSettings();
   // 云同步自动化：启动远端检查、设置变更去抖上传、窗口可见时检查
   useCloudSync();

@@ -1,5 +1,6 @@
 import { Network, Trash2 } from "lucide-react";
 import { shortId } from "../../lib/format";
+import { useT } from "../../lib/i18n";
 import type { NetworkDto } from "../../types/docker";
 import { Badge, EmptyState, IconButton } from "../../components/ui";
 
@@ -17,6 +18,7 @@ export function NetworkList({
   onOpen: (name: string) => void;
   onDelete: (n: NetworkDto) => void;
 }) {
+  const t = useT();
   const keyword = search.trim().toLowerCase();
   const filtered = keyword
     ? nets.filter(
@@ -30,8 +32,8 @@ export function NetworkList({
   return filtered.length === 0 ? (
     <EmptyState
       icon={<Network size={40} strokeWidth={1.5} />}
-      title="没有匹配的网络"
-      desc="换个关键字试试"
+      title={t("st.netEmptySearch")}
+      desc={t("inspect.noMatchHint")}
     />
   ) : (
     <div className="flex-1 overflow-auto p-4 pt-2">
@@ -39,12 +41,12 @@ export function NetworkList({
         <div
           className={`${NETWORK_GRID} h-8 border-b border-edge bg-panel2/60 px-4 text-[11px] font-medium text-fg3`}
         >
-          <div>名称</div>
-          <div>驱动</div>
-          <div>范围</div>
-          <div>子网 / 网关</div>
-          <div>已连接</div>
-          <div>标记</div>
+          <div>{t("st.name")}</div>
+          <div>{t("st.driver")}</div>
+          <div>{t("st.thScope")}</div>
+          <div>{t("st.thSubnet")}</div>
+          <div>{t("st.thConnected")}</div>
+          <div>{t("st.thLabels")}</div>
           <div />
         </div>
         {filtered.map((n) => (
@@ -58,7 +60,7 @@ export function NetworkList({
                 <span className="truncate font-medium text-fg" title={n.name}>
                   {n.name}
                 </span>
-                {n.internal && <Badge tone="warn">内部</Badge>}
+                {n.internal && <Badge tone="warn">{t("st.internal")}</Badge>}
               </div>
               <div className="truncate font-mono text-[11px] text-fg3">{shortId(n.id)}</div>
             </div>
@@ -75,14 +77,14 @@ export function NetworkList({
                   </div>
                 </>
               ) : (
-                <span className="text-[12px] text-fg3">自动分配</span>
+                <span className="text-[12px] text-fg3">{t("st.autoAssigned")}</span>
               )}
             </div>
             <div className="text-[12px] tabular-nums text-fg2">
-              {n.containers.length > 0 ? `${n.containers.length} 个` : "0"}
+              {n.containers.length > 0 ? t("storage.nContainersShort", { n: n.containers.length }) : "0"}
             </div>
             <div className="flex flex-wrap items-center gap-1">
-              {n.built_in && <Badge>内置</Badge>}
+              {n.built_in && <Badge>{t("st.builtIn")}</Badge>}
               {n.enable_ipv6 && <Badge tone="accent">IPv6</Badge>}
               {!n.built_in && !n.enable_ipv6 && <span className="text-fg3">—</span>}
             </div>
@@ -92,7 +94,7 @@ export function NetworkList({
               data-no-drag
             >
               <IconButton
-                title={n.built_in ? "内置网络不可删除" : "删除"}
+                title={n.built_in ? t("st.builtInNoDelete") : t("containers.actRemove")}
                 disabled={n.built_in}
                 className="hover:bg-err/10 hover:text-err"
                 onClick={() => onDelete(n)}

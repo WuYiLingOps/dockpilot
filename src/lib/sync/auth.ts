@@ -9,6 +9,7 @@
  */
 
 import { invoke } from "@tauri-apps/api/core";
+import { t } from "../i18n";
 import { SYNC_CONSTANTS, type DeviceFlowStart, type OAuthTokens, type ProviderAccount } from "../../types/sync";
 
 // ---------------------------------------------------------------------------
@@ -44,7 +45,7 @@ export const pollForToken = async (
         "abort",
         () => {
           clearTimeout(timer);
-          reject(new DOMException("GitHub 认证已取消", "AbortError"));
+          reject(new DOMException(t("sync.authCancelled"), "AbortError"));
         },
         { once: true },
       );
@@ -52,7 +53,7 @@ export const pollForToken = async (
 
   while (Date.now() < start.expiresAt) {
     await sleep(intervalMs);
-    if (signal?.aborted) throw new DOMException("GitHub 认证已取消", "AbortError");
+    if (signal?.aborted) throw new DOMException(t("sync.authCancelled"), "AbortError");
 
     // 单次轮询的网络失败（瞬态超时等）不中断授权流程，按 pending 处理等下一轮
     const data = await invoke<Record<string, unknown>>("github_device_flow_poll", {
@@ -83,18 +84,18 @@ export const pollForToken = async (
       continue;
     }
     if (error === "expired_token") {
-      throw new Error("设备码已过期，请重新连接");
+      throw new Error(t("sync.deviceCodeExpired"));
     }
     if (error === "access_denied") {
-      throw new Error("用户拒绝了授权");
+      throw new Error(t("sync.authDenied"));
     }
     if (error) {
       const desc = typeof data.error_description === "string" ? data.error_description : error;
-      throw new Error(`GitHub 认证失败: ${desc}`);
+      throw new Error(t("sync.authFailed", { err: desc }));
     }
   }
 
-  throw new Error("设备码已过期，请重新连接");
+  throw new Error(t("sync.deviceCodeExpired"));
 };
 
 // ---------------------------------------------------------------------------
@@ -117,7 +118,7 @@ export const getUserInfo = async (accessToken: string): Promise<ProviderAccount>
       Accept: "application/vnd.github.v3+json",
     },
   });
-  if (!res.ok) throw new Error(`获取 GitHub 账号信息失败: ${res.status} ${res.statusText}`);
+  if (!res.ok) throw new Error(t("sync.userInfoFailed", { status: res.status, text: res.statusText }));
   const user = (await res.json()) as GitHubUser;
   return {
     id: String(user.id),

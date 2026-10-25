@@ -1,12 +1,14 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { toast } from "sonner";
+import { useT } from "../../lib/i18n";
 import { api } from "../../lib/api";
 import { useRegistries } from "../../lib/registries";
 import { refRegistryDomain, resolvePullCredential } from "./shared";
 import { Button, Input, Modal } from "../../components/ui";
 
 export function PullModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const t = useT();
   const qc = useQueryClient();
   const [image, setImage] = useState("");
   const [lines, setLines] = useState<string[]>([]);
@@ -24,7 +26,7 @@ export function PullModal({ open, onClose }: { open: boolean; onClose: () => voi
     const name = image.trim();
     if (!name || running) return;
     setRunning(true);
-    setLines([`开始拉取 ${name} …`]);
+    setLines([t("img.pullingStart", { name })]);
     cancelRef.current = api.pullImage(name, (p) => {
       setLines((prev) => {
         const text = p.error
@@ -36,10 +38,12 @@ export function PullModal({ open, onClose }: { open: boolean; onClose: () => voi
       });
       if (p.done) {
         setRunning(false);
-        if (p.error) {
-          toast.error(`拉取失败: ${p.error}`);
+        if (p.cancelled) {
+          toast.info(t("img.pullCancelled"));
+        } else if (p.error) {
+          toast.error(t("img.pullFailed", { err: p.error }));
         } else {
-          toast.success("镜像拉取完成");
+          toast.success(t("img.pullDone"));
           void qc.invalidateQueries({ queryKey: ["images"] });
           void qc.invalidateQueries({ queryKey: ["dockerInfo"] });
         }
@@ -64,15 +68,15 @@ export function PullModal({ open, onClose }: { open: boolean; onClose: () => voi
   return (
     <Modal
       open={open}
-      title="拉取镜像"
+      title={t("img.pullTitle")}
       onClose={close}
       footer={
         <>
           <Button variant="outline" onClick={close}>
-            关闭
+            {t("common.close")}
           </Button>
           <Button variant="primary" disabled={running || !image.trim()} onClick={start}>
-            {running ? "拉取中…" : "开始拉取"}
+            {running ? t("img.pulling") : t("img.startPull")}
           </Button>
         </>
       }
@@ -81,7 +85,7 @@ export function PullModal({ open, onClose }: { open: boolean; onClose: () => voi
         value={image}
         onChange={(e) => setImage(e.target.value)}
         onKeyDown={(e) => e.key === "Enter" && start()}
-        placeholder="例如 nginx:latest 或 redis:7-alpine"
+        placeholder={t("img.pullPlaceholder")}
         disabled={running}
         className="w-full font-mono"
         autoFocus
@@ -89,9 +93,9 @@ export function PullModal({ open, onClose }: { open: boolean; onClose: () => voi
       {name && (
         <div className="mt-2 text-[11px] leading-4 text-fg3">
           {credential
-            ? `将自动使用凭据「${credential.name}」（${credential.registry}）拉取`
+            ? t("img.usingCredential", { name: credential.name, registry: credential.registry })
             : domain !== "docker.io" &&
-              `该镜像来自私有仓库 ${domain}：如拉取失败请在设置中添加对应仓库凭据`}
+              t("img.privateRepoHint", { domain: domain ?? "" })}
         </div>
       )}
       {lines.length > 0 && (

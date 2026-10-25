@@ -4,11 +4,13 @@ import { toast } from "sonner";
 import { api } from "./api";
 import { firstLine } from "./format";
 import { setThemeMode, syncThemeFromSettings } from "./theme";
+import { syncLangFromSettings, t } from "./i18n";
 import type { AppSettings, ConnectionProfile } from "../types/settings";
 
 /** 与后端 AppSettings::default() 对应，仅作 query 初始化占位（真实值以后端为准） */
 export const DEFAULT_SETTINGS: AppSettings = {
   theme: "system",
+  language: "system",
   docker_socket: "",
   connections: [
     {
@@ -58,6 +60,23 @@ export function activeConnection(settings: AppSettings | undefined): ConnectionP
   );
 }
 
+/**
+ * 持久化默认名的展示映射：后端 sanitize 会把「本地」「未命名连接」等固定
+ * 默认值写进 settings.json（存量数据不迁移），展示时按当前语言转换。
+ * 用户自定义名称原样返回。
+ */
+export function displayConnName(name: string): string {
+  if (name === "本地") return t("conn.defaultLocal");
+  if (name === "未命名连接") return t("conn.unnamed");
+  return name;
+}
+
+/** 同上：仓库凭据的默认名（「未命名仓库」由后端 sanitize 生成） */
+export function displayRegistryName(name: string): string {
+  if (name === "未命名仓库") return t("registry.unnamed");
+  return name;
+}
+
 export function useSettings() {
   return useQuery({
     queryKey: ["settings"],
@@ -78,7 +97,7 @@ export function useUpdateSettings() {
       return { prev };
     },
     onError: (e, _next, ctx) => {
-      toast.error(`保存设置失败: ${e}`);
+      toast.error(t("settings.saveFailed", { err: String(e) }));
       if (ctx?.prev) qc.setQueryData(["settings"], ctx.prev);
     },
     onSuccess: (saved) => qc.setQueryData(["settings"], saved),
@@ -92,7 +111,7 @@ export function useSwitchConnection() {
     mutationFn: (id: string) => api.switchConnection(id),
     onSuccess: (p) => {
       void qc.invalidateQueries();
-      toast.success(`已切换到「${p.name}」`);
+      toast.success(t("conn.switchedTo", { name: displayConnName(p.name) }));
     },
     onError: (e) => toast.error(firstLine(String(e))),
   });
@@ -115,5 +134,14 @@ export function useSettingsThemeSync() {
       return;
     }
     syncThemeFromSettings(data.theme);
+  }, [data]);
+}
+
+/** 设置加载后同步界面语言（内存 + 首帧缓存 + 后端上报），与 useSettingsThemeSync 对称 */
+export function useSettingsLangSync() {
+  const { data } = useSettings();
+  useEffect(() => {
+    if (!data) return;
+    syncLangFromSettings(data.language);
   }, [data]);
 }
