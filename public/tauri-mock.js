@@ -190,8 +190,6 @@
     },
   ];
   settings.registries = registries;
-  settings.compose_projects = trackedComposeProjects;
-  settings.compose_scan_dirs = composeScanDirs;
 
   // ---- 编排（docker compose）----
   const composeProjectDir = (name) => `/home/user/${name}`;
@@ -211,6 +209,8 @@
       added_at: now - 86400 * 3,
     },
   ];
+  settings.compose_projects = trackedComposeProjects;
+  settings.compose_scan_dirs = composeScanDirs;
 
   /** 从容器数组实时聚合 compose 项目（含本地跟踪记录），与真实后端口径一致 */
   function composeProjects() {
@@ -673,8 +673,13 @@ volumes:
         case "list_images":
           return Promise.resolve(images);
         case "container_action":
-        case "remove_image":
+          // 容器启停等动作在 mock 中不翻转状态，仅确认成功
           return Promise.resolve();
+        case "remove_image": {
+          const idx = images.findIndex((i) => i.id === args.id);
+          if (idx >= 0) images.splice(idx, 1);
+          return Promise.resolve();
+        }
         case "export_images": {
           // 模拟 docker save：总量按所选镜像大小合计（浏览器端不落盘）
           const sid = `sid-export-${Math.random().toString(36).slice(2, 8)}`;
