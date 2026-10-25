@@ -59,6 +59,9 @@ export function Images({
   const t = useT();
   const [pendingDelete, setPendingDelete] = useState<ImageDto | null>(null);
   const [forceDelete, setForceDelete] = useState(false);
+  // ---- 批量删除：确认弹窗 + 逐个执行状态 ----
+  const [pendingBatchDelete, setPendingBatchDelete] = useState(false);
+  const [batchDeleting, setBatchDeleting] = useState(false);
   const [pullOpen, setPullOpen] = useState(false);
   const [runImage, setRunImage] = useState<string | null>(null);
   const [groupFilter, setGroupFilter] = useState("");
@@ -106,6 +109,40 @@ export function Images({
     },
     onError: (e) => toast.error(t("img.removeFailed", { err: String(e) })),
   });
+
+  /** 批量删除：确认后逐个调用 remove_image，单镜像失败不阻塞后续，完成按结果汇总提示 */
+  const runBatchDelete = async (imgs: ImageDto[], force: boolean) => {
+    if (imgs.length === 0 || batchDeleting) return;
+    setPendingBatchDelete(false);
+    setBatchDeleting(true);
+    let done = 0;
+    const failures: string[] = [];
+    for (const img of imgs) {
+      const name = img.tags[0] || shortId(img.id);
+      try {
+        await api.removeImage(img.id, force);
+        done++;
+      } catch (e) {
+        failures.push(`${name}: ${String(e)}`);
+      }
+    }
+    setBatchDeleting(false);
+    setSelected(new Set());
+    void qc.invalidateQueries({ queryKey: ["images"] });
+    void qc.invalidateQueries({ queryKey: ["dockerInfo"] });
+    if (failures.length === 0) {
+      toast.success(t("img.batchDeleted", { n: done }));
+    } else {
+      toast.error(
+        t("img.batchDeletePartial", {
+          done,
+          failed: failures.length,
+          err: failures.join("；"),
+        }),
+        { duration: 8000 },
+      );
+    }
+  };
 
   const list = query.data ?? [];
 
@@ -470,6 +507,17 @@ export function Images({
                   <FileDown size={14} />
                   {t("img.exportSelected")}
                 </Button>
+                <Button
+                  variant="danger"
+                  disabled={remove.isPending || batchDeleting}
+                  onClick={() => {
+                    setForceDelete(false);
+                    setPendingBatchDelete(true);
+                  }}
+                >
+                  <Trash2 size={14} />
+                  {t("img.deleteSelected")}
+                </Button>
               </div>
             </div>
           )}
@@ -514,6 +562,46 @@ export function Images({
       </Modal>
 
       <PullModal open={pullOpen} onClose={() => setPullOpen(false)} />
+
+      <Modal
+        open={pendingBatchDelete}
+        title={t("img.batchDeleteTitle")}
+        onClose={() => setPendingBatchDelete(false)}
+        footer={
+          <>
+            <Button variant="outline" onClick={() => setPendingBatchDelete(false)}>
+              {t("common.cancel")}
+            </Button>
+            <Button
+              variant="danger"
+              disabled={remove.isPending || batchDeleting}
+              onClick={() => void runBatchDelete(selectedImages, forceDelete)}
+            >
+              {t("containers.confirmDelete")}
+            </Button>
+          </>
+        }
+      >
+        <p>{t("img.batchDeleteConfirm", { n: selectedImages.length })}</p>
+        <div className="mt-3 max-h-56 space-y-1.5 overflow-y-auto pr-1">
+          {selectedImages.map((img) => (
+            <div
+              key={img.id}
+              className="truncate rounded-ctl border border-edge bg-panel2/40 px-2.5 py-1.5 font-mono text-[11.5px] text-fg2"
+              title={img.tags[0] || shortId(img.id)}
+            >
+              {img.tags[0] || `${shortId(img.id)}（<none>）`}
+            </div>
+          ))}
+        </div>
+        <div className="mt-3">
+          <Checkbox
+            label={t("img.forceDelete")}
+            checked={forceDelete}
+            onChange={setForceDelete}
+          />
+        </div>
+      </Modal>
 
       <Modal
         open={exportState !== null}
