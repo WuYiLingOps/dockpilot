@@ -6,7 +6,6 @@ import {
   FileDown,
   Folder,
   FolderOpen,
-  RefreshCw,
   Trash2,
   Upload,
 } from "lucide-react";
@@ -17,7 +16,7 @@ import { api } from "../../lib/api";
 import { formatBytes } from "../../lib/format";
 import { useT } from "../../lib/i18n";
 import type { FileEntry } from "../../types/docker";
-import { Button, EmptyState, ErrorNote, IconButton, Spinner } from "../ui";
+import { Button, EmptyState, ErrorNote, IconButton, RefreshIcon, Spinner } from "../ui";
 
 /** 路径拼接（绝对路径语义）："/var/log" + "app" → "/var/log/app" */
 function joinPath(dir: string, name: string): string {
@@ -177,7 +176,7 @@ export function FileBrowserView({ id, running }: { id: string; running: boolean 
           className="h-7 w-7"
           onClick={() => void query.refetch()}
         >
-          <RefreshCw size={13} className={query.isFetching ? "animate-spin" : ""} />
+          <RefreshIcon spinning={query.isFetching} size={13} />
         </IconButton>
         <Button variant="outline" className="h-7 px-2 text-[12px]" disabled={transfer !== null} onClick={() => void upload()}>
           <Upload size={13} />

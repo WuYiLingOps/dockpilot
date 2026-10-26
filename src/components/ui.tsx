@@ -1,11 +1,11 @@
-import { Check, ChevronDown, Search, X } from "lucide-react";
+import { Check, ChevronDown, RefreshCw, Search, X } from "lucide-react";
 import type {
   ButtonHTMLAttributes,
   InputHTMLAttributes,
   ReactNode,
   SelectHTMLAttributes,
 } from "react";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { withDragRegion } from "../lib/drag";
 import { t, useT } from "../lib/i18n";
 import type { MsgKey } from "../lib/i18n/zh";
@@ -496,6 +496,71 @@ export function Modal({
         {footer && <div className="mt-5 flex justify-end gap-2">{footer}</div>}
       </div>
     </div>
+  );
+}
+
+/* ---------------------------------------------------------------- */
+/* RefreshIcon — 页头刷新图标。激活时匀速旋转；停止时从当前角度      */
+/* 缓动补完剩余角度回正（CSS animate-spin 停止时会从中途角度瞬跳回 0°）*/
+/* ---------------------------------------------------------------- */
+
+/** 匀速一整圈的时长（ms） */
+const REFRESH_SPIN_MS = 900;
+/** 停止时补完剩余角度的缓动时长（ms） */
+const REFRESH_SETTLE_MS = 450;
+
+export function RefreshIcon({
+  spinning,
+  size = 15,
+  className,
+}: {
+  spinning: boolean;
+  size?: number;
+  className?: string;
+}) {
+  const ref = useRef<HTMLSpanElement>(null);
+  const angleRef = useRef(0);
+  const rafRef = useRef(0);
+
+  useEffect(() => {
+    // 减弱动态效果时保持静止
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    if (!spinning) {
+      const from = angleRef.current % 360;
+      if (from === 0) return;
+      // 停止：从当前角度转完这一圈（剩余角度 ease-out），结束后回正
+      const start = performance.now();
+      const delta = 360 - from;
+      cancelAnimationFrame(rafRef.current);
+      const settle = (now: number) => {
+        const t = Math.min(1, Math.max(0, now - start) / REFRESH_SETTLE_MS);
+        const eased = 1 - (1 - t) ** 3;
+        angleRef.current = t < 1 ? from + delta * eased : 0;
+        if (ref.current) ref.current.style.transform = `rotate(${angleRef.current}deg)`;
+        if (t < 1) rafRef.current = requestAnimationFrame(settle);
+      };
+      rafRef.current = requestAnimationFrame(settle);
+      return () => cancelAnimationFrame(rafRef.current);
+    }
+    // 启动/重启：按帧间隔增量累加角度，从当前角度无缝续转
+    // （rAF 帧时间戳可能早于 effect 执行时刻，dt 钳制为非负避免首帧回跳）
+    cancelAnimationFrame(rafRef.current);
+    let last = performance.now();
+    const loop = (now: number) => {
+      const dt = Math.max(0, now - last);
+      last = now;
+      angleRef.current = (angleRef.current + (dt / REFRESH_SPIN_MS) * 360) % 360;
+      if (ref.current) ref.current.style.transform = `rotate(${angleRef.current}deg)`;
+      rafRef.current = requestAnimationFrame(loop);
+    };
+    rafRef.current = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(rafRef.current);
+  }, [spinning]);
+
+  return (
+    <span ref={ref} className={cn("inline-flex will-change-transform", className)}>
+      <RefreshCw size={size} />
+    </span>
   );
 }
 

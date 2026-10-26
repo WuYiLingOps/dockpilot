@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Container, RefreshCw, Settings as SettingsIcon, TriangleAlert } from "lucide-react";
+import { Container, Settings as SettingsIcon, TriangleAlert } from "lucide-react";
 import { Sidebar, type PageKey } from "./components/Sidebar";
 import { WindowControls } from "./components/TitleBar";
 import { AppLogViewer } from "./components/AppLogViewer";
 import { ClosePromptDialog } from "./components/ClosePromptDialog";
-import { Button } from "./components/ui";
+import { Button, RefreshIcon } from "./components/ui";
 import { SyncBanners } from "./components/settings/SyncBanners";
 import { Overview } from "./pages/Overview";
 import { Containers } from "./pages/Containers";
@@ -67,7 +67,7 @@ function DisconnectedOverlay({
       )}
       <div className="mt-3 flex gap-2">
         <Button variant="primary" onClick={onRetry} disabled={retrying}>
-          <RefreshCw size={14} className={retrying ? "animate-spin" : ""} />
+          <RefreshIcon spinning={retrying} size={14} />
           {t("app.retryConnect")}
         </Button>
         <Button variant="outline" onClick={onManage}>

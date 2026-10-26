@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, Database, Eraser, HardDrive, Layers, PackageOpen, RefreshCw } from "lucide-react";
+import { AlertTriangle, Database, Eraser, HardDrive, Layers, PackageOpen } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { api } from "../lib/api";
@@ -7,7 +7,7 @@ import { formatBytes } from "../lib/format";
 import { useT } from "../lib/i18n";
 import type { MsgKey } from "../lib/i18n/zh";
 import type { DiskUsageDto, UsageCategory } from "../types/daemon";
-import { Badge, Button, CheckDot, EmptyState, ErrorNote, IconButton, Modal, PageHeader, Spinner } from "../components/ui";
+import { Badge, Button, CheckDot, EmptyState, ErrorNote, IconButton, Modal, PageHeader, RefreshIcon, Spinner } from "../components/ui";
 
 interface KindDef {
   key: string;
@@ -127,7 +127,7 @@ export function Cleanup() {
           onClick={() => void query.refetch()}
           className="h-8 w-8"
         >
-          <RefreshCw size={15} className={query.isFetching ? "animate-spin" : ""} />
+          <RefreshIcon spinning={query.isFetching} size={15} />
         </IconButton>
       </PageHeader>
 

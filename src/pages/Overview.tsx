@@ -13,7 +13,6 @@ import {
   MemoryStick,
   Monitor,
   Network,
-  RefreshCw,
   Server,
 } from "lucide-react";
 import { api } from "../lib/api";
@@ -29,6 +28,7 @@ import {
   IconButton,
   Modal,
   PageHeader,
+  RefreshIcon,
   SegmentedControl,
   Spinner,
   StatusDot,
@@ -831,7 +831,7 @@ export function Overview({
           onClick={() => void refresh()}
           className={refreshing ? "text-accent" : ""}
         >
-          <RefreshCw size={14} className={refreshing ? "animate-spin" : ""} />
+          <RefreshIcon spinning={refreshing} size={14} />
         </IconButton>
       </PageHeader>
 

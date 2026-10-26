@@ -2,7 +2,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Layers,
   Plus,
-  RefreshCw,
   Square,
   Play,
   ScanSearch,
@@ -27,6 +26,7 @@ import {
   Input,
   Modal,
   PageHeader,
+  RefreshIcon,
   SearchInput,
   Spinner,
   StatusDot,
@@ -138,7 +138,7 @@ export function Compose({
           {t("compose.addProject")}
         </Button>
         <IconButton title={t("common.refresh")} onClick={() => void query.refetch()} className="h-8 w-8">
-          <RefreshCw size={15} className={query.isFetching ? "animate-spin" : ""} />
+          <RefreshIcon spinning={query.isFetching} size={15} />
         </IconButton>
       </PageHeader>
 

@@ -5,7 +5,6 @@ import {
   Pause,
   Play,
   Plus,
-  RefreshCw,
   RotateCw,
   Square,
   Trash2,
@@ -28,6 +27,7 @@ import {
   Modal,
   PageHeader,
   PortChips,
+  RefreshIcon,
   SearchInput,
   Spinner,
   StatusDot,
@@ -130,7 +130,7 @@ export function Containers({
           onClick={() => void query.refetch()}
           className="h-8 w-8"
         >
-          <RefreshCw size={15} className={query.isFetching ? "animate-spin" : ""} />
+          <RefreshIcon spinning={query.isFetching} size={15} />
         </IconButton>
       </PageHeader>
 

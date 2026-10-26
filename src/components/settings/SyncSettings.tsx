@@ -6,9 +6,9 @@
 
 import { useEffect, useRef, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { Cloud, Download, ExternalLink, History, KeyRound, Lock, Pencil, RefreshCw, Trash2, TriangleAlert } from "lucide-react";
+import { Cloud, Download, ExternalLink, History, KeyRound, Lock, Pencil, Trash2, TriangleAlert } from "lucide-react";
 import { toast } from "sonner";
-import { cn, Badge, Button, IconButton, Input, Modal, Spinner, Switch } from "../ui";
+import { cn, Badge, Button, IconButton, Input, Modal, RefreshIcon, Spinner, Switch } from "../ui";
 import { copyText } from "../../lib/clipboard";
 import { useT } from "../../lib/i18n";
 import type { MsgKey } from "../../lib/i18n/zh";
@@ -394,7 +394,7 @@ export function SyncSettings() {
               disabled={!connected || !unlocked || busy}
               title={!SYNC_CONSTANTS.GITHUB_CLIENT_ID ? t("sync.noClientId") : undefined}
             >
-              <RefreshCw size={13} className={busy ? "animate-spin" : ""} />
+              <RefreshIcon spinning={busy} size={13} />
               {t("sync.syncNow")}
             </Button>
           </div>

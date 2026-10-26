@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowRight, Eraser, Plus, RefreshCw } from "lucide-react";
+import { ArrowRight, Eraser, Plus } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "../../lib/api";
 import { formatBytes } from "../../lib/format";
@@ -12,6 +12,7 @@ import {
   IconButton,
   Modal,
   PageHeader,
+  RefreshIcon,
   SearchInput,
   SegmentedControl,
   Spinner,
@@ -163,7 +164,7 @@ export function Storage({
           onChange={onTab}
         />
         <IconButton title={t("common.refresh")} onClick={() => void active.refetch()} className="h-8 w-8">
-          <RefreshCw size={15} className={active.isFetching ? "animate-spin" : ""} />
+          <RefreshIcon spinning={active.isFetching} size={15} />
         </IconButton>
       </PageHeader>
 
