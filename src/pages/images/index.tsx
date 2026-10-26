@@ -6,7 +6,6 @@ import {
   FileUp,
   Image as ImageIcon,
   Play,
-  RefreshCw,
   Tag,
   Trash2,
 } from "lucide-react";
@@ -35,6 +34,7 @@ import {
   IconButton,
   Modal,
   PageHeader,
+  RefreshIcon,
   SearchInput,
   Select,
   Spinner,
@@ -110,7 +110,12 @@ export function Images({
     onError: (e) => toast.error(t("img.removeFailed", { err: String(e) })),
   });
 
-  /** 批量删除：确认后逐个调用 remove_image，单镜像失败不阻塞后续，完成按结果汇总提示 */
+  /**
+   * 批量删除：确认后逐个处理，单镜像失败不阻塞后续，完成按结果汇总提示。
+   * 有标签的镜像按行内主标签引用删除（docker rmi 标签语义）：仅移除该标签，
+   * 其余标签保留；当它是最后一个标签时 Docker 会连带删除镜像本体。
+   * 无标签（悬空）镜像按 ID 删除。
+   */
   const runBatchDelete = async (imgs: ImageDto[], force: boolean) => {
     if (imgs.length === 0 || batchDeleting) return;
     setPendingBatchDelete(false);
@@ -120,7 +125,11 @@ export function Images({
     for (const img of imgs) {
       const name = img.tags[0] || shortId(img.id);
       try {
-        await api.removeImage(img.id, force);
+        if (img.tags[0]) {
+          await api.removeImage(img.tags[0], force);
+        } else {
+          await api.removeImage(img.id, force);
+        }
         done++;
       } catch (e) {
         failures.push(`${name}: ${String(e)}`);
@@ -325,7 +334,7 @@ export function Images({
           onClick={() => void query.refetch()}
           className="h-8 w-8"
         >
-          <RefreshCw size={15} className={query.isFetching ? "animate-spin" : ""} />
+          <RefreshIcon spinning={query.isFetching} size={15} />
         </IconButton>
       </PageHeader>
 
