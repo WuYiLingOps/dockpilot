@@ -523,11 +523,14 @@ volumes:
     metadata: { currentWindow: { label: "main" }, currentWebview: { label: "main" } },
     plugins: {},
     invoke: (cmd, args) => {
+      /** 拟真延迟：查询类命令统一延迟返回，预览环境贴近真实引擎的响应节奏 */
+      const delayed = (v, ms = 320) =>
+        new Promise((resolve) => setTimeout(() => resolve(v), ms));
       switch (cmd) {
         case "docker_info":
-          return Promise.resolve(info);
+          return delayed(info);
         case "list_containers":
-          return Promise.resolve(containers);
+          return delayed(containers);
         case "container_health": {
           const c = containers.find((x) => x.id === args.id);
           if (!c || !c.health || c.health === "none") {
@@ -574,11 +577,11 @@ volumes:
           return Promise.resolve(id.slice(0, 64));
         }
         case "list_networks":
-          return Promise.resolve(
+          return delayed(
             [...networks].sort((a, b) => a.name.localeCompare(b.name)),
           );
         case "list_volumes":
-          return Promise.resolve(volumes);
+          return delayed(volumes);
         case "create_volume": {
           const spec = args.spec ?? {};
           const name = (spec.name ?? "").trim();
@@ -671,11 +674,20 @@ volumes:
           return Promise.resolve();
         }
         case "list_images":
-          return Promise.resolve(images);
+          return delayed(images);
         case "container_action":
           // 容器启停等动作在 mock 中不翻转状态，仅确认成功
           return Promise.resolve();
         case "remove_image": {
+          // 与真实引擎一致：按 name:tag 引用删除时仅移除该标签（最后一个标签才连带删镜像本体），
+          // 按 ID 删除时移除整个镜像
+          const tagIdx = images.findIndex((i) => i.tags.includes(args.id));
+          if (tagIdx >= 0 && !args.id.startsWith("sha256:")) {
+            const img = images[tagIdx];
+            img.tags = img.tags.filter((t) => t !== args.id);
+            if (img.tags.length === 0) images.splice(tagIdx, 1);
+            return Promise.resolve();
+          }
           const idx = images.findIndex((i) => i.id === args.id);
           if (idx >= 0) images.splice(idx, 1);
           return Promise.resolve();
@@ -738,8 +750,21 @@ volumes:
         }
         case "tag_image":
           return Promise.resolve();
-        case "untag_image":
-          return Promise.resolve(false);
+        case "untag_image": {
+          // 按 docker 语义：移除一个标签，移除最后一个标签时连带删除镜像本体
+          for (const img of images) {
+            const i = img.tags.indexOf(args.reference);
+            if (i >= 0) {
+              img.tags.splice(i, 1);
+              if (img.tags.length === 0) {
+                images.splice(images.indexOf(img), 1);
+                return Promise.resolve(true);
+              }
+              return Promise.resolve(false);
+            }
+          }
+          return Promise.reject("移除标签失败: no such image (mock)");
+        }
         case "push_image": {
           // 模拟 docker push：分层推送进度 → Pushed → digest，结束时给本地镜像补目标标签
           const sid = `sid-push-${Math.random().toString(36).slice(2, 8)}`;
@@ -1029,23 +1054,23 @@ volumes:
             setTimeout(() => resolve(60 + Math.floor(Math.random() * 700)), 250),
           );
         case "disk_usage":
-          return Promise.resolve(diskUsage);
+          return delayed(diskUsage);
         case "host_stats":
-          return Promise.resolve(hostStats());
+          return delayed(hostStats());
         case "system_df":
-          return Promise.resolve(systemDf);
+          return delayed(systemDf);
 
         // ---- 编排（docker compose）----
         case "list_compose_projects":
-          return Promise.resolve(composeProjects());
+          return delayed(composeProjects());
         case "compose_cli_info":
-          return Promise.resolve({ available: true, version: "v5.5.0", source: "plugin" });
+          return delayed({ available: true, version: "v5.5.0", source: "plugin" });
         case "compose_action":
           return fakeComposeStream(args, args.project, args.action);
         case "compose_deploy":
           return fakeComposeStream(args, args.projectName || "myapp", "Up");
         case "read_compose_file":
-          return Promise.resolve(composeYamlSample);
+          return delayed(composeYamlSample);
         case "write_compose_file":
           return new Promise((resolve) => setTimeout(resolve, 400));
         case "add_tracked_compose_project":
@@ -1085,6 +1110,21 @@ volumes:
           return Promise.resolve();
         case "export_container_logs":
           return Promise.resolve(5 * 1024);
+        case "container_list_files":
+          // 文件浏览器列表：拟真延迟让页头刷新动画可见
+          return delayed(
+            [
+              { name: ".dockerenv", is_dir: false, size: 0, mode: "-rw-r--r--", date: "Sep 28 10:00" },
+              { name: "bin", is_dir: true, size: 4096, mode: "drwxr-xr-x", date: "Sep 28 10:00" },
+              { name: "etc", is_dir: true, size: 4096, mode: "drwxr-xr-x", date: "Sep 28 10:00" },
+              { name: "home", is_dir: true, size: 4096, mode: "drwxr-xr-x", date: "Sep 28 10:00" },
+              { name: "opt", is_dir: true, size: 4096, mode: "drwxr-xr-x", date: "Sep 28 10:00" },
+              { name: "root", is_dir: true, size: 4096, mode: "drwxr-xr-x", date: "Sep 28 10:00" },
+              { name: "usr", is_dir: true, size: 4096, mode: "drwxr-xr-x", date: "Sep 28 10:00" },
+              { name: "var", is_dir: true, size: 4096, mode: "drwxr-xr-x", date: "Sep 28 10:00" },
+            ],
+            350,
+          );
 
         case "cleanup":
           return new Promise((resolve) =>
